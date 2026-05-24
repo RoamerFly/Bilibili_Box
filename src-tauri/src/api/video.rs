@@ -1,3 +1,4 @@
+use chrono::{Duration as ChronoDuration, Local, TimeZone};
 use reqwest::StatusCode;
 use reqwest_middleware::RequestBuilder;
 use serde::{Deserialize, Serialize};
@@ -499,7 +500,7 @@ impl super::BiliClient {
         let encoded_keyword: String =
             url::form_urlencoded::byte_serialize(keyword.as_bytes()).collect();
         let order = normalize_search_order(options.order.as_deref());
-        let pubtime = normalize_search_pubtime(options.pubtime.as_deref());
+        let (pubtime_begin_s, pubtime_end_s) = search_pubtime_range(options.pubtime.as_deref());
         let duration = normalize_search_duration(options.duration.as_deref());
 
         let mut video_params = HashMap::from([
@@ -508,13 +509,14 @@ impl super::BiliClient {
             ("page".to_string(), "1".to_string()),
             ("order".to_string(), order.to_string()),
             ("duration".to_string(), duration.to_string()),
-            ("pubtime".to_string(), pubtime.to_string()),
+            ("pubtime_begin_s".to_string(), pubtime_begin_s.clone()),
+            ("pubtime_end_s".to_string(), pubtime_end_s.clone()),
         ]);
         self.sign_params(&mut video_params).await?;
 
         let search_referer = format!(
-            "https://search.bilibili.com/video?keyword={}&order={}&duration={}&pubtime={}",
-            encoded_keyword, order, duration, pubtime
+            "https://search.bilibili.com/video?keyword={}&order={}&duration={}&pubtime_begin_s={}&pubtime_end_s={}",
+            encoded_keyword, order, duration, pubtime_begin_s, pubtime_end_s
         );
 
         let video_data = self
@@ -703,16 +705,6 @@ fn normalize_search_order(value: Option<&str>) -> &'static str {
     }
 }
 
-fn normalize_search_pubtime(value: Option<&str>) -> &'static str {
-    match value {
-        Some("1") => "1",
-        Some("7") => "7",
-        Some("30") => "30",
-        Some("365") => "365",
-        _ => "0",
-    }
-}
-
 fn normalize_search_duration(value: Option<&str>) -> &'static str {
     match value {
         Some("1") => "1",
@@ -721,6 +713,36 @@ fn normalize_search_duration(value: Option<&str>) -> &'static str {
         Some("4") => "4",
         _ => "0",
     }
+}
+
+fn search_pubtime_range(value: Option<&str>) -> (String, String) {
+    let days = match value {
+        Some("1") => 1_u32,
+        Some("7") => 7,
+        Some("30") => 30,
+        Some("365") => 365,
+        _ => return ("0".to_string(), "0".to_string()),
+    };
+
+    let today = Local::now().date_naive();
+    let begin_date = today - ChronoDuration::days(days.saturating_sub(1) as i64);
+    let begin_ts = local_day_timestamp(begin_date, 0, 0, 0);
+    let end_ts = local_day_timestamp(today, 23, 59, 59);
+
+    (begin_ts.to_string(), end_ts.to_string())
+}
+
+fn local_day_timestamp(date: chrono::NaiveDate, hour: u32, minute: u32, second: u32) -> i64 {
+    let Some(naive) = date.and_hms_opt(hour, minute, second) else {
+        return 0;
+    };
+
+    Local
+        .from_local_datetime(&naive)
+        .single()
+        .or_else(|| Local.from_local_datetime(&naive).earliest())
+        .map(|datetime| datetime.timestamp())
+        .unwrap_or_else(|| naive.and_utc().timestamp())
 }
 
 fn parse_bangumi_search_result(data: Value) -> Result<BangumiSearchResult, String> {
