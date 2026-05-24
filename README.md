@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./src-tauri/icons/128x128.png" width="96" height="96" alt="BiliBox Logo" />
+  <img src="./icon.png" width="112" height="112" alt="BiliBox Logo" />
 
   <h1>BiliBox</h1>
 
