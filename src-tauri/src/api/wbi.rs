@@ -41,6 +41,10 @@ pub fn get_mixin_key(img_key: &str, sub_key: &str) -> String {
 pub fn sign_params(params: &mut std::collections::HashMap<String, String>, mixin_key: &str) {
     use md5::{Digest, Md5};
 
+    for value in params.values_mut() {
+        *value = sanitize_wbi_value(value);
+    }
+
     // 添加 wts 参数
     let wts = chrono::Utc::now().timestamp().to_string();
     params.insert("wts".to_string(), wts);
@@ -53,7 +57,11 @@ pub fn sign_params(params: &mut std::collections::HashMap<String, String>, mixin
     let query: String = sorted_keys
         .iter()
         .filter(|k| !k.contains("w_rid"))
-        .map(|k| format!("{}={}", k, params.get(*k).unwrap()))
+        .map(|k| {
+            url::form_urlencoded::Serializer::new(String::new())
+                .append_pair(k, params.get(*k).unwrap())
+                .finish()
+        })
         .collect::<Vec<_>>()
         .join("&");
 
@@ -64,6 +72,13 @@ pub fn sign_params(params: &mut std::collections::HashMap<String, String>, mixin
     let w_rid = format!("{:x}", hasher.finalize());
 
     params.insert("w_rid".to_string(), w_rid);
+}
+
+fn sanitize_wbi_value(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| !matches!(ch, '!' | '\'' | '(' | ')' | '*'))
+        .collect()
 }
 
 /// 从 URL 中提取密钥 (格式: .../hieroglyphy.png 中的 hieroglyphy)

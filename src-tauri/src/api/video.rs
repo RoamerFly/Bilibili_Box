@@ -498,30 +498,34 @@ impl super::BiliClient {
 
         let encoded_keyword: String =
             url::form_urlencoded::byte_serialize(keyword.as_bytes()).collect();
-        let search_referer = format!(
-            "https://search.bilibili.com/all?keyword={}",
-            encoded_keyword
-        );
         let order = normalize_search_order(options.order.as_deref());
         let pubtime = normalize_search_pubtime(options.pubtime.as_deref());
         let duration = normalize_search_duration(options.duration.as_deref());
 
+        let mut video_params = HashMap::from([
+            ("search_type".to_string(), "video".to_string()),
+            ("keyword".to_string(), keyword.to_string()),
+            ("page".to_string(), "1".to_string()),
+            ("order".to_string(), order.to_string()),
+            ("duration".to_string(), duration.to_string()),
+            ("pubtime".to_string(), pubtime.to_string()),
+        ]);
+        self.sign_params(&mut video_params).await?;
+
+        let search_referer = format!(
+            "https://search.bilibili.com/video?keyword={}&order={}&duration={}&pubtime={}",
+            encoded_keyword, order, duration, pubtime
+        );
+
         let video_data = self
             .request_search_value(
                 self.api_client()
-                    .get("https://api.bilibili.com/x/web-interface/search/type")
-                    .query(&[
-                        ("search_type", "video"),
-                        ("keyword", keyword),
-                        ("page", "1"),
-                        ("order", order),
-                        ("duration", duration),
-                        ("pubtime", pubtime),
-                    ])
+                    .get("https://api.bilibili.com/x/web-interface/wbi/search/type")
+                    .query(&video_params)
                     .header(
                         "cookie",
                         self.get_cookie_for_url(
-                            "https://api.bilibili.com/x/web-interface/search/type",
+                            "https://api.bilibili.com/x/web-interface/wbi/search/type",
                         ),
                     )
                     .header("referer", &search_referer)

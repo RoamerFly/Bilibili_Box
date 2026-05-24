@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Calendar,
   Copy,
@@ -43,6 +43,11 @@ type SearchResponse =
 type SearchOrder = "totalrank" | "click" | "pubdate" | "dm" | "stow";
 type SearchDate = "0" | "1" | "7" | "30" | "365";
 type SearchDuration = "0" | "1" | "2" | "3" | "4";
+type SearchFilters = {
+  order: SearchOrder;
+  pubtime: SearchDate;
+  duration: SearchDuration;
+};
 
 const orderOptions: Array<{ value: SearchOrder; label: string }> = [
   { value: "totalrank", label: "综合排序" },
@@ -70,10 +75,12 @@ const durationOptions: Array<{ value: SearchDuration; label: string }> = [
 
 export function SearchView() {
   const openPlayer = useAppStore((s) => s.openPlayer);
+  const searchRequestIdRef = useRef(0);
   const [searchInput, setSearchInput] = useState("");
   const [searchOrder, setSearchOrder] = useState<SearchOrder>("totalrank");
   const [searchDate, setSearchDate] = useState<SearchDate>("0");
   const [searchDuration, setSearchDuration] = useState<SearchDuration>("0");
+  const [lastAggregateInput, setLastAggregateInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<SearchResponse | null>(null);
@@ -83,30 +90,67 @@ export function SearchView() {
     []
   );
 
-  const handleSearch = async (rawInput = searchInput) => {
+  const runSearch = useCallback(async (rawInput: string, filters: SearchFilters) => {
     const input = rawInput.trim();
     if (!input) {
       setError("请输入搜索内容");
       return;
     }
 
+    const requestId = searchRequestIdRef.current + 1;
+    searchRequestIdRef.current = requestId;
     setLoading(true);
     setError("");
     try {
       const data = await invoke<SearchResponse>("search_video", {
         input,
-        order: searchOrder,
-        pubtime: searchDate,
-        duration: searchDuration,
+        order: filters.order,
+        pubtime: filters.pubtime,
+        duration: filters.duration,
       });
+      if (requestId !== searchRequestIdRef.current) return;
       setResult(data);
+      setLastAggregateInput(data.type === "Aggregate" ? input : "");
     } catch (err) {
+      if (requestId !== searchRequestIdRef.current) return;
       setError(String(err));
       setResult(null);
+      setLastAggregateInput("");
     } finally {
-      setLoading(false);
+      if (requestId === searchRequestIdRef.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, []);
+
+  const currentFilters = useMemo<SearchFilters>(
+    () => ({
+      order: searchOrder,
+      pubtime: searchDate,
+      duration: searchDuration,
+    }),
+    [searchDate, searchDuration, searchOrder]
+  );
+
+  const handleSearch = useCallback(
+    async (rawInput = searchInput) => {
+      await runSearch(rawInput, currentFilters);
+    },
+    [currentFilters, runSearch, searchInput]
+  );
+
+  const updateFilters = useCallback(
+    (nextFilters: SearchFilters) => {
+      setSearchOrder(nextFilters.order);
+      setSearchDate(nextFilters.pubtime);
+      setSearchDuration(nextFilters.duration);
+
+      if (result?.type === "Aggregate" && lastAggregateInput) {
+        void runSearch(lastAggregateInput, nextFilters);
+      }
+    },
+    [lastAggregateInput, result?.type, runSearch]
+  );
 
   const handleDownload = async (bvid: string, cid: number, title: string) => {
     try {
@@ -258,19 +302,25 @@ export function SearchView() {
           label="排序"
           value={searchOrder}
           options={orderOptions}
-          onChange={(value) => setSearchOrder(value as SearchOrder)}
+          onChange={(value) =>
+            updateFilters({ ...currentFilters, order: value as SearchOrder })
+          }
         />
         <FilterSelect
           label="日期"
           value={searchDate}
           options={dateOptions}
-          onChange={(value) => setSearchDate(value as SearchDate)}
+          onChange={(value) =>
+            updateFilters({ ...currentFilters, pubtime: value as SearchDate })
+          }
         />
         <FilterSelect
           label="时长"
           value={searchDuration}
           options={durationOptions}
-          onChange={(value) => setSearchDuration(value as SearchDuration)}
+          onChange={(value) =>
+            updateFilters({ ...currentFilters, duration: value as SearchDuration })
+          }
         />
         <span style={{ fontSize: "12.5px", color: "#9a9aa8" }}>
           筛选对关键词视频结果生效
