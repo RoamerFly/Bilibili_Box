@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build output
+dist/
+dist_*/
+frontend/dist/
+src-tauri/target/
+src-tauri/gen/
+
+# Runtime data and secrets
+data/
+**/data/user/
+**/config.json
+**/user.json
+env/
+
+# Logs and temporary files
+*.log
+frontend/vite-stdout.log
+frontend/vite-stderr.log
+frontend/tsconfig.tsbuildinfo
+*.tmp
+*.bak
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local assistant/work notes
+.claude/
+.workbuddy/
+page/
+check_prompt.md
+problems.md
+player-debug.log
