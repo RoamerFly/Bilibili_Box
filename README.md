@@ -1,6 +1,5 @@
 <div align="center">
-  <img src="./icon.png" width="112" height="112" alt="BiliBox Logo" />
-
+  <img src="./icon.png" width="136" height="136" alt="BiliBox Logo" />
   <h1>BiliBox</h1>
 
   <p>
