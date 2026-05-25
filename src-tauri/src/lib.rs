@@ -128,6 +128,8 @@ pub fn run() {
             commands::get_playable_url,
             commands::get_play_proxy_url,
             commands::get_popular_videos,
+            commands::get_recommended_videos,
+            commands::get_region_videos,
             commands::create_download_task,
             commands::get_download_tasks,
             commands::pause_download_tasks,

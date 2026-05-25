@@ -16,6 +16,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { invoke } from "@/lib/api";
 import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
+import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
 import { useAppStore } from "@/stores/app-store";
 import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
@@ -97,6 +98,7 @@ function formatAddTime(timestamp: number) {
 }
 
 export function WatchLaterView() {
+  const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
   const viewMode = useAppStore((s) => s.cardViewModes.watchlater ?? "list");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
@@ -180,8 +182,10 @@ export function WatchLaterView() {
 
   const handleDownload = async (bvid: string, cid: number, title: string) => {
     try {
+      const downloadQuality = await requestDownloadQuality();
+      if (!downloadQuality) return;
       const taskIds = await invoke<string[]>("create_download_task", {
-        params: { bvid, cid, title, cids: [cid] },
+        params: { bvid, cid, title, cids: [cid], download_quality: downloadQuality },
       });
       notifyDownloadQueued(taskIds, title);
     } catch (err) {
@@ -415,6 +419,7 @@ export function WatchLaterView() {
           )}
         </>
       )}
+      {downloadQualityDialog}
     </div>
   );
 }

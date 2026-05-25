@@ -18,7 +18,7 @@ use crate::api::watchlater::WatchLaterInfo;
 use crate::api::BiliClient;
 use crate::config::Config;
 use crate::download::{CreateDownloadTaskParams, DownloadManager, DownloadProgress};
-use crate::media_proxy::MediaProxyServer;
+use crate::media_proxy::{MediaProxyServer, RegisteredPlayable};
 use crate::plugin::{PluginInfo, PluginManager};
 
 /// 获取配置
@@ -302,8 +302,9 @@ pub async fn get_playable_url(
     bili_client: State<'_, Arc<BiliClient>>,
     bvid: String,
     cid: i64,
+    quality: Option<i64>,
 ) -> Result<PlayableUrlInfo, String> {
-    bili_client.get_playable_url(&bvid, cid).await
+    bili_client.get_playable_url(&bvid, cid, quality).await
 }
 
 #[tauri::command]
@@ -311,8 +312,9 @@ pub async fn get_play_proxy_url(
     media_proxy: State<'_, Arc<MediaProxyServer>>,
     bvid: String,
     cid: i64,
-) -> Result<String, String> {
-    media_proxy.register_playable(&bvid, cid).await
+    quality: Option<i64>,
+) -> Result<RegisteredPlayable, String> {
+    media_proxy.register_playable(&bvid, cid, quality).await
 }
 
 /// 获取热门视频列表
@@ -324,6 +326,29 @@ pub async fn get_popular_videos(
 ) -> Result<Vec<VideoInfo>, String> {
     bili_client
         .get_popular_videos(page.unwrap_or(1), page_size.unwrap_or(20))
+        .await
+}
+
+#[tauri::command]
+pub async fn get_recommended_videos(
+    bili_client: State<'_, Arc<BiliClient>>,
+    fresh_index: Option<i64>,
+    page_size: Option<i64>,
+) -> Result<Vec<VideoInfo>, String> {
+    bili_client
+        .get_recommended_videos(fresh_index.unwrap_or(1), page_size.unwrap_or(30))
+        .await
+}
+
+#[tauri::command]
+pub async fn get_region_videos(
+    bili_client: State<'_, Arc<BiliClient>>,
+    rid: i64,
+    page: Option<i64>,
+    page_size: Option<i64>,
+) -> Result<Vec<VideoInfo>, String> {
+    bili_client
+        .get_region_videos(rid, page.unwrap_or(1), page_size.unwrap_or(60))
         .await
 }
 

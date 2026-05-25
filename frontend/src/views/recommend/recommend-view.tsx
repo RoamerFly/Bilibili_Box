@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronDown,
@@ -12,6 +12,7 @@ import {
   ThumbsUp,
 } from "lucide-react";
 import { invoke } from "@/lib/api";
+import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
 import { formatBiliImageUrl, formatDuration, formatNumber } from "@/lib/utils";
 import { buildVisiblePages, useResponsivePageSize } from "@/hooks/use-responsive-page-size";
@@ -51,8 +52,32 @@ interface RecommendVideo {
   likes: string;
 }
 
-const CATEGORIES = ["全部", "动画", "音乐", "游戏", "知识", "科技", "生活", "影视", "鬼畜", "舞蹈"];
-const MORE_CATEGORIES = ["美食", "动物", "汽车", "运动", "时尚", "Vlog"];
+interface RecommendCategory {
+  label: string;
+  rid: number | null;
+}
+
+const CATEGORIES: RecommendCategory[] = [
+  { label: "全部", rid: null },
+  { label: "动画", rid: 1 },
+  { label: "音乐", rid: 3 },
+  { label: "游戏", rid: 4 },
+  { label: "知识", rid: 36 },
+  { label: "科技", rid: 188 },
+  { label: "生活", rid: 160 },
+  { label: "影视", rid: 181 },
+  { label: "鬼畜", rid: 119 },
+  { label: "舞蹈", rid: 129 },
+];
+const MORE_CATEGORIES: RecommendCategory[] = [
+  { label: "美食", rid: 211 },
+  { label: "动物", rid: 217 },
+  { label: "汽车", rid: 223 },
+  { label: "运动", rid: 234 },
+  { label: "时尚", rid: 155 },
+  { label: "日常", rid: 21 },
+];
+const ALL_CATEGORIES = [...CATEGORIES, ...MORE_CATEGORIES];
 
 const containerVariants = {
   hidden: {},
@@ -71,18 +96,24 @@ const itemVariants = {
 };
 
 export function RecommendView() {
-  const setView = useAppStore((s) => s.setView);
   const openPlayer = useAppStore((s) => s.openPlayer);
   const cardScale = useAppStore((s) => Number(s.config?.card_scale ?? 1));
-  const [activeCategory, setActiveCategory] = useState("全部");
-  const [searchQuery, setSearchQuery] = useState("");
+  const recommendPageState = useAppStore((s) => s.recommendPageState);
+  const setRecommendPageState = useAppStore((s) => s.setRecommendPageState);
+  const { activeCategory, searchQuery, videos, sortMode, currentPage, loadedCategory } = recommendPageState;
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showMoreCategories, setShowMoreCategories] = useState(false);
-  const [videos, setVideos] = useState<RecommendVideo[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [sortMode, setSortMode] = useState<"default" | "duration_desc" | "likes_desc">("default");
-  const [currentPage, setCurrentPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(loadedCategory !== activeCategory);
   const [error, setError] = useState("");
+  const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
+  const batchIndexesRef = useRef<Record<string, number>>(recommendPageState.batchIndexes);
+  const paginationMountedRef = useRef(false);
+  const requestIdRef = useRef(0);
+
+  const activeCategoryInfo = useMemo(
+    () => ALL_CATEGORIES.find((category) => category.label === activeCategory) ?? CATEGORIES[0],
+    [activeCategory]
+  );
 
   const { pageSize } = useResponsivePageSize({
     minCardWidth: 290 * cardScale,
@@ -106,36 +137,59 @@ export function RecommendView() {
     []
   );
 
-  const fetchVideos = useCallback(async () => {
+  const fetchVideos = useCallback(async (category: RecommendCategory, advanceBatch = false) => {
+    const requestId = ++requestIdRef.current;
+    const currentBatch = batchIndexesRef.current[category.label] ?? 1;
+    const batch = advanceBatch ? currentBatch + 1 : currentBatch;
+    const nextBatchIndexes = { ...batchIndexesRef.current, [category.label]: batch };
+    batchIndexesRef.current = nextBatchIndexes;
+    setRecommendPageState({ batchIndexes: nextBatchIndexes });
+
+    if (advanceBatch) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
+    }
     setError("");
     try {
-      const pages = [1, 2, 3, 4, 5];
-      const responses = await Promise.all(
-        pages.map((page) => invoke<BackendVideo[]>("get_popular_videos", { page, pageSize: 20 }))
-      );
-      const merged = responses.flat();
-      const deduped = Array.from(new Map(merged.map((item) => [item.bvid, item])).values());
-      setVideos(deduped.map(transformVideo));
+      const response = category.rid === null
+        ? await invoke<BackendVideo[]>("get_recommended_videos", { freshIndex: batch, pageSize: 30 })
+        : await invoke<BackendVideo[]>("get_region_videos", { rid: category.rid, page: batch, pageSize: 60 });
+      if (requestId !== requestIdRef.current) return;
+      const deduped = Array.from(new Map(response.map((item) => [item.bvid, item])).values());
+      setRecommendPageState({
+        videos: deduped.map(transformVideo),
+        loadedCategory: category.label,
+      });
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(String(err));
-      setVideos([]);
+      setRecommendPageState({ videos: [] });
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      if (requestId === requestIdRef.current) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
     }
-  }, [transformVideo]);
+  }, [setRecommendPageState, transformVideo]);
 
   useEffect(() => {
-    void fetchVideos();
-  }, [fetchVideos]);
+    if (loadedCategory === activeCategoryInfo.label) return;
+    setRecommendPageState({ currentPage: 1 });
+    void fetchVideos(activeCategoryInfo);
+  }, [activeCategoryInfo, fetchVideos, loadedCategory, setRecommendPageState]);
 
   useEffect(() => {
-    setCurrentPage(1);
-  }, [activeCategory, pageSize, searchQuery, sortMode]);
+    if (!paginationMountedRef.current) {
+      paginationMountedRef.current = true;
+      return;
+    }
+    setRecommendPageState({ currentPage: 1 });
+  }, [activeCategory, pageSize, searchQuery, setRecommendPageState, sortMode]);
 
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    await fetchVideos();
+  const handleRefresh = () => {
+    setRecommendPageState({ currentPage: 1 });
+    void fetchVideos(activeCategoryInfo, true);
   };
 
   const displayedVideos = useMemo(() => {
@@ -143,15 +197,6 @@ export function RecommendView() {
 
     if (searchQuery.trim()) {
       const keyword = searchQuery.trim().toLowerCase();
-      result = result.filter(
-        (video) =>
-          video.title.toLowerCase().includes(keyword) ||
-          video.author.toLowerCase().includes(keyword)
-      );
-    }
-
-    if (activeCategory !== "全部") {
-      const keyword = activeCategory.toLowerCase();
       result = result.filter(
         (video) =>
           video.title.toLowerCase().includes(keyword) ||
@@ -181,7 +226,7 @@ export function RecommendView() {
     }
 
     return result;
-  }, [activeCategory, searchQuery, sortMode, videos]);
+  }, [searchQuery, sortMode, videos]);
 
   const pageCount = useMemo(
     () => Math.max(1, Math.ceil(displayedVideos.length / pageSize)),
@@ -199,11 +244,12 @@ export function RecommendView() {
   }, [currentPage, displayedVideos, pageSize]);
 
   const handleToggleSort = () => {
-    setSortMode((current) => {
-      if (current === "default") return "likes_desc";
-      if (current === "likes_desc") return "duration_desc";
-      return "default";
-    });
+    const nextSortMode = sortMode === "default"
+      ? "likes_desc"
+      : sortMode === "likes_desc"
+        ? "duration_desc"
+        : "default";
+    setRecommendPageState({ sortMode: nextSortMode });
   };
 
   const handleOpenBrowser = (bvid: string) => {
@@ -222,10 +268,11 @@ export function RecommendView() {
 
   const handleDownload = async (video: RecommendVideo) => {
     try {
+      const downloadQuality = await requestDownloadQuality();
+      if (!downloadQuality) return;
       await invoke<string[]>("create_download_task", {
-        params: { bvid: video.bvid, cid: video.cid, title: video.title, cids: [video.cid] },
+        params: { bvid: video.bvid, cid: video.cid, title: video.title, cids: [video.cid], download_quality: downloadQuality },
       });
-      setView("downloads");
     } catch (err) {
       setError(String(err));
     }
@@ -256,10 +303,12 @@ export function RecommendView() {
               推荐视频
             </h1>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "6px", flexWrap: "wrap" }}>
-              <span style={{ fontSize: "13px", color: "#8b8b9a" }}>为你聚合热门推荐内容</span>
+              <span style={{ fontSize: "13px", color: "#8b8b9a" }}>
+                {activeCategory === "全部" ? "首页个性化推荐" : `${activeCategory}分区近期投稿`}
+              </span>
               <button
                 onClick={() => void handleRefresh()}
-                disabled={isRefreshing}
+                disabled={isRefreshing || isLoading}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -269,10 +318,10 @@ export function RecommendView() {
                   border: "none",
                   padding: "4px 10px",
                   borderRadius: "8px",
-                  color: isRefreshing ? "#aaa" : "#6366f1",
+                  color: isRefreshing || isLoading ? "#aaa" : "#6366f1",
                   fontSize: "12.5px",
                   fontWeight: 600,
-                  cursor: isRefreshing ? "not-allowed" : "pointer",
+                  cursor: isRefreshing || isLoading ? "not-allowed" : "pointer",
                 }}
               >
                 {isRefreshing ? (
@@ -304,7 +353,7 @@ export function RecommendView() {
                 type="text"
                 placeholder="搜索标题、UP 主或关键词"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => setRecommendPageState({ searchQuery: e.target.value })}
                 style={{
                   width: "100%",
                   border: "none",
@@ -353,11 +402,11 @@ export function RecommendView() {
           style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}
         >
           {CATEGORIES.map((category) => {
-            const active = category === activeCategory;
+            const active = category.label === activeCategory;
             return (
               <motion.button
-                key={category}
-                onClick={() => setActiveCategory(category)}
+                key={category.label}
+                onClick={() => setRecommendPageState({ activeCategory: category.label })}
                 whileTap={{ scale: 0.96 }}
                 style={{
                   backgroundColor: active ? "#6366f1" : "transparent",
@@ -370,7 +419,7 @@ export function RecommendView() {
                   cursor: "pointer",
                 }}
               >
-                {category}
+                {category.label}
               </motion.button>
             );
           })}
@@ -384,13 +433,13 @@ export function RecommendView() {
                 alignItems: "center",
                 justifyContent: "center",
                 gap: "5px",
-                backgroundColor: "transparent",
+                backgroundColor: MORE_CATEGORIES.some((category) => category.label === activeCategory) ? "#6366f1" : "transparent",
                 border: "none",
                 borderRadius: "20px",
                 padding: "6px 14px",
                 fontSize: "13px",
-                fontWeight: 500,
-                color: "#555568",
+                fontWeight: MORE_CATEGORIES.some((category) => category.label === activeCategory) ? 600 : 500,
+                color: MORE_CATEGORIES.some((category) => category.label === activeCategory) ? "#fff" : "#555568",
                 cursor: "pointer",
               }}
             >
@@ -426,24 +475,24 @@ export function RecommendView() {
                 >
                   {MORE_CATEGORIES.map((category) => (
                     <button
-                      key={category}
+                      key={category.label}
                       onClick={() => {
-                        setActiveCategory(category);
+                        setRecommendPageState({ activeCategory: category.label });
                         setShowMoreCategories(false);
                       }}
                       style={{
                         width: "100%",
                         textAlign: "left",
-                        backgroundColor: "transparent",
+                        backgroundColor: activeCategory === category.label ? "#f0efff" : "transparent",
                         border: "none",
                         borderRadius: "8px",
                         padding: "7px 12px",
                         fontSize: "13px",
-                        color: "#444455",
+                        color: activeCategory === category.label ? "#6366f1" : "#444455",
                         cursor: "pointer",
                       }}
                     >
-                      {category}
+                      {category.label}
                     </button>
                   ))}
                 </motion.div>
@@ -502,15 +551,15 @@ export function RecommendView() {
 
             <div style={{ display: "flex", justifyContent: "center", marginTop: "24px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-                <PageButton disabled={currentPage <= 1} onClick={() => setCurrentPage((prev) => prev - 1)}>
+                <PageButton disabled={currentPage <= 1} onClick={() => setRecommendPageState({ currentPage: currentPage - 1 })}>
                   上一页
                 </PageButton>
                 {visiblePages.map((page) => (
-                  <PageButton key={page} active={page === currentPage} onClick={() => setCurrentPage(page)}>
+                  <PageButton key={page} active={page === currentPage} onClick={() => setRecommendPageState({ currentPage: page })}>
                     {page}
                   </PageButton>
                 ))}
-                <PageButton disabled={currentPage >= pageCount} onClick={() => setCurrentPage((prev) => prev + 1)}>
+                <PageButton disabled={currentPage >= pageCount} onClick={() => setRecommendPageState({ currentPage: currentPage + 1 })}>
                   下一页
                 </PageButton>
               </div>
@@ -518,6 +567,7 @@ export function RecommendView() {
           </>
         )}
       </div>
+      {downloadQualityDialog}
     </motion.div>
   );
 }

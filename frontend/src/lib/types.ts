@@ -11,6 +11,7 @@ export interface Config {
   cookie?: string;
   theme: string;
   download_quality: string;
+  prompt_download_quality: boolean;
   video_quality_priority: number[];
   codec_type_priority: number[];
   audio_quality_priority: number[];
@@ -140,7 +141,9 @@ export interface AggregateKeywordVideoResult {
   pubdate?: number;
   play: number;
   danmaku?: number;
+  like?: number;
   favorite?: number;
+  reply?: number;
   description: string;
 }
 
@@ -301,6 +304,7 @@ export interface CreateDownloadTaskParams {
   cid: number;
   title: string;
   cids: number[];
+  download_quality?: string;
 }
 
 export type DownloadStage =
@@ -330,6 +334,7 @@ export interface DownloadProgress {
   title: string;
   cover?: string;
   duration?: number;
+  quality?: string;
   state: DownloadTaskState;
   stage?: DownloadStage;
   progress: number;

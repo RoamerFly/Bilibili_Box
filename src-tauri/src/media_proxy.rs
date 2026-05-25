@@ -9,9 +9,11 @@ use reqwest::header::{
     ACCEPT_RANGES, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, LAST_MODIFIED,
     RANGE,
 };
+use serde::Serialize;
 use tauri::http::{Request, Response, StatusCode};
 use uuid::Uuid;
 
+use crate::api::video::{DashAudio, DashSegmentBase, DashVideo, PlayUrlInfo};
 use crate::api::BiliClient;
 
 const TOKEN_TTL: Duration = Duration::from_secs(2 * 60 * 60);
@@ -21,13 +23,48 @@ const MAX_CHUNK_SIZE: u64 = 2 * 1024 * 1024;
 
 #[derive(Clone)]
 enum ProxySource {
-    Remote { remote_url: String, referer: String },
-    Local { file_path: PathBuf },
+    Remote {
+        remote_url: String,
+        referer: String,
+        exact_ranges: bool,
+    },
+    Local {
+        file_path: PathBuf,
+    },
 }
 
 struct ProxyEntry {
     source: ProxySource,
     created_at: Instant,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RegisteredPlayable {
+    pub url: Option<String>,
+    pub quality: i64,
+    pub accept_quality: Vec<i64>,
+    pub dash: Option<RegisteredDashPlayback>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RegisteredDashPlayback {
+    pub duration_seconds: u64,
+    pub min_buffer_time: f64,
+    pub video: RegisteredDashStream,
+    pub audio: Option<RegisteredDashStream>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RegisteredDashStream {
+    pub url: String,
+    pub id: i64,
+    pub bandwidth: u64,
+    pub mime_type: String,
+    pub codecs: String,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub frame_rate: Option<String>,
+    pub segment_base: Option<DashSegmentBase>,
 }
 
 pub struct MediaProxyServer {
@@ -48,39 +85,144 @@ impl MediaProxyServer {
         server
     }
 
-    pub async fn register_playable(&self, bvid: &str, cid: i64) -> Result<String, String> {
+    pub async fn register_playable(
+        &self,
+        bvid: &str,
+        cid: i64,
+        quality: Option<i64>,
+    ) -> Result<RegisteredPlayable, String> {
         self.prune_entries();
 
-        let playable = self.bili_client.get_playable_url(bvid, cid).await?;
+        match self.bili_client.get_normal_url(bvid, cid).await {
+            Ok(play_info) => {
+                if let Some(registered) =
+                    self.register_dash_playable(bvid, quality.unwrap_or(80), play_info)
+                {
+                    return Ok(registered);
+                }
+                log::warn!(
+                    "[MediaProxy] DASH response contained no video representations: bvid={}, cid={}",
+                    bvid,
+                    cid
+                );
+            }
+            Err(error) => {
+                log::warn!(
+                    "[MediaProxy] DASH playback lookup failed; trying direct media fallback: bvid={}, cid={}, error={}",
+                    bvid,
+                    cid,
+                    error
+                );
+            }
+        }
+
+        let playable = self
+            .bili_client
+            .get_playable_url(bvid, cid, quality)
+            .await?;
+        let actual_quality = playable.quality;
+        let accept_quality = playable.accept_quality.clone();
         let remote_url = playable
             .url
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| "No directly playable URL was returned for this item".to_string())?;
 
-        let token = Uuid::new_v4().to_string();
         let referer = format!("https://www.bilibili.com/video/{}", bvid);
         let remote_host = summarize_url_host(&remote_url);
+        let proxy_url = self.register_remote_source(remote_url, referer, false);
+        log::info!(
+            "[MediaProxy] Registered media URL: bvid={}, cid={}, quality={}, proxy_url={}, remote_host={}",
+            bvid,
+            cid,
+            actual_quality,
+            proxy_url,
+            remote_host
+        );
+
+        Ok(RegisteredPlayable {
+            url: Some(proxy_url),
+            quality: actual_quality,
+            accept_quality,
+            dash: None,
+        })
+    }
+
+    fn register_dash_playable(
+        &self,
+        bvid: &str,
+        requested_quality: i64,
+        play_info: PlayUrlInfo,
+    ) -> Option<RegisteredPlayable> {
+        let available_qualities = available_dash_qualities(&play_info.video_list);
+        let video = select_dash_video(&play_info.video_list, requested_quality)?;
+        let audio = select_dash_audio(&play_info.audio_list);
+        let referer = format!("https://www.bilibili.com/video/{}", bvid);
+        let actual_quality = video.id;
+
+        let video_stream = RegisteredDashStream {
+            url: self.register_remote_source(video.base_url.clone(), referer.clone(), true),
+            id: video.id,
+            bandwidth: video.bandwidth,
+            mime_type: video.mime_type.clone(),
+            codecs: video.codecs.clone(),
+            width: Some(video.width),
+            height: Some(video.height),
+            frame_rate: Some(video.frame_rate.clone()),
+            segment_base: video.segment_base.clone(),
+        };
+        let audio_stream = audio.map(|audio| RegisteredDashStream {
+            url: self.register_remote_source(audio.base_url.clone(), referer, true),
+            id: audio.id,
+            bandwidth: audio.bandwidth,
+            mime_type: audio.mime_type.clone(),
+            codecs: audio.codecs.clone(),
+            width: None,
+            height: None,
+            frame_rate: None,
+            segment_base: audio.segment_base.clone(),
+        });
+
+        log::info!(
+            "[MediaProxy] Registered DASH playback: bvid={}, quality={}, available_qualities={:?}, video_codec={}, audio={}",
+            bvid,
+            actual_quality,
+            available_qualities,
+            video.codecs,
+            audio_stream.is_some()
+        );
+
+        Some(RegisteredPlayable {
+            url: None,
+            quality: actual_quality,
+            accept_quality: available_qualities,
+            dash: Some(RegisteredDashPlayback {
+                duration_seconds: play_info.duration_seconds,
+                min_buffer_time: play_info.min_buffer_time,
+                video: video_stream,
+                audio: audio_stream,
+            }),
+        })
+    }
+
+    fn register_remote_source(
+        &self,
+        remote_url: String,
+        referer: String,
+        exact_ranges: bool,
+    ) -> String {
+        let token = Uuid::new_v4().to_string();
         self.entries.write().insert(
             token.clone(),
             ProxyEntry {
                 source: ProxySource::Remote {
                     remote_url,
                     referer,
+                    exact_ranges,
                 },
                 created_at: Instant::now(),
             },
         );
-
-        let proxy_url = build_media_protocol_url(&token);
-        log::info!(
-            "[MediaProxy] Registered media URL: bvid={}, cid={}, proxy_url={}, remote_host={}",
-            bvid,
-            cid,
-            proxy_url,
-            remote_host
-        );
-
-        Ok(proxy_url)
+        build_media_protocol_url(&token)
     }
 
     pub fn register_local_file(&self, file_path: PathBuf) -> Result<String, String> {
@@ -157,17 +299,23 @@ impl MediaProxyServer {
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
 
-        let (remote_url, referer) = match source {
+        let (remote_url, referer, exact_ranges) = match source {
             ProxySource::Local { file_path } => {
                 return Self::serve_local_file(&method, file_path, original_range.as_deref()).await;
             }
             ProxySource::Remote {
                 remote_url,
                 referer,
-            } => (remote_url, referer),
+                exact_ranges,
+            } => (remote_url, referer, exact_ranges),
         };
         let effective_range = if method.as_str() == "HEAD" {
             Some("bytes=0-0".to_string())
+        } else if exact_ranges {
+            Some(remote_range_header(
+                original_range.as_deref(),
+                DEFAULT_CHUNK_SIZE,
+            ))
         } else {
             Some(clamp_range_header(
                 original_range.as_deref(),
@@ -353,6 +501,61 @@ impl MediaProxyServer {
         if removed > 0 {
             log::debug!("[MediaProxy] Removed expired proxy tokens: {}", removed);
         }
+    }
+}
+
+fn available_dash_qualities(videos: &[DashVideo]) -> Vec<i64> {
+    let mut qualities: Vec<i64> = videos.iter().map(|video| video.id).collect();
+    qualities.sort_unstable_by(|left, right| right.cmp(left));
+    qualities.dedup();
+    qualities
+}
+
+fn select_dash_video(videos: &[DashVideo], requested_quality: i64) -> Option<&DashVideo> {
+    let qualities = available_dash_qualities(videos);
+    let selected_quality = qualities
+        .iter()
+        .copied()
+        .find(|quality| *quality <= requested_quality)
+        .or_else(|| qualities.last().copied())?;
+
+    videos
+        .iter()
+        .filter(|video| video.id == selected_quality)
+        .min_by_key(|video| match video.codecs.as_str() {
+            codec if codec.starts_with("avc1") => 0,
+            codec if codec.starts_with("hev") || codec.starts_with("hvc") => 1,
+            codec if codec.starts_with("av01") => 2,
+            _ => 3,
+        })
+}
+
+fn select_dash_audio(audios: &[DashAudio]) -> Option<&DashAudio> {
+    audios
+        .iter()
+        .filter(|audio| audio.codecs.starts_with("mp4a"))
+        .max_by_key(|audio| audio.bandwidth)
+        .or_else(|| audios.iter().max_by_key(|audio| audio.bandwidth))
+}
+
+fn remote_range_header(range: Option<&str>, default_chunk_size: u64) -> String {
+    let Some(range) = range
+        .map(str::trim)
+        .filter(|value| value.starts_with("bytes="))
+    else {
+        return format!("bytes=0-{}", default_chunk_size.saturating_sub(1));
+    };
+
+    let spec = range.trim_start_matches("bytes=").trim();
+    let is_finite_single_range = !spec.contains(',')
+        && spec.split_once('-').is_some_and(|(start, end)| {
+            start.trim().parse::<u64>().is_ok() && end.trim().parse::<u64>().is_ok()
+        });
+
+    if is_finite_single_range || spec.starts_with('-') {
+        range.to_string()
+    } else {
+        clamp_range_header(Some(range), default_chunk_size, MAX_CHUNK_SIZE)
     }
 }
 

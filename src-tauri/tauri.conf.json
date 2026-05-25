@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https: data: blob:; media-src 'self' asset: https: data: blob: bili-media: https://bili-media.localhost; font-src 'self' data:; connect-src 'self' https: wss: ws: ipc: bili-media: https://bili-media.localhost;"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https: data: blob:; media-src 'self' asset: https: data: blob: bili-media: https://bili-media.localhost; font-src 'self' data:; connect-src 'self' https: wss: ws: ipc: blob: bili-media: https://bili-media.localhost;"
     }
   },
   "bundle": {

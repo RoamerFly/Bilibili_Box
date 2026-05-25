@@ -1,20 +1,21 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft,
   Calendar,
   Copy,
   Download,
   Eye,
   ExternalLink,
-  Heart,
   Loader2,
   MessageCircle,
   Play,
   Search,
+  Star,
+  ThumbsUp,
   UserRound,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { invoke } from "@/lib/api";
+import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { openExternalUrl } from "@/lib/open-external";
 import type {
@@ -24,6 +25,7 @@ import type {
   SearchFilters,
   SearchOrder,
   SearchResponse,
+  BangumiInfo,
   VideoInfo,
 } from "@/lib/types";
 import { useAppStore } from "@/stores/app-store";
@@ -53,6 +55,8 @@ const durationOptions: Array<{ value: SearchDuration; label: string }> = [
   { value: "4", label: "60 分钟以上" },
 ];
 
+type SearchResultType = "all" | "video" | "bangumi";
+
 export function SearchView() {
   const openPlayer = useAppStore((s) => s.openPlayer);
   const searchPageState = useAppStore((s) => s.searchPageState);
@@ -60,13 +64,9 @@ export function SearchView() {
   const searchRequestIdRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const {
-    input: searchInput,
-    filters: currentFilters,
-    lastAggregateInput,
-    result,
-    aggregateSnapshot,
-  } = searchPageState;
+  const [activeResultType, setActiveResultType] = useState<SearchResultType>("all");
+  const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
+  const { input: searchInput, filters: currentFilters, lastAggregateInput, result } = searchPageState;
 
   const placeholder = useMemo(
     () => "输入关键词、BV/AV、ep/ss、视频链接或番剧链接",
@@ -100,13 +100,10 @@ export function SearchView() {
       });
       if (requestId !== searchRequestIdRef.current) return;
       const latestState = useAppStore.getState().searchPageState;
-      const previousAggregate =
-        latestState.result?.type === "Aggregate" ? latestState.result : latestState.aggregateSnapshot;
       setSearchPageState({
         filters,
         result: data,
         lastAggregateInput: data.type === "Aggregate" ? input : latestState.lastAggregateInput,
-        aggregateSnapshot: data.type === "Aggregate" ? data : previousAggregate,
       });
     } catch (err) {
       if (requestId !== searchRequestIdRef.current) return;
@@ -137,27 +134,62 @@ export function SearchView() {
     [lastAggregateInput, result?.type, runSearch, setSearchPageState]
   );
 
-  const restoreAggregateResults = useCallback(() => {
-    if (!aggregateSnapshot) {
-      return;
-    }
-
-    setError("");
-    setSearchPageState({
-      result: aggregateSnapshot,
-      lastAggregateInput: aggregateSnapshot.keyword || lastAggregateInput,
-      input: searchInput || aggregateSnapshot.keyword || "",
+  const queueDownload = async (bvid: string, cid: number, title: string, downloadQuality: string) => {
+    const taskIds = await invoke<string[]>("create_download_task", {
+      params: { bvid, cid, title, cids: [cid], download_quality: downloadQuality },
     });
-  }, [aggregateSnapshot, lastAggregateInput, searchInput, setSearchPageState]);
+    notifyDownloadQueued(taskIds, title);
+  };
 
   const handleDownload = async (bvid: string, cid: number, title: string) => {
     try {
-      const taskIds = await invoke<string[]>("create_download_task", {
-        params: { bvid, cid, title, cids: [cid] },
-      });
-      notifyDownloadQueued(taskIds, title);
+      const downloadQuality = await requestDownloadQuality();
+      if (!downloadQuality) return;
+      await queueDownload(bvid, cid, title, downloadQuality);
     } catch (err) {
       setError(String(err));
+    }
+  };
+
+  const handleSearchVideoDownload = async (video: AggregateSearchResult["videos"][number], selectedQuality?: string) => {
+    try {
+      const downloadQuality = selectedQuality ?? await requestDownloadQuality();
+      if (!downloadQuality) return false;
+      const detail = await invoke<VideoInfo>("get_normal_info", { bvid: video.bvid });
+      await queueDownload(detail.bvid, detail.cid, detail.title || video.title, downloadQuality);
+      return true;
+    } catch (err) {
+      setError(String(err));
+      return false;
+    }
+  };
+
+  const handleSearchBangumiDownload = async (bangumi: { season_id: number; title: string }, selectedQuality?: string) => {
+    try {
+      const downloadQuality = selectedQuality ?? await requestDownloadQuality();
+      if (!downloadQuality) return false;
+      const detail = await invoke<BangumiInfo>("get_bangumi_info", { seasonId: bangumi.season_id });
+      if (!detail.episodes.length) {
+        throw new Error("没有找到可下载的剧集");
+      }
+      const groups = await Promise.all(
+        detail.episodes.map((episode) =>
+          invoke<string[]>("create_download_task", {
+            params: {
+              bvid: episode.bvid,
+              cid: episode.cid,
+              title: `${detail.title || bangumi.title} - ${episode.long_title || episode.title}`.trim(),
+              cids: [episode.cid],
+              download_quality: downloadQuality,
+            },
+          })
+        )
+      );
+      notifyDownloadQueued(groups.flat(), detail.title || bangumi.title);
+      return true;
+    } catch (err) {
+      setError(String(err));
+      return false;
     }
   };
 
@@ -296,6 +328,32 @@ export function SearchView() {
           marginBottom: "20px",
         }}
       >
+        <div style={{ display: "flex", alignItems: "center", gap: "5px", padding: "4px", borderRadius: "11px", backgroundColor: "#f1f1f7" }}>
+          {([
+            ["all", "全部"],
+            ["video", "视频"],
+            ["bangumi", "番剧"],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setActiveResultType(value)}
+              style={{
+                padding: "7px 14px",
+                borderRadius: "8px",
+                border: "none",
+                backgroundColor: activeResultType === value ? "#fff" : "transparent",
+                boxShadow: activeResultType === value ? "0 1px 4px rgba(65,65,95,0.09)" : "none",
+                color: activeResultType === value ? "#4338ca" : "#666679",
+                fontSize: "13px",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <FilterSelect
           label="排序"
           value={currentFilters.order}
@@ -321,7 +379,7 @@ export function SearchView() {
           }
         />
         <span style={{ fontSize: "12.5px", color: "#9a9aa8" }}>
-          筛选对关键词视频结果生效
+          排序、日期和时长对关键词视频结果生效
         </span>
       </motion.div>
 
@@ -355,8 +413,6 @@ export function SearchView() {
           {result.type === "Normal" ? (
             <NormalVideoResult
               video={result}
-              canBackToResults={Boolean(aggregateSnapshot)}
-              onBackToResults={restoreAggregateResults}
               onCopyBvid={handleCopyBvid}
               onDownload={handleDownload}
               onOpenBrowser={handleOpenBrowser}
@@ -367,9 +423,8 @@ export function SearchView() {
           {result.type === "Bangumi" ? (
             <BangumiResult
               bangumi={result}
-              canBackToResults={Boolean(aggregateSnapshot)}
-              onBackToResults={restoreAggregateResults}
               onDownload={handleDownload}
+              onDownloadAll={() => void handleSearchBangumiDownload(result)}
               onOpenBrowser={handleOpenBrowser}
               onOpenPlayer={handleOpenBangumiPlayer}
             />
@@ -378,9 +433,13 @@ export function SearchView() {
           {result.type === "Aggregate" ? (
             <AggregateResult
               result={result}
-              onSearch={handleSearch}
+              activeType={activeResultType}
               onOpenVideoPlayer={handleOpenVideoPlayer}
               onOpenBangumiPlayer={handleOpenBangumiPlayer}
+              onDownloadVideo={handleSearchVideoDownload}
+              onDownloadBangumi={handleSearchBangumiDownload}
+              onRequestDownloadQuality={requestDownloadQuality}
+              onOpenBrowser={handleOpenBrowser}
             />
           ) : null}
         </motion.div>
@@ -389,26 +448,23 @@ export function SearchView() {
           <Search style={{ width: "56px", height: "56px", margin: "0 auto 18px", opacity: 0.35 }} />
           <p style={{ fontSize: "15px", fontWeight: 500 }}>输入内容开始搜索</p>
           <p style={{ fontSize: "13px", marginTop: "8px", opacity: 0.75 }}>
-            关键词会返回聚合结果，链接和编号会直接进入详情
+            关键词会返回分类结果，链接和编号会直接显示可操作内容
           </p>
         </div>
       ) : null}
+      {downloadQualityDialog}
     </div>
   );
 }
 
 function NormalVideoResult({
   video,
-  canBackToResults,
-  onBackToResults,
   onCopyBvid,
   onDownload,
   onOpenBrowser,
   onOpenPlayer,
 }: {
   video: VideoInfo;
-  canBackToResults: boolean;
-  onBackToResults: () => void;
   onCopyBvid: (bvid: string) => void;
   onDownload: (bvid: string, cid: number, title: string) => void;
   onOpenBrowser: (url: string) => void;
@@ -418,8 +474,8 @@ function NormalVideoResult({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 320px",
-        gap: "22px",
+        gridTemplateColumns: "minmax(0, 1fr)",
+        gap: 0,
         alignItems: "start",
       }}
     >
@@ -471,28 +527,6 @@ function NormalVideoResult({
         </div>
 
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-          {canBackToResults ? (
-            <button
-              onClick={onBackToResults}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                width: "fit-content",
-                marginBottom: "10px",
-                border: "none",
-                background: "transparent",
-                color: "#6366f1",
-                fontSize: "13px",
-                fontWeight: 700,
-                cursor: "pointer",
-                padding: 0,
-              }}
-            >
-              <ArrowLeft style={{ width: 14, height: 14 }} />
-              返回搜索结果
-            </button>
-          ) : null}
           <h3 style={{ fontSize: "18px", fontWeight: 700, color: "#1a1a2e", lineHeight: 1.45, marginBottom: "10px" }}>
             {video.title}
           </h3>
@@ -505,8 +539,9 @@ function NormalVideoResult({
 
           <div style={{ display: "flex", alignItems: "center", gap: "16px", fontSize: "13px", color: "#7a7a8c", flexWrap: "wrap" }}>
             <MetaPill icon={<Eye style={{ width: 13, height: 13 }} />} text={`播放 ${formatNumber(video.stat.view)}`} />
-            <MetaPill icon={<MessageCircle style={{ width: 13, height: 13 }} />} text={`弹幕 ${formatNumber(video.stat.danmaku)}`} />
-            <MetaPill icon={<Heart style={{ width: 13, height: 13 }} />} text={`收藏 ${formatNumber(video.stat.favorite)}`} />
+            <MetaPill icon={<ThumbsUp style={{ width: 13, height: 13 }} />} text={`点赞 ${formatNumber(video.stat.like)}`} />
+            <MetaPill icon={<Star style={{ width: 13, height: 13 }} />} text={`收藏 ${formatNumber(video.stat.favorite)}`} />
+            <MetaPill icon={<MessageCircle style={{ width: 13, height: 13 }} />} text={`评论 ${formatNumber(video.stat.reply)}`} />
             <button
               onClick={() => onCopyBvid(video.bvid)}
               style={{
@@ -527,10 +562,6 @@ function NormalVideoResult({
               <Copy style={{ width: "13px", height: "13px" }} />
             </button>
           </div>
-
-          <p style={{ marginTop: "14px", fontSize: "13.5px", color: "#6b7280", lineHeight: 1.7 }}>
-            {video.description || "暂无简介"}
-          </p>
 
           <div style={{ marginTop: "auto", paddingTop: "12px", display: "flex", gap: "10px", justifyContent: "flex-end", flexWrap: "wrap" }}>
             <PrimaryActionButton
@@ -555,34 +586,20 @@ function NormalVideoResult({
         </div>
       </div>
 
-      <InfoPanel
-        cover={video.pic}
-        title={video.title}
-        lines={[
-          ["BV", video.bvid],
-          ["发布时间", formatDateTime(video.pubdate)],
-          ["时长", formatDuration(video.duration)],
-          ["作者", video.owner.name],
-          ["播放", formatNumber(video.stat.view)],
-          ["点赞", formatNumber(video.stat.like)],
-        ]}
-      />
     </div>
   );
 }
 
 function BangumiResult({
   bangumi,
-  canBackToResults,
-  onBackToResults,
   onDownload,
+  onDownloadAll,
   onOpenBrowser,
   onOpenPlayer,
 }: {
   bangumi: Extract<SearchResponse, { type: "Bangumi" }>;
-  canBackToResults: boolean;
-  onBackToResults: () => void;
   onDownload: (bvid: string, cid: number, title: string) => void;
+  onDownloadAll: () => void;
   onOpenBrowser: (url: string) => void;
   onOpenPlayer: (bangumi: { season_id: number; title: string; cover: string }) => void;
 }) {
@@ -619,27 +636,6 @@ function BangumiResult({
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          {canBackToResults ? (
-            <button
-              onClick={onBackToResults}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                marginBottom: "10px",
-                border: "none",
-                background: "transparent",
-                color: "#6366f1",
-                fontSize: "13px",
-                fontWeight: 700,
-                cursor: "pointer",
-                padding: 0,
-              }}
-            >
-              <ArrowLeft style={{ width: 14, height: 14 }} />
-              返回搜索结果
-            </button>
-          ) : null}
           <h3 style={{ fontSize: "18px", fontWeight: 700, color: "#1a1a2e", marginBottom: "10px" }}>
             {bangumi.title}
           </h3>
@@ -655,6 +651,9 @@ function BangumiResult({
               icon={<ExternalLink style={{ width: 16, height: 16 }} />}
             >
               浏览器打开
+            </GhostActionButton>
+            <GhostActionButton onClick={onDownloadAll} icon={<Download style={{ width: 16, height: 16 }} />}>
+              下载全部
             </GhostActionButton>
           </div>
         </div>
@@ -716,56 +715,163 @@ function BangumiResult({
 
 function AggregateResult({
   result,
-  onSearch,
+  activeType,
   onOpenVideoPlayer,
   onOpenBangumiPlayer,
+  onDownloadVideo,
+  onDownloadBangumi,
+  onRequestDownloadQuality,
+  onOpenBrowser,
 }: {
   result: Extract<SearchResponse, { type: "Aggregate" }>;
-  onSearch: (input: string) => Promise<void>;
+  activeType: SearchResultType;
   onOpenVideoPlayer: (video: { bvid: string; cid?: number; title: string; pic?: string }) => void;
   onOpenBangumiPlayer: (bangumi: { season_id: number; title: string; cover: string }) => void;
+  onDownloadVideo: (video: AggregateSearchResult["videos"][number], quality?: string) => Promise<boolean>;
+  onDownloadBangumi: (bangumi: { season_id: number; title: string }, quality?: string) => Promise<boolean>;
+  onRequestDownloadQuality: () => Promise<string | null>;
+  onOpenBrowser: (url: string) => void;
 }) {
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [batchDownloading, setBatchDownloading] = useState(false);
+  const showVideos = activeType === "all" || activeType === "video";
+  const showBangumi = activeType === "all" || activeType === "bangumi";
+  const visibleKeys = [
+    ...(showVideos ? result.videos.map((video) => `video:${video.bvid}`) : []),
+    ...(showBangumi ? result.bangumi.map((bangumi) => `bangumi:${bangumi.season_id}`) : []),
+  ];
+  const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((key) => selectedKeys.has(key));
+
+  useEffect(() => {
+    setSelectedKeys(new Set());
+  }, [result]);
+
+  const toggleSelection = (key: string) => {
+    setSelectedKeys((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const toggleVisibleSelection = () => {
+    setSelectedKeys((previous) => {
+      const next = new Set(previous);
+      if (allVisibleSelected) {
+        visibleKeys.forEach((key) => next.delete(key));
+      } else {
+        visibleKeys.forEach((key) => next.add(key));
+      }
+      return next;
+    });
+  };
+
+  const handleBatchDownload = async () => {
+    const operations = [
+      ...result.videos
+        .filter((video) => selectedKeys.has(`video:${video.bvid}`))
+        .map((video) => ({ key: `video:${video.bvid}`, run: (quality: string) => onDownloadVideo(video, quality) })),
+      ...result.bangumi
+        .filter((bangumi) => selectedKeys.has(`bangumi:${bangumi.season_id}`))
+        .map((bangumi) => ({ key: `bangumi:${bangumi.season_id}`, run: (quality: string) => onDownloadBangumi(bangumi, quality) })),
+    ];
+    if (!operations.length) return;
+
+    const downloadQuality = await onRequestDownloadQuality();
+    if (!downloadQuality) return;
+    setBatchDownloading(true);
+    const outcomes = await Promise.all(operations.map(async (operation) => ({ key: operation.key, ok: await operation.run(downloadQuality) })));
+    setBatchDownloading(false);
+    setSelectedKeys(new Set(outcomes.filter((outcome) => !outcome.ok).map((outcome) => outcome.key)));
+  };
+
   return (
     <>
-      <SectionHeader title="视频结果" count={result.videos.length} />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "16px" }}>
-        {result.videos.map((video) => (
-          <AggregateVideoCard
-            key={video.bvid}
-            video={video}
-            onDetail={() => void onSearch(video.bvid)}
-            onPlay={() => onOpenVideoPlayer({ bvid: video.bvid, title: video.title, pic: video.pic })}
-          />
-        ))}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px", flexWrap: "wrap" }}>
+        <span style={{ fontSize: "13px", color: "#7a7a8c" }}>
+          当前类别 {activeType === "all" ? "全部" : activeType === "video" ? "视频" : "番剧"}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap" }}>
+          <GhostActionButton onClick={toggleVisibleSelection} icon={<span aria-hidden="true">{allVisibleSelected ? "✓" : "□"}</span>}>
+            {allVisibleSelected ? "取消当前全选" : "全选当前"}
+          </GhostActionButton>
+          <GhostActionButton
+            onClick={() => void handleBatchDownload()}
+            icon={batchDownloading ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Download style={{ width: 15, height: 15 }} />}
+            disabled={batchDownloading || selectedKeys.size === 0}
+          >
+            下载选中 {selectedKeys.size ? `(${selectedKeys.size})` : ""}
+          </GhostActionButton>
+        </div>
       </div>
 
-      <SectionHeader title="番剧结果" count={result.bangumi.length} />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "16px" }}>
-        {result.bangumi.map((bangumi) => (
-          <AggregateBangumiCard
-            key={bangumi.season_id}
-            bangumi={bangumi}
-            onDetail={() => void onSearch(`ss${bangumi.season_id}`)}
-            onPlay={() => onOpenBangumiPlayer(bangumi)}
-          />
-        ))}
-      </div>
+      {showVideos && result.videos.length ? (
+        <>
+          <SectionHeader title="视频结果" count={result.videos.length} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(370px, 1fr))", gap: "14px" }}>
+            {result.videos.map((video) => (
+              <AggregateVideoCard
+                key={video.bvid}
+                video={video}
+                selected={selectedKeys.has(`video:${video.bvid}`)}
+                onToggleSelection={() => toggleSelection(`video:${video.bvid}`)}
+                onDownload={() => void onDownloadVideo(video)}
+                onOpenBrowser={() => onOpenBrowser(`https://www.bilibili.com/video/${video.bvid}`)}
+                onPlay={() => onOpenVideoPlayer({ bvid: video.bvid, title: video.title, pic: video.pic })}
+              />
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      {showBangumi && result.bangumi.length ? (
+        <>
+          <SectionHeader title="番剧结果" count={result.bangumi.length} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "14px" }}>
+            {result.bangumi.map((bangumi) => (
+              <AggregateBangumiCard
+                key={bangumi.season_id}
+                bangumi={bangumi}
+                selected={selectedKeys.has(`bangumi:${bangumi.season_id}`)}
+                onToggleSelection={() => toggleSelection(`bangumi:${bangumi.season_id}`)}
+                onDownload={() => void onDownloadBangumi(bangumi)}
+                onOpenBrowser={() => onOpenBrowser(`https://www.bilibili.com/bangumi/play/ss${bangumi.season_id}`)}
+                onPlay={() => onOpenBangumiPlayer(bangumi)}
+              />
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      {(!showVideos || !result.videos.length) && (!showBangumi || !result.bangumi.length) ? (
+        <div style={{ padding: "52px 0", textAlign: "center", color: "#8b8b9a", fontSize: "14px" }}>该类型暂无结果</div>
+      ) : null}
     </>
   );
 }
 
 function AggregateVideoCard({
   video,
-  onDetail,
+  selected,
+  onToggleSelection,
+  onDownload,
+  onOpenBrowser,
   onPlay,
 }: {
   video: AggregateSearchResult["videos"][number];
-  onDetail: () => void;
+  selected: boolean;
+  onToggleSelection: () => void;
+  onDownload: () => void;
+  onOpenBrowser: () => void;
   onPlay: () => void;
 }) {
   return (
-    <div style={{ borderRadius: "16px", backgroundColor: "#fff", border: "1px solid #ececf2", padding: "16px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "156px minmax(0, 1fr)", gap: "14px", alignItems: "start" }}>
+    <div style={{ borderRadius: "14px", backgroundColor: "#fff", border: selected ? "1.5px solid #6366f1" : "1px solid #ececf2", padding: "13px 14px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "148px minmax(0, 1fr)", gap: "13px", alignItems: "start" }}>
         <div
           onClick={onPlay}
           style={{ aspectRatio: "16 / 9", borderRadius: "10px", overflow: "hidden", backgroundColor: "#f0f0f5", position: "relative", cursor: "pointer" }}
@@ -792,6 +898,14 @@ function AggregateVideoCard({
           >
             {video.duration || "--:--"}
           </span>
+          <input
+            type="checkbox"
+            checked={selected}
+            onClick={(event) => event.stopPropagation()}
+            onChange={onToggleSelection}
+            aria-label={`选择视频 ${video.title}`}
+            style={{ position: "absolute", top: "8px", left: "8px", width: "17px", height: "17px", accentColor: "#6366f1", cursor: "pointer" }}
+          />
         </div>
         <div style={{ minWidth: 0 }}>
           <h3
@@ -813,25 +927,26 @@ function AggregateVideoCard({
             <span style={{ fontSize: "12.5px", color: "#505065", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {video.author || "未知 UP"}
             </span>
+            <span style={{ fontSize: "12px", color: "#999aaa", whiteSpace: "nowrap" }}>{formatDateTime(video.pubdate)}</span>
           </div>
-          <div style={{ marginTop: "8px", display: "flex", alignItems: "center", gap: "8px", color: "#8b8b9a", flexWrap: "wrap" }}>
-            <MetaPill icon={<Eye style={{ width: 13, height: 13 }} />} text={formatNumber(video.play)} />
-            <MetaPill icon={<MessageCircle style={{ width: 13, height: 13 }} />} text={formatNumber(video.danmaku || 0)} />
-            <MetaPill icon={<Heart style={{ width: 13, height: 13 }} />} text={formatNumber(video.favorite || 0)} />
-            <MetaPill icon={<Calendar style={{ width: 13, height: 13 }} />} text={formatDateTime(video.pubdate)} />
-          </div>
-          <p style={{ marginTop: "8px", fontSize: "13px", color: "#6b7280", lineHeight: 1.6 }}>
-            {video.description || "暂无简介"}
-          </p>
         </div>
       </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "14px", flexWrap: "wrap" }}>
-        <PrimaryActionButton onClick={onPlay} icon={<Play style={{ width: 15, height: 15 }} />}>
+      <div style={{ marginTop: "11px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "11px", color: "#7a7a8c", fontSize: "12.5px", flexWrap: "wrap" }}>
+        <MetaPill icon={<Eye style={{ width: 13, height: 13 }} />} text={`播放 ${formatNumber(video.play)}`} />
+        <MetaPill icon={<ThumbsUp style={{ width: 13, height: 13 }} />} text={`点赞 ${formatNumber(video.like || 0)}`} />
+        <MetaPill icon={<Star style={{ width: 13, height: 13 }} />} text={`收藏 ${formatNumber(video.favorite || 0)}`} />
+        <MetaPill icon={<MessageCircle style={{ width: 13, height: 13 }} />} text={`评论 ${formatNumber(video.reply || 0)}`} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "8px", marginTop: "13px" }}>
+        <CardActionButton primary onClick={onPlay} icon={<Play style={{ width: 14, height: 14 }} />}>
           播放
-        </PrimaryActionButton>
-        <GhostActionButton onClick={onDetail} icon={<Search style={{ width: 15, height: 15 }} />}>
-          查看详情
-        </GhostActionButton>
+        </CardActionButton>
+        <CardActionButton onClick={onDownload} icon={<Download style={{ width: 14, height: 14 }} />}>
+          下载
+        </CardActionButton>
+        <CardActionButton onClick={onOpenBrowser} icon={<ExternalLink style={{ width: 14, height: 14 }} />}>
+          浏览器
+        </CardActionButton>
       </div>
     </div>
   );
@@ -839,23 +954,37 @@ function AggregateVideoCard({
 
 function AggregateBangumiCard({
   bangumi,
-  onDetail,
+  selected,
+  onToggleSelection,
+  onDownload,
+  onOpenBrowser,
   onPlay,
 }: {
   bangumi: AggregateSearchResult["bangumi"][number];
-  onDetail: () => void;
+  selected: boolean;
+  onToggleSelection: () => void;
+  onDownload: () => void;
+  onOpenBrowser: () => void;
   onPlay: () => void;
 }) {
   return (
-    <div style={{ borderRadius: "16px", backgroundColor: "#fff", border: "1px solid #ececf2", padding: "16px" }}>
+    <div style={{ borderRadius: "14px", backgroundColor: "#fff", border: selected ? "1.5px solid #6366f1" : "1px solid #ececf2", padding: "13px 14px" }}>
       <div style={{ display: "grid", gridTemplateColumns: "116px minmax(0, 1fr)", gap: "14px", alignItems: "start" }}>
-        <div style={{ aspectRatio: "3 / 4", borderRadius: "10px", overflow: "hidden", backgroundColor: "#f0f0f5" }}>
+        <div onClick={onPlay} style={{ aspectRatio: "3 / 4", borderRadius: "10px", overflow: "hidden", backgroundColor: "#f0f0f5", cursor: "pointer", position: "relative" }}>
           <img
             src={formatBiliImageUrl(bangumi.cover, "@308w_410h_1c.webp")}
             alt={bangumi.title}
             loading="lazy"
             referrerPolicy="no-referrer"
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+          <input
+            type="checkbox"
+            checked={selected}
+            onClick={(event) => event.stopPropagation()}
+            onChange={onToggleSelection}
+            aria-label={`选择番剧 ${bangumi.title}`}
+            style={{ position: "absolute", top: "8px", left: "8px", width: "17px", height: "17px", accentColor: "#6366f1", cursor: "pointer" }}
           />
         </div>
         <div style={{ minWidth: 0 }}>
@@ -864,18 +993,18 @@ function AggregateBangumiCard({
             <Calendar style={{ width: 13, height: 13 }} />
             {bangumi.index_show || "番剧"}
           </div>
-          <p style={{ marginTop: "8px", fontSize: "13px", color: "#6b7280", lineHeight: 1.6 }}>
-            {bangumi.description || "暂无简介"}
-          </p>
         </div>
       </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "14px", flexWrap: "wrap" }}>
-        <PrimaryActionButton onClick={onPlay} icon={<Play style={{ width: 15, height: 15 }} />}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "8px", marginTop: "13px" }}>
+        <CardActionButton primary onClick={onPlay} icon={<Play style={{ width: 14, height: 14 }} />}>
           播放
-        </PrimaryActionButton>
-        <GhostActionButton onClick={onDetail} icon={<Search style={{ width: 15, height: 15 }} />}>
-          查看详情
-        </GhostActionButton>
+        </CardActionButton>
+        <CardActionButton onClick={onDownload} icon={<Download style={{ width: 14, height: 14 }} />}>
+          下载
+        </CardActionButton>
+        <CardActionButton onClick={onOpenBrowser} icon={<ExternalLink style={{ width: 14, height: 14 }} />}>
+          浏览器
+        </CardActionButton>
       </div>
     </div>
   );
@@ -956,44 +1085,45 @@ function SectionHeader({ title, count }: { title: string; count: number }) {
   );
 }
 
-function InfoPanel({
-  cover,
-  title,
-  lines,
+function CardActionButton({
+  children,
+  icon,
+  onClick,
+  primary = false,
 }: {
-  cover: string;
-  title: string;
-  lines: Array<[string, string]>;
+  children: React.ReactNode;
+  icon: React.ReactNode;
+  onClick: () => void;
+  primary?: boolean;
 }) {
   return (
-    <div style={{ borderRadius: "16px", backgroundColor: "#fff", border: "1px solid #ececf2", padding: "20px" }}>
-      <div
-        style={{
-          width: "100%",
-          aspectRatio: "16/9",
-          borderRadius: "10px",
-          overflow: "hidden",
-          backgroundColor: "#f0f0f5",
-          marginBottom: "18px",
-        }}
-      >
-        <img
-          src={formatBiliImageUrl(cover, "@672w_378h_1c.webp")}
-          alt={title}
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-        {lines.map(([label, value]) => (
-          <div key={label}>
-            <div style={{ fontSize: "12.5px", fontWeight: 600, color: "#7a7a8c", marginBottom: "4px" }}>{label}</div>
-            <div style={{ color: "#1a1a2e", fontWeight: 500, fontSize: "13.5px", wordBreak: "break-all" }}>{value || "-"}</div>
-          </div>
-        ))}
-      </div>
-    </div>
+    <motion.button
+      type="button"
+      onClick={onClick}
+      whileHover={{ scale: 1.03 }}
+      whileTap={{ scale: 0.97 }}
+      style={{
+        minWidth: 0,
+        height: "36px",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "5px",
+        padding: "0 7px",
+        borderRadius: "9px",
+        border: primary ? "1px solid #6366f1" : "1px solid #dddde8",
+        backgroundColor: primary ? "#6366f1" : "#fff",
+        color: primary ? "#fff" : "#505065",
+        fontSize: "12.5px",
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {icon}
+      {children}
+    </motion.button>
   );
 }
 
@@ -1088,16 +1218,19 @@ function GhostActionButton({
   children,
   icon,
   onClick,
+  disabled = false,
 }: {
   children: React.ReactNode;
   icon: React.ReactNode;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <motion.button
       onClick={onClick}
-      whileHover={{ scale: 1.04 }}
-      whileTap={{ scale: 0.96 }}
+      disabled={disabled}
+      whileHover={disabled ? {} : { scale: 1.04 }}
+      whileTap={disabled ? {} : { scale: 0.96 }}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -1106,11 +1239,12 @@ function GhostActionButton({
         padding: "9px 18px",
         borderRadius: "10px",
         backgroundColor: "#fff",
-        color: "#505065",
+        color: disabled ? "#a5a5b2" : "#505065",
         fontSize: "14px",
         fontWeight: 600,
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
         border: "1.5px solid #d8d8e4",
+        opacity: disabled ? 0.7 : 1,
         fontFamily: "inherit",
       }}
     >

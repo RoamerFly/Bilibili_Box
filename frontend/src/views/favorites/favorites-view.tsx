@@ -14,6 +14,7 @@ import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
 import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
 import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
+import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { useAppStore } from "@/stores/app-store";
 
 interface FavFolder {
@@ -62,6 +63,7 @@ function isLoggedIn(user: SavedUserInfo | null | undefined) {
 }
 
 export function FavoritesView() {
+  const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
   const cardScale = useAppStore((s) => Number(s.config?.card_scale ?? 1));
   const pageSize = Math.max(4, Number(useAppStore((s) => s.config?.card_page_size ?? 12)));
@@ -174,8 +176,10 @@ export function FavoritesView() {
 
   const handleDownload = async (media: FavMedia) => {
     try {
+      const downloadQuality = await requestDownloadQuality();
+      if (!downloadQuality) return;
       const taskIds = await invoke<string[]>("create_download_task", {
-        params: { bvid: media.bvid, cid: media.cid, title: media.title, cids: [media.cid] },
+        params: { bvid: media.bvid, cid: media.cid, title: media.title, cids: [media.cid], download_quality: downloadQuality },
       });
       notifyDownloadQueued(taskIds, media.title);
     } catch (err) {
@@ -229,6 +233,8 @@ export function FavoritesView() {
     }
 
     try {
+      const downloadQuality = await requestDownloadQuality();
+      if (!downloadQuality) return;
       const taskGroups = await Promise.all(
         selected.map((media) =>
           invoke<string[]>("create_download_task", {
@@ -237,6 +243,7 @@ export function FavoritesView() {
               cid: media.cid,
               title: media.title,
               cids: [media.cid],
+              download_quality: downloadQuality,
             },
           })
         )
@@ -482,6 +489,7 @@ export function FavoritesView() {
           </section>
         </div>
       )}
+      {downloadQualityDialog}
     </div>
   );
 }

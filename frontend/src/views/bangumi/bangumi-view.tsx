@@ -17,6 +17,7 @@ import { invoke } from "@/lib/api";
 import { formatBiliImageUrl } from "@/lib/utils";
 import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
+import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { CardViewMode, useAppStore } from "@/stores/app-store";
 
 type FollowStatus = "following" | "finished" | "paused";
@@ -75,6 +76,7 @@ function isLoggedIn(userInfo: UserInfoData) {
 }
 
 export function BangumiView() {
+  const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
   const viewMode = useAppStore((s) => s.cardViewModes.bangumi ?? "grid");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
@@ -169,6 +171,8 @@ export function BangumiView() {
   const handleDownload = useCallback(
     async (seasonId: number, title: string) => {
       try {
+        const downloadQuality = await requestDownloadQuality();
+        if (!downloadQuality) return;
         const bangumiInfo = await invoke<{
           season_id: number;
           title: string;
@@ -193,6 +197,7 @@ export function BangumiView() {
                 cid: ep.cid,
                 title: `${title} - ${ep.long_title || ep.title}`.trim(),
                 cids: [ep.cid],
+                download_quality: downloadQuality,
               },
             })
           )
@@ -202,7 +207,7 @@ export function BangumiView() {
         setError(String(err));
       }
     },
-    []
+    [requestDownloadQuality]
   );
 
   const handleRefresh = async () => {
@@ -461,6 +466,7 @@ export function BangumiView() {
           </aside>
         </div>
       )}
+      {downloadQualityDialog}
     </div>
   );
 }

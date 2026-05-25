@@ -12,6 +12,7 @@ import {
   Sun,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { DOWNLOAD_QUALITY_OPTIONS } from "@/components/download-quality-dialog";
 import { invoke } from "@/lib/api";
 import { useAppStore } from "@/stores/app-store";
 
@@ -26,18 +27,10 @@ interface BackendConfig {
   cookie?: string;
   theme: string;
   download_quality: string;
+  prompt_download_quality: boolean;
   task_concurrency: number;
   [key: string]: unknown;
 }
-
-const QUALITY_OPTIONS = [
-  { value: "4k", label: "4K" },
-  { value: "1080p_plus", label: "1080P+" },
-  { value: "1080p", label: "1080P" },
-  { value: "720p", label: "720P" },
-  { value: "480p", label: "480P" },
-  { value: "360p", label: "360P" },
-];
 
 export function SettingsView() {
   const userInfo = useAppStore((s) => s.userInfo);
@@ -218,20 +211,37 @@ export function SettingsView() {
         <SettingRow
           icon={<MonitorPlay style={{ width: 21, height: 21, color: "#2563eb" }} />}
           iconBgColor="#eff6ff"
-          title="下载清晰度"
-          description="选择默认视频清晰度优先级"
+          title="下载画质策略"
+          description="可在每次下载时选择画质，或直接使用默认画质"
           control={
-            <select
-              value={backendConfig.download_quality}
-              onChange={(e) => void saveConfig({ download_quality: e.target.value })}
-              style={selectStyle}
-            >
-              {QUALITY_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <div style={{ display: "flex", alignItems: "center", padding: "3px", gap: "2px", backgroundColor: "#f3f3f8", borderRadius: "10px" }}>
+                <ModeButton
+                  active={backendConfig.prompt_download_quality}
+                  onClick={() => void saveConfig({ prompt_download_quality: true })}
+                >
+                  每次询问
+                </ModeButton>
+                <ModeButton
+                  active={!backendConfig.prompt_download_quality}
+                  onClick={() => void saveConfig({ prompt_download_quality: false })}
+                >
+                  使用默认
+                </ModeButton>
+              </div>
+              <select
+                aria-label="默认下载清晰度"
+                value={backendConfig.download_quality}
+                onChange={(e) => void saveConfig({ download_quality: e.target.value })}
+                style={{ ...selectStyle, opacity: backendConfig.prompt_download_quality ? 0.72 : 1 }}
+              >
+                {DOWNLOAD_QUALITY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    默认 {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           }
         />
 
@@ -467,6 +477,36 @@ function ToggleSwitch({
           boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
         }}
       />
+    </button>
+  );
+}
+
+function ModeButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        height: "34px",
+        padding: "0 12px",
+        borderRadius: "8px",
+        border: active ? "1px solid #6366f1" : "1px solid transparent",
+        backgroundColor: active ? "#fff" : "transparent",
+        color: active ? "#6366f1" : "#505065",
+        fontSize: "13px",
+        fontWeight: active ? 600 : 500,
+        cursor: "pointer",
+      }}
+    >
+      {children}
     </button>
   );
 }

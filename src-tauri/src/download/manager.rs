@@ -39,6 +39,8 @@ pub struct DownloadProgress {
     pub cover: String,
     #[serde(default)]
     pub duration: i64,
+    #[serde(default = "default_quality_label")]
+    pub quality: String,
     pub state: DownloadTaskState,
     #[serde(default)]
     pub stage: DownloadStage,
@@ -151,16 +153,25 @@ impl DownloadManager {
         // 获取视频播放地址
         let bili_client = self.app.state::<Arc<crate::api::BiliClient>>();
         let config = self.app.state::<Arc<RwLock<Config>>>();
-        let config = config.read().clone();
+        let mut config = config.read().clone();
+        if let Some(download_quality) = params
+            .download_quality
+            .as_deref()
+            .map(str::trim)
+            .filter(|quality| !quality.is_empty())
+        {
+            config.download_quality = download_quality.to_string();
+        }
         let video_info = bili_client.get_normal_info(&params.bvid).await?;
 
         for cid in params.cids.iter() {
             let play_info = bili_client.get_normal_url(&params.bvid, *cid).await?;
-            let video_url = if config.download_video {
+            let selected_video = if config.download_video {
                 Self::select_video_url(&play_info.video_list, &config)
             } else {
                 None
             };
+            let video_url = selected_video.as_ref().map(|(url, _)| url.clone());
             let audio_url = if config.download_audio {
                 Self::select_audio_url(&play_info.audio_list, &config)
             } else {
@@ -188,6 +199,10 @@ impl DownloadManager {
                 duration: page_info
                     .map(|page| page.duration as i64)
                     .unwrap_or(video_info.duration as i64),
+                quality: selected_video
+                    .as_ref()
+                    .map(|(_, quality)| quality.clone())
+                    .unwrap_or_else(default_quality_label),
                 state: DownloadTaskState::Pending,
                 stage: DownloadStage::Pending,
                 progress: 0.0,
@@ -1439,23 +1454,28 @@ impl DownloadManager {
     fn select_video_url(
         videos: &[crate::api::video::DashVideo],
         config: &Config,
-    ) -> Option<String> {
+    ) -> Option<(String, String)> {
         for quality in &Self::preferred_video_qualities(config) {
             let quality_id = *quality as i64;
             for codec in &config.codec_type_priority {
                 if let Some(video) = videos.iter().find(|video| {
                     video.id == quality_id && Self::codec_matches(&video.codecs, *codec)
                 }) {
-                    return Some(video.base_url.clone());
+                    return Some((video.base_url.clone(), quality.name().to_string()));
                 }
             }
 
             if let Some(video) = videos.iter().find(|video| video.id == quality_id) {
-                return Some(video.base_url.clone());
+                return Some((video.base_url.clone(), quality.name().to_string()));
             }
         }
 
-        videos.first().map(|video| video.base_url.clone())
+        videos.first().map(|video| {
+            (
+                video.base_url.clone(),
+                quality_name_from_id(video.id).to_string(),
+            )
+        })
     }
 
     fn select_audio_url(
@@ -1482,6 +1502,29 @@ impl DownloadManager {
     }
 }
 
+fn default_quality_label() -> String {
+    "自动".to_string()
+}
+
+fn quality_name_from_id(id: i64) -> &'static str {
+    match id {
+        127 => "8K",
+        126 => "杜比视界",
+        125 => "HDR",
+        120 => "4K",
+        116 => "1080P60",
+        112 => "1080P+",
+        100 => "AI修复",
+        80 => "1080P",
+        74 => "720P60",
+        64 => "720P",
+        32 => "480P",
+        16 => "360P",
+        6 => "240P",
+        _ => "自动",
+    }
+}
+
 /// 创建下载任务参数
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateDownloadTaskParams {
@@ -1489,4 +1532,6 @@ pub struct CreateDownloadTaskParams {
     pub cid: i64,
     pub title: String,
     pub cids: Vec<i64>,
+    #[serde(default)]
+    pub download_quality: Option<String>,
 }

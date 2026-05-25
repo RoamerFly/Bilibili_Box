@@ -14,6 +14,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { invoke } from "@/lib/api";
 import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
+import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
 import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
@@ -140,6 +141,7 @@ function getProgressLabel(progress: number, duration: number) {
 }
 
 export function HistoryView() {
+  const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
   const viewMode = useAppStore((s) => s.cardViewModes.history ?? "list");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
@@ -203,8 +205,10 @@ export function HistoryView() {
 
   const handleDownload = async (bvid: string, cid: number, title: string) => {
     try {
+      const downloadQuality = await requestDownloadQuality();
+      if (!downloadQuality) return;
       const taskIds = await invoke<string[]>("create_download_task", {
-        params: { bvid, cid, title, cids: [cid] },
+        params: { bvid, cid, title, cids: [cid], download_quality: downloadQuality },
       });
       notifyDownloadQueued(taskIds, title);
     } catch (err) {
@@ -424,6 +428,7 @@ export function HistoryView() {
           </div>
         </>
       )}
+      {downloadQualityDialog}
     </div>
   );
 }

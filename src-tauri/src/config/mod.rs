@@ -116,6 +116,7 @@ pub struct Config {
     pub cookie: String,
     pub theme: String,
     pub download_quality: String,
+    pub prompt_download_quality: bool,
     pub video_quality_priority: Vec<VideoQuality>,
     pub codec_type_priority: Vec<CodecType>,
     pub audio_quality_priority: Vec<AudioQuality>,
@@ -248,6 +249,7 @@ impl Config {
             cookie: String::new(),
             theme: "system".to_string(),
             download_quality: "1080p".to_string(),
+            prompt_download_quality: true,
             video_quality_priority: vec![
                 VideoQuality::Video8K,
                 VideoQuality::VideoDolby,

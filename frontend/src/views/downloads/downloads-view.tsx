@@ -47,7 +47,7 @@ function transformToUITask(progress: DownloadProgress): DownloadTask {
     task_id: progress.task_id,
     title: progress.title,
     cover: progress.cover || "",
-    quality: "自动",
+    quality: progress.quality || "自动",
     format: "MP4",
     state: progress.state,
     stage: progress.stage,

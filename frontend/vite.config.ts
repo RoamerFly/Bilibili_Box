@@ -40,6 +40,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          if (id.includes("node_modules/dashjs") || id.includes("node_modules/@svta/")) {
+            return "player-dash";
+          }
           return id.includes("node_modules") ? "vendor" : undefined;
         },
       },

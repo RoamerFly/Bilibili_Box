@@ -85,7 +85,27 @@ export interface SearchPageState {
   filters: SearchFilters;
   lastAggregateInput: string;
   result: SearchResponse | null;
-  aggregateSnapshot: Extract<SearchResponse, { type: "Aggregate" }> | null;
+}
+
+export interface RecommendPageVideo {
+  bvid: string;
+  cid: number;
+  title: string;
+  cover: string;
+  duration: string;
+  author: string;
+  views: string;
+  likes: string;
+}
+
+export interface RecommendPageState {
+  activeCategory: string;
+  searchQuery: string;
+  videos: RecommendPageVideo[];
+  sortMode: "default" | "duration_desc" | "likes_desc";
+  currentPage: number;
+  loadedCategory: string | null;
+  batchIndexes: Record<string, number>;
 }
 
 const defaultSearchFilters: SearchFilters = {
@@ -99,7 +119,16 @@ const defaultSearchPageState: SearchPageState = {
   filters: defaultSearchFilters,
   lastAggregateInput: "",
   result: null,
-  aggregateSnapshot: null,
+};
+
+const defaultRecommendPageState: RecommendPageState = {
+  activeCategory: "全部",
+  searchQuery: "",
+  videos: [],
+  sortMode: "default",
+  currentPage: 1,
+  loadedCategory: null,
+  batchIndexes: { 全部: 1 },
 };
 
 interface AppState {
@@ -114,6 +143,10 @@ interface AppState {
   searchPageState: SearchPageState;
   setSearchPageState: (state: Partial<SearchPageState>) => void;
   resetSearchPageState: () => void;
+
+  recommendPageState: RecommendPageState;
+  setRecommendPageState: (state: Partial<RecommendPageState>) => void;
+  resetRecommendPageState: () => void;
 
   cardViewModes: Partial<Record<CardViewModeKey, CardViewMode>>;
   setCardViewMode: (key: CardViewModeKey, mode: CardViewMode) => void;
@@ -171,6 +204,16 @@ export const useAppStore = create<AppState>()(
           },
         })),
       resetSearchPageState: () => set({ searchPageState: defaultSearchPageState }),
+
+      recommendPageState: defaultRecommendPageState,
+      setRecommendPageState: (nextRecommendState) =>
+        set((state) => ({
+          recommendPageState: {
+            ...state.recommendPageState,
+            ...nextRecommendState,
+          },
+        })),
+      resetRecommendPageState: () => set({ recommendPageState: defaultRecommendPageState }),
 
       cardViewModes: {
         favorites: "grid",

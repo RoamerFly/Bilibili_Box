@@ -41,14 +41,21 @@ pub struct OwnerInfo {
     pub face: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VideoStat {
+    #[serde(default)]
     pub view: i64,
+    #[serde(default)]
     pub danmaku: i64,
+    #[serde(default)]
     pub reply: i64,
+    #[serde(default)]
     pub favorite: i64,
+    #[serde(default)]
     pub coin: i64,
+    #[serde(default)]
     pub share: i64,
+    #[serde(default)]
     pub like: i64,
 }
 
@@ -102,6 +109,7 @@ pub struct DashVideo {
     pub width: i64,
     pub height: i64,
     pub frame_rate: String,
+    pub segment_base: Option<DashSegmentBase>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +120,13 @@ pub struct DashAudio {
     pub bandwidth: u64,
     pub mime_type: String,
     pub codecs: String,
+    pub segment_base: Option<DashSegmentBase>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashSegmentBase {
+    pub initialization: String,
+    pub index_range: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,12 +136,15 @@ pub struct PlayUrlInfo {
     pub video_list: Vec<DashVideo>,
     pub audio_list: Vec<DashAudio>,
     pub dash_id: i64,
+    pub duration_seconds: u64,
+    pub min_buffer_time: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayableUrlInfo {
     pub url: Option<String>,
     pub quality: i64,
+    pub accept_quality: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,7 +182,9 @@ pub struct KeywordVideoResult {
     pub pubdate: i64,
     pub play: i64,
     pub danmaku: i64,
+    pub like: i64,
     pub favorite: i64,
+    pub reply: i64,
     pub description: String,
 }
 
@@ -266,6 +286,7 @@ impl super::BiliClient {
                                 .and_then(|value| value.as_str())
                                 .unwrap_or("30")
                                 .to_string(),
+                            segment_base: parse_dash_segment_base(item),
                         })
                     })
                     .collect()
@@ -292,6 +313,7 @@ impl super::BiliClient {
                             bandwidth: item.get("bandwidth")?.as_u64()?,
                             mime_type: item.get("mimeType")?.as_str()?.to_string(),
                             codecs: item.get("codecs")?.as_str()?.to_string(),
+                            segment_base: parse_dash_segment_base(item),
                         })
                     })
                     .collect()
@@ -311,19 +333,34 @@ impl super::BiliClient {
             video_list,
             audio_list,
             dash_id: cid,
+            duration_seconds: dash
+                .get("duration")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0),
+            min_buffer_time: dash
+                .get("minBufferTime")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(1.5),
         })
     }
 
-    pub async fn get_playable_url(&self, bvid: &str, cid: i64) -> Result<PlayableUrlInfo, String> {
+    pub async fn get_playable_url(
+        &self,
+        bvid: &str,
+        cid: i64,
+        requested_quality: Option<i64>,
+    ) -> Result<PlayableUrlInfo, String> {
+        let requested_quality = requested_quality.unwrap_or(80);
         log::info!(
-            "[Player] Requesting playable URL: bvid={}, cid={}",
+            "[Player] Requesting playable URL: bvid={}, cid={}, requested_quality={}",
             bvid,
-            cid
+            cid,
+            requested_quality
         );
         let mut params = HashMap::from([
             ("bvid".to_string(), bvid.to_string()),
             ("cid".to_string(), cid.to_string()),
-            ("qn".to_string(), "80".to_string()),
+            ("qn".to_string(), requested_quality.to_string()),
             ("fnval".to_string(), "0".to_string()),
             ("fourk".to_string(), "1".to_string()),
         ]);
@@ -394,6 +431,11 @@ impl super::BiliClient {
         Ok(PlayableUrlInfo {
             url: (!first_durl.is_empty()).then(|| first_durl.to_string()),
             quality,
+            accept_quality: data
+                .get("accept_quality")
+                .and_then(|value| value.as_array())
+                .map(|values| values.iter().filter_map(|value| value.as_i64()).collect())
+                .unwrap_or_default(),
         })
     }
 
@@ -584,6 +626,67 @@ impl super::BiliClient {
 
         let list = data.get("list").ok_or("响应中没有 list 字段")?;
         serde_json::from_value(list.clone()).map_err(|e| format!("解析视频列表失败: {}", e))
+    }
+
+    pub async fn get_recommended_videos(
+        &self,
+        fresh_index: i64,
+        page_size: i64,
+    ) -> Result<Vec<VideoInfo>, String> {
+        let fresh_index = fresh_index.max(1);
+        let mut params = HashMap::from([
+            ("ps".to_string(), page_size.clamp(1, 30).to_string()),
+            ("fresh_type".to_string(), "3".to_string()),
+            ("version".to_string(), "1".to_string()),
+            ("fresh_idx".to_string(), fresh_index.to_string()),
+            ("fresh_idx_1h".to_string(), fresh_index.to_string()),
+        ]);
+        self.sign_params(&mut params).await?;
+
+        let endpoint = "https://api.bilibili.com/x/web-interface/wbi/index/top/feed/rcmd";
+        let data = self
+            .request_bili_value(
+                self.api_client()
+                    .get(endpoint)
+                    .query(&params)
+                    .header("cookie", self.get_cookie_for_url(endpoint)),
+            )
+            .await?;
+
+        parse_video_info_list(
+            data.get("item").ok_or("首页推荐响应中没有 item 字段")?,
+            "首页推荐",
+        )
+    }
+
+    pub async fn get_region_videos(
+        &self,
+        rid: i64,
+        page: i64,
+        page_size: i64,
+    ) -> Result<Vec<VideoInfo>, String> {
+        if rid <= 0 {
+            return Err("无效的视频分区编号".to_string());
+        }
+
+        let endpoint = "https://api.bilibili.com/x/web-interface/dynamic/region";
+        let data = self
+            .request_bili_value(
+                self.api_client()
+                    .get(endpoint)
+                    .query(&[
+                        ("rid", rid),
+                        ("pn", page.max(1)),
+                        ("ps", page_size.clamp(1, 100)),
+                    ])
+                    .header("cookie", self.get_cookie_for_url(endpoint)),
+            )
+            .await?;
+
+        parse_video_info_list(
+            data.get("archives").ok_or("分区响应中没有 archives 字段")?,
+            "分区视频",
+        )
     }
 
     async fn request_search_value(&self, request: RequestBuilder) -> Result<Value, String> {
@@ -867,7 +970,9 @@ fn parse_keyword_video_results(data: &Value) -> Vec<KeywordVideoResult> {
                         pubdate: parse_i64_field(item, &["pubdate", "senddate"]),
                         play: parse_i64_field(item, &["play", "view"]),
                         danmaku: parse_i64_field(item, &["video_review", "danmaku"]),
+                        like: parse_i64_field(item, &["like", "likes"]),
                         favorite: parse_i64_field(item, &["favorites", "favorite"]),
+                        reply: parse_i64_field(item, &["review", "reply", "comment"]),
                         description: clean_search_text(
                             item.get("description")
                                 .and_then(|value| value.as_str())
@@ -878,6 +983,42 @@ fn parse_keyword_video_results(data: &Value) -> Vec<KeywordVideoResult> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn parse_dash_segment_base(item: &Value) -> Option<DashSegmentBase> {
+    let segment_base = item
+        .get("SegmentBase")
+        .or_else(|| item.get("segment_base"))?;
+    Some(DashSegmentBase {
+        initialization: segment_base.get("initialization")?.as_str()?.to_string(),
+        index_range: segment_base.get("index_range")?.as_str()?.to_string(),
+    })
+}
+
+fn parse_video_info_list(data: &Value, label: &str) -> Result<Vec<VideoInfo>, String> {
+    let items = data
+        .as_array()
+        .ok_or_else(|| format!("{}响应列表格式错误", label))?;
+
+    items
+        .iter()
+        .filter(|item| {
+            item.get("bvid").and_then(|value| value.as_str()).is_some()
+                && item.get("cid").and_then(|value| value.as_i64()).is_some()
+        })
+        .map(|item| {
+            let mut normalized = item.clone();
+            if normalized.get("aid").is_none() {
+                let aid = normalized.get("id").cloned().unwrap_or_else(|| json!(0));
+                if let Some(object) = normalized.as_object_mut() {
+                    object.insert("aid".to_string(), aid);
+                }
+            }
+
+            serde_json::from_value(normalized)
+                .map_err(|error| format!("解析{}列表失败: {}", label, error))
+        })
+        .collect()
 }
 
 fn parse_keyword_bangumi_results(data: &Value) -> Vec<KeywordBangumiResult> {
