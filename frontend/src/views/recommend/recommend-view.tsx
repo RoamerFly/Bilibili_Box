@@ -14,6 +14,7 @@ import {
 import { invoke } from "@/lib/api";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
+import { loadCachedPageData } from "@/lib/page-cache";
 import { formatBiliImageUrl, formatDuration, formatNumber } from "@/lib/utils";
 import { buildVisiblePages, useResponsivePageSize } from "@/hooks/use-responsive-page-size";
 import { useAppStore } from "@/stores/app-store";
@@ -152,9 +153,13 @@ export function RecommendView() {
     }
     setError("");
     try {
-      const response = category.rid === null
-        ? await invoke<BackendVideo[]>("get_recommended_videos", { freshIndex: batch, pageSize: 30 })
-        : await invoke<BackendVideo[]>("get_region_videos", { rid: category.rid, page: batch, pageSize: 60 });
+      const response = await loadCachedPageData(
+        `recommend:${category.label}`,
+        () => category.rid === null
+          ? invoke<BackendVideo[]>("get_recommended_videos", { freshIndex: batch, pageSize: 30 })
+          : invoke<BackendVideo[]>("get_region_videos", { rid: category.rid, page: batch, pageSize: 60 }),
+        advanceBatch
+      );
       if (requestId !== requestIdRef.current) return;
       const deduped = Array.from(new Map(response.map((item) => [item.bvid, item])).values());
       setRecommendPageState({

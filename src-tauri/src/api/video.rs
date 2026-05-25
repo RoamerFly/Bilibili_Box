@@ -293,32 +293,17 @@ impl super::BiliClient {
             })
             .unwrap_or_default();
 
-        let audio_list = dash
-            .get("audio")
-            .and_then(|value| value.as_array())
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| {
-                        Some(DashAudio {
-                            id: item.get("id")?.as_i64()?,
-                            base_url: item.get("baseUrl")?.as_str()?.to_string(),
-                            backup_url: item.get("backupUrl").and_then(|backup| {
-                                backup.as_array().map(|urls| {
-                                    urls.iter()
-                                        .filter_map(|url| url.as_str().map(String::from))
-                                        .collect()
-                                })
-                            }),
-                            bandwidth: item.get("bandwidth")?.as_u64()?,
-                            mime_type: item.get("mimeType")?.as_str()?.to_string(),
-                            codecs: item.get("codecs")?.as_str()?.to_string(),
-                            segment_base: parse_dash_segment_base(item),
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut audio_list = parse_dash_audio_array(dash.get("audio"));
+        audio_list.extend(parse_dash_audio_array(
+            dash.get("dolby").and_then(|value| value.get("audio")),
+        ));
+        if let Some(audio) = dash
+            .get("flac")
+            .and_then(|value| value.get("audio"))
+            .and_then(parse_dash_audio)
+        {
+            audio_list.push(audio);
+        }
 
         Ok(PlayUrlInfo {
             quality: data
@@ -992,6 +977,42 @@ fn parse_dash_segment_base(item: &Value) -> Option<DashSegmentBase> {
     Some(DashSegmentBase {
         initialization: segment_base.get("initialization")?.as_str()?.to_string(),
         index_range: segment_base.get("index_range")?.as_str()?.to_string(),
+    })
+}
+
+fn parse_dash_audio_array(value: Option<&Value>) -> Vec<DashAudio> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(parse_dash_audio).collect())
+        .unwrap_or_default()
+}
+
+fn parse_dash_audio(item: &Value) -> Option<DashAudio> {
+    Some(DashAudio {
+        id: item.get("id")?.as_i64()?,
+        base_url: item
+            .get("baseUrl")
+            .or_else(|| item.get("base_url"))?
+            .as_str()?
+            .to_string(),
+        backup_url: item
+            .get("backupUrl")
+            .or_else(|| item.get("backup_url"))
+            .and_then(|backup| {
+                backup.as_array().map(|urls| {
+                    urls.iter()
+                        .filter_map(|url| url.as_str().map(String::from))
+                        .collect()
+                })
+            }),
+        bandwidth: item.get("bandwidth")?.as_u64()?,
+        mime_type: item
+            .get("mimeType")
+            .or_else(|| item.get("mime_type"))?
+            .as_str()?
+            .to_string(),
+        codecs: item.get("codecs")?.as_str()?.to_string(),
+        segment_base: parse_dash_segment_base(item),
     })
 }
 

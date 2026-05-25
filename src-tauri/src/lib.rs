@@ -110,6 +110,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
             commands::save_config,
+            commands::reset_config,
+            commands::get_page_cache,
+            commands::save_page_cache,
             commands::generate_qrcode,
             commands::get_qrcode_status,
             commands::get_user_info,

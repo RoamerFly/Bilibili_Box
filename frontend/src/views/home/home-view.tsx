@@ -5,17 +5,21 @@ import {
   ChevronRight,
   Clock,
   Download,
+  Flame,
   FolderOpen,
   MoreVertical,
   Music,
   PackageCheck,
   Pause,
   PlayCircle,
+  RefreshCw,
   Search,
   Sparkles,
   Star,
+  Tv,
 } from "lucide-react";
 import { invoke } from "@/lib/api";
+import { loadCachedPageData } from "@/lib/page-cache";
 import { formatBiliImageUrl, formatFileSize, formatSpeed } from "@/lib/utils";
 import { useAppStore, useDownloadStore, type DownloadTask } from "@/stores/app-store";
 import appIcon from "@/assets/app-icon.png";
@@ -49,6 +53,8 @@ interface HomeStats {
   history: string;
 }
 
+type HomeRemoteStats = Omit<HomeStats, "downloads">;
+
 function isLoggedIn(userInfo: UserInfo) {
   return Boolean(userInfo.isLogin ?? userInfo.is_login);
 }
@@ -64,53 +70,63 @@ export function HomeView() {
     watchLater: "--",
     history: "--",
   });
+  const [refreshingStats, setRefreshingStats] = useState(false);
   const downloadTasks = useMemo(
     () => Object.values(taskMap).sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0)),
     [taskMap]
   );
 
-  const fetchHomeData = useCallback(async () => {
+  const fetchHomeData = useCallback(async (forceRefresh = false) => {
     try {
       const totalDownloads = await invoke<number>("get_download_task_count").catch(() => 0);
+      const remoteStats = await loadCachedPageData<HomeRemoteStats>(
+        "home:remote-stats",
+        async () => {
+          let favorites = "--";
+          let watchLaterValue = "--";
+          let historyValue = "--";
 
-      let favCount = "--";
-      let watchLaterCount = "--";
-      let historyCount = "--";
-
-      try {
-        const config = await invoke<{ sessdata: string }>("get_config");
-        if (config.sessdata) {
-          const userInfo = await invoke<UserInfo>("get_user_info", { sessdata: config.sessdata });
-          if (isLoggedIn(userInfo) && userInfo.mid) {
-            const [favFolders, watchLater, history] = await Promise.all([
-              invoke<{ count: number }>("get_fav_folders", { uid: userInfo.mid }),
-              invoke<{ count: number }>("get_watch_later_info", { page: 1 }),
-              invoke<{ page: { total: number } }>("get_history_info", {
-                params: {
-                  pn: 1,
-                  keyword: "",
-                  add_time_start: 0,
-                  add_time_end: 0,
-                  arc_max_duration: 0,
-                  arc_min_duration: 0,
-                  device_type: "All",
-                },
-              }),
-            ]);
-            favCount = String(favFolders.count ?? 0);
-            watchLaterCount = String(watchLater.count ?? 0);
-            historyCount = String(history.page?.total ?? 0);
+          try {
+            const config = await invoke<{ sessdata: string }>("get_config");
+            if (config.sessdata) {
+              const userInfo = await invoke<UserInfo>("get_user_info", { sessdata: config.sessdata });
+              if (isLoggedIn(userInfo) && userInfo.mid) {
+                const [favFolders, watchLater, history] = await Promise.all([
+                  invoke<{ count: number }>("get_fav_folders", { uid: userInfo.mid }),
+                  invoke<{ count: number }>("get_watch_later_info", { page: 1 }),
+                  invoke<{ page: { total: number } }>("get_history_info", {
+                    params: {
+                      pn: 1,
+                      keyword: "",
+                      add_time_start: 0,
+                      add_time_end: 0,
+                      arc_max_duration: 0,
+                      arc_min_duration: 0,
+                      device_type: "All",
+                    },
+                  }),
+                ]);
+                favorites = String(favFolders.count ?? 0);
+                watchLaterValue = String(watchLater.count ?? 0);
+                historyValue = String(history.page?.total ?? 0);
+              }
+            }
+          } catch {
+            // Guest mode keeps lightweight placeholders.
           }
-        }
-      } catch {
-        // Guest mode keeps lightweight placeholders.
-      }
+
+          return {
+            favorites,
+            watchLater: watchLaterValue,
+            history: historyValue,
+          };
+        },
+        forceRefresh
+      );
 
       setStats({
         downloads: String(totalDownloads ?? 0),
-        favorites: favCount,
-        watchLater: watchLaterCount,
-        history: historyCount,
+        ...remoteStats,
       });
     } catch (error) {
       console.error("Failed to load home data:", error);
@@ -119,11 +135,16 @@ export function HomeView() {
 
   useEffect(() => {
     void fetchHomeData();
-    const interval = window.setInterval(() => {
-      void fetchHomeData();
-    }, 30000);
-    return () => window.clearInterval(interval);
   }, [fetchHomeData]);
+
+  const handleRefreshStats = async () => {
+    setRefreshingStats(true);
+    try {
+      await fetchHomeData(true);
+    } finally {
+      setRefreshingStats(false);
+    }
+  };
 
   const recentTasks = useMemo(
     () => downloadTasks.filter((task) => task.status === "completed").slice(0, 2),
@@ -144,6 +165,17 @@ export function HomeView() {
     [downloadTasks]
   );
 
+  const handleQueuePanelAction = useCallback(() => {
+    if (activeCount <= 0) {
+      setView("downloads");
+      return;
+    }
+    const activeTaskIds = downloadTasks
+      .filter((task) => task.status === "downloading" || task.status === "pending")
+      .map((task) => task.id);
+    void invoke("pause_download_tasks", { taskIds: activeTaskIds });
+  }, [activeCount, downloadTasks, setView]);
+
   return (
     <motion.div className="bb-home" variants={containerVariants} initial="hidden" animate="show">
       <motion.section className="bb-hero" variants={itemVariants}>
@@ -160,6 +192,30 @@ export function HomeView() {
         <HeroVisual />
       </motion.section>
 
+      <motion.div variants={itemVariants} style={{ display: "flex", justifyContent: "flex-end", marginTop: "18px", marginBottom: "-8px" }}>
+        <button
+          type="button"
+          onClick={() => void handleRefreshStats()}
+          disabled={refreshingStats}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "6px 11px",
+            border: 0,
+            borderRadius: "8px",
+            background: "transparent",
+            color: refreshingStats ? "#a0a0ae" : "#6366f1",
+            cursor: refreshingStats ? "wait" : "pointer",
+            fontSize: "12.5px",
+            fontWeight: 600,
+          }}
+        >
+          <RefreshCw className={refreshingStats ? "animate-spin" : ""} size={14} />
+          刷新概览
+        </button>
+      </motion.div>
+
       <motion.section className="bb-stat-grid" variants={itemVariants}>
         <StatCard
           icon={<Download />}
@@ -167,6 +223,7 @@ export function HomeView() {
           value={stats.downloads}
           note="较昨日 0"
           tone="violet"
+          onClick={() => setView("downloads")}
         />
         <StatCard
           icon={<Star />}
@@ -174,6 +231,7 @@ export function HomeView() {
           value={stats.favorites}
           note={`总收藏 ${stats.favorites} 个`}
           tone="amber"
+          onClick={() => setView("favorites")}
         />
         <StatCard
           icon={<Clock />}
@@ -181,6 +239,7 @@ export function HomeView() {
           value={stats.watchLater}
           note={`未观看 ${stats.watchLater} 个`}
           tone="blue"
+          onClick={() => setView("watchlater")}
         />
         <StatCard
           icon={<PlayCircle />}
@@ -188,6 +247,7 @@ export function HomeView() {
           value={stats.history}
           note={`总记录 ${stats.history} 条`}
           tone="green"
+          onClick={() => setView("history")}
         />
       </motion.section>
 
@@ -202,18 +262,18 @@ export function HomeView() {
             onClick={() => setView("search")}
           />
           <QuickAction
-            icon={<Star />}
-            title="我的收藏"
-            subtitle="查看收藏夹内容"
+            icon={<Flame />}
+            title="推荐视频"
+            subtitle="浏览个性化推荐内容"
             tone="favorite"
-            onClick={() => setView("favorites")}
+            onClick={() => setView("recommend")}
           />
           <QuickAction
-            icon={<Clock />}
-            title="稍后再看"
-            subtitle="管理稍后观看列表"
+            icon={<Tv />}
+            title="追番追剧"
+            subtitle="查看已追番剧更新"
             tone="later"
-            onClick={() => setView("watchlater")}
+            onClick={() => setView("bangumi")}
           />
           <QuickAction
             icon={<Captions />}
@@ -271,7 +331,7 @@ export function HomeView() {
             title="下载队列"
             badge={activeCount}
             action={activeCount > 0 ? "全部暂停" : "查看队列"}
-            onAction={() => setView("downloads")}
+            onAction={handleQueuePanelAction}
           />
           {queueTasks.length > 0 ? (
             <div className="bb-queue-list">
@@ -313,15 +373,17 @@ function StatCard({
   value,
   note,
   tone,
+  onClick,
 }: {
   icon: ReactNode;
   label: string;
   value: string;
   note: string;
   tone: "violet" | "amber" | "blue" | "green";
+  onClick: () => void;
 }) {
   return (
-    <motion.div className={`bb-stat-card bb-stat-${tone}`} whileHover={{ y: -3 }} whileTap={{ scale: 0.985 }}>
+    <motion.button type="button" className={`bb-stat-card bb-stat-${tone}`} onClick={onClick} whileHover={{ y: -3 }} whileTap={{ scale: 0.985 }}>
       <div className="bb-stat-icon">{icon}</div>
       <div className="bb-stat-copy">
         <div className="bb-stat-label">{label}</div>
@@ -329,7 +391,7 @@ function StatCard({
         <div className="bb-stat-note">{note}</div>
       </div>
       <div className="bb-stat-watermark">{icon}</div>
-    </motion.div>
+    </motion.button>
   );
 }
 
@@ -406,7 +468,7 @@ function RecentTaskItem({ task, onPlay }: { task: DownloadTask; onPlay: () => vo
       <div className="bb-recent-copy">
         <strong>{task.filename || "未命名视频"}</strong>
         <span>
-          自动 <i /> MP4 <i /> {formatFileSize(task.totalBytes || task.downloadedBytes || 0)}
+          {task.quality || "自动"} <i /> {task.format || "MP4"} <i /> {formatFileSize(task.totalBytes || task.downloadedBytes || 0)}
         </span>
       </div>
       <span className="bb-task-done">已完成</span>
@@ -461,6 +523,8 @@ function queueStageLabel(task: DownloadTask): string {
       return "正在下载视频分片";
     case "downloading_audio":
       return "正在下载音频分片";
+    case "converting_audio":
+      return "正在转换 MP3";
     case "merging":
       return "正在合并";
     case "paused":

@@ -48,7 +48,7 @@ function transformToUITask(progress: DownloadProgress): DownloadTask {
     title: progress.title,
     cover: progress.cover || "",
     quality: progress.quality || "自动",
-    format: "MP4",
+    format: progress.audio_only ? "MP3" : "MP4",
     state: progress.state,
     stage: progress.stage,
     progress: progress.progress,
@@ -1078,6 +1078,8 @@ function getStageText(stage?: DownloadStage, state?: TaskState): string {
       return "正在下载视频分片";
     case "downloading_audio":
       return "正在下载音频分片";
+    case "converting_audio":
+      return "正在转换 MP3";
     case "merging":
       return "正在合并";
     case "completed":

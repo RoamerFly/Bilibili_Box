@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { invoke } from "@/lib/api";
+import { loadCachedPageData } from "@/lib/page-cache";
 import { formatBiliImageUrl } from "@/lib/utils";
 import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
@@ -90,54 +91,59 @@ export function BangumiView() {
   const [searchKeyword, setSearchKeyword] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
-  const loadAllBangumi = useCallback(async () => {
+  const loadAllBangumi = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setError("");
     try {
-      const config = await invoke<Config>("get_config");
-      if (!config.sessdata) {
-        throw new Error("请先登录 Bilibili 账号");
-      }
+      const transformed = await loadCachedPageData<BangumiFollowItem[]>(
+        "bangumi:follow-list",
+        async () => {
+          const config = await invoke<Config>("get_config");
+          if (!config.sessdata) {
+            throw new Error("请先登录 Bilibili 账号");
+          }
 
-      const userInfo = await invoke<UserInfoData>("get_user_info", { sessdata: config.sessdata });
-      if (!isLoggedIn(userInfo) || !userInfo.mid) {
-        throw new Error("登录已失效，请重新登录");
-      }
+          const userInfo = await invoke<UserInfoData>("get_user_info", { sessdata: config.sessdata });
+          if (!isLoggedIn(userInfo) || !userInfo.mid) {
+            throw new Error("登录已失效，请重新登录");
+          }
 
-      const merged: BackendBangumiFollowItem[] = [];
-      let total = 0;
-      let page = 1;
-      const requestSize = 24;
+          const merged: BackendBangumiFollowItem[] = [];
+          let total = 0;
+          let page = 1;
+          const requestSize = 24;
 
-      while (page === 1 || merged.length < total) {
-        const data = await invoke<BackendBangumiFollowInfo>("get_bangumi_follow_info", {
-          vmid: userInfo.mid,
-          page,
-          pageSize: requestSize,
-        });
-        total = data.total;
-        merged.push(...data.list);
-        if (!data.list.length || data.list.length < requestSize) {
-          break;
-        }
-        page += 1;
-      }
+          while (page === 1 || merged.length < total) {
+            const data = await invoke<BackendBangumiFollowInfo>("get_bangumi_follow_info", {
+              vmid: userInfo.mid,
+              page,
+              pageSize: requestSize,
+            });
+            total = data.total;
+            merged.push(...data.list);
+            if (!data.list.length || data.list.length < requestSize) {
+              break;
+            }
+            page += 1;
+          }
 
-      const transformed = merged.map((item) => {
-        const hasNewEp = Boolean(item.new_ep && item.new_ep.id > 0);
-        const status: FollowStatus = item.total_count > 0 && hasNewEp ? "following" : "finished";
-        return {
-          season_id: item.season_id,
-          title: item.title,
-          cover: item.cover,
-          evaluate: item.evaluate,
-          total_count: item.total_count,
-          status,
-          update_time_str: hasNewEp ? `更新至 ${item.new_ep?.long_title || item.new_ep?.title}` : "已完结",
-          new_ep_index: hasNewEp ? parseInt(item.new_ep?.title || "0", 10) || 0 : 0,
-        } satisfies BangumiFollowItem;
-      });
-
+          return merged.map((item) => {
+            const hasNewEp = Boolean(item.new_ep && item.new_ep.id > 0);
+            const status: FollowStatus = item.total_count > 0 && hasNewEp ? "following" : "finished";
+            return {
+              season_id: item.season_id,
+              title: item.title,
+              cover: item.cover,
+              evaluate: item.evaluate,
+              total_count: item.total_count,
+              status,
+              update_time_str: hasNewEp ? `更新至 ${item.new_ep?.long_title || item.new_ep?.title}` : "已完结",
+              new_ep_index: hasNewEp ? parseInt(item.new_ep?.title || "0", 10) || 0 : 0,
+            } satisfies BangumiFollowItem;
+          });
+        },
+        forceRefresh
+      );
       setItems(transformed);
     } catch (err) {
       setError(String(err));
@@ -215,7 +221,7 @@ export function BangumiView() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await loadAllBangumi();
+    await loadAllBangumi(true);
   };
 
   const stats = useMemo(

@@ -300,6 +300,8 @@ function stageLabel(task: { stage?: string; status?: string }) {
       return "正在下载视频分片";
     case "downloading_audio":
       return "正在下载音频分片";
+    case "converting_audio":
+      return "正在转换 MP3";
     case "merging":
       return "正在合并";
     case "completed":

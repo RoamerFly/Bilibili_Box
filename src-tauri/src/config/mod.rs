@@ -169,6 +169,10 @@ impl Config {
         Ok(Self::user_data_dir(app)?.join("user.json"))
     }
 
+    pub fn page_cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
+        Ok(Self::app_root_dir(app)?.join("data").join("cache"))
+    }
+
     pub fn default_download_dir() -> PathBuf {
         PathBuf::from("data").join("download")
     }

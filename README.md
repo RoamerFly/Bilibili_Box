@@ -54,11 +54,15 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 - 聚合搜索，支持任意关键词、BV/AV 号和视频链接。
 - 搜索结果支持排序、发布时间、视频时长筛选。
 - 我的收藏、稍后再看、观看历史、追番追剧。
+- 首页、推荐、收藏、稍后再看、观看历史与追番页面支持本地缓存，手动刷新时重新获取最新数据。
+- 观看历史支持分页跳转与番剧条目继续播放。
 
 ### 播放能力
 
 - 通用播放页面。
 - 支持从搜索、收藏、历史、稍后再看、追番追剧等页面进入播放。
+- 清晰度菜单根据当前视频实际可用流动态展示，不再固定为单一清晰度。
+- 支持全屏、双击切换全屏、画中画播放和纵向音量调节。
 - 使用 Tauri 内部媒体协议代理远程媒体资源，减少打包后本地 TCP 代理失效问题。
 - 下载完成的视频可直接从首页或下载列表进入播放，复用内部媒体协议读取本地文件。
 - 分集视频可在播放页一键加入全部剧集下载任务。
@@ -71,37 +75,51 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 - 底部上拉面板实时展示视频分片、音频分片、合并、完成和失败原因，最新任务优先显示。
 - 上拉面板支持单项暂停、继续、删除，并在点击界面其他区域后自动收起。
 - 支持 FFmpeg/FFprobe 自动发现与分发目录打包。
-- 支持清晰度、编码、音频质量、并发数量、文件存在策略等配置。
+- 下载清晰度选项按目标视频可用画质展示；默认画质高于视频上限时，自动采用其最高可用画质。
+- 支持默认清晰度、编码、音频质量、并发数量、文件存在策略等配置。
 
 ### 个性化设置
 
 - 主题、下载目录、默认清晰度、任务并发、分片并发。
 - 卡片尺寸、每页数量、启动最大化。
+- 支持一键恢复默认设置，并保留当前账号登录状态。
 - 默认下载目录使用 exe 同级相对路径，适合绿色分发。
 
 ## 界面预览
 
-> 下方已放入可渲染的占位图。你截图后可以直接替换 `docs/screenshots/` 中的同名文件，建议尺寸统一为 1600×900 或 1920×1080。
-
 ### 首页
 
-![Home Preview](./docs/screenshots/home.svg)
+![Home Preview](./docs/screenshots/home.png)
 
 ### 搜索视频
 
-![Search Preview](./docs/screenshots/search.svg)
+![Search Preview](./docs/screenshots/search.png)
+
+### 推荐视频
+
+![Recommend Preview](./docs/screenshots/recommend.png)
 
 ### 我的收藏
 
-![Favorites Preview](./docs/screenshots/favorites.svg)
+![Favorites Preview](./docs/screenshots/favorites.png)
 
 ### 播放页面
 
-![Player Preview](./docs/screenshots/player.svg)
+![Player Preview](./docs/screenshots/player.png)
 
 ### 下载队列
 
-![Downloads Preview](./docs/screenshots/downloads.svg)
+![Downloads Preview](./docs/screenshots/downloads.png)
+
+### 观看历史
+
+![Downloads Preview](./docs/screenshots/history.png)
+
+### 追番追剧
+
+![Downloads Preview](./docs/screenshots/zfzj1.png)
+
+![Downloads Preview](./docs/screenshots/zfzj2.png)
 
 ## 技术栈
 
@@ -180,11 +198,13 @@ data/
   user/
     config.json
     user.json
+  cache/
   download/
 ```
 
 - `config.json` 保存本地配置和登录 Cookie。
 - `user.json` 保存本地账号展示信息。
+- `cache/` 按登录账号隔离保存浏览页面响应数据，页面刷新时会更新对应缓存。
 - `download/` 是默认下载目录。
 
 这些文件属于本机运行数据，不会提交到 Git，也不应该打进公开仓库。
@@ -236,10 +256,11 @@ cargo fmt
 - [x] 二维码、Cookie、内置浏览器登录。
 - [x] 收藏夹、稍后再看、历史、追番追剧接入。
 - [x] 通用播放页面与内部媒体协议代理。
+- [x] 动态播放/下载清晰度、全屏、画中画与双击切换全屏。
 - [x] 后台下载队列、可操作底部下载面板与下载任务状态追踪。
 - [x] 已下载视频的本地播放与任务文件管理。
+- [x] 浏览页面缓存、历史番剧播放修复与设置恢复默认。
 - [x] Windows 分发脚本补齐 FFmpeg/FFprobe 环境。
-- [ ] 更完整的 DASH 音视频合流播放策略。
 - [ ] 更细粒度的下载任务恢复与失败重试。
 - [ ] 插件系统示例与开发文档。
 

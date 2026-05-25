@@ -16,7 +16,9 @@ import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
+import { loadCachedPageData } from "@/lib/page-cache";
 import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
+import type { BangumiInfo } from "@/lib/types";
 import { useAppStore } from "@/stores/app-store";
 
 type ViewMode = "list" | "grid";
@@ -27,6 +29,8 @@ type DeviceType = "All" | "PC" | "Mobile" | "Pad" | "TV";
 interface HistoryItem {
   bvid: string;
   cid: number;
+  business: string;
+  ep_id?: number | null;
   title: string;
   cover: string;
   duration: number;
@@ -140,6 +144,10 @@ function getProgressLabel(progress: number, duration: number) {
   return `已观看 ${Math.min(100, Math.max(0, Math.round((progress / duration) * 100)))}%`;
 }
 
+function isBangumiHistoryItem(item: HistoryItem) {
+  return item.ep_id != null && item.ep_id > 0 && (item.business === "pgc" || item.business === "bangumi");
+}
+
 export function HistoryView() {
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
@@ -162,23 +170,26 @@ export function HistoryView() {
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
   const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
   const fetchHistory = useCallback(
-    async (page = currentPage, showLoading = true) => {
+    async (page = 1, showLoading = true, forceRefresh = false) => {
       if (showLoading) setLoading(true);
       setError("");
 
       try {
         const timeRange = getTimeRange(timeFilter);
         const durationRange = getDurationRange(durationFilter);
-        const data = await invoke<HistoryInfo>("get_history_info", {
-          params: {
-            pn: page,
-            ps: pageSize,
-            keyword,
-            ...timeRange,
-            ...durationRange,
-            device_type: deviceType,
-          },
-        });
+        const params = {
+          pn: page,
+          ps: pageSize,
+          keyword,
+          ...timeRange,
+          ...durationRange,
+          device_type: deviceType,
+        };
+        const data = await loadCachedPageData(
+          `history:${JSON.stringify(params)}`,
+          () => invoke<HistoryInfo>("get_history_info", { params }),
+          forceRefresh
+        );
         setItems(data.list || []);
         setCurrentPage(data.page?.pn || page);
         setTotal(data.page?.total || data.list.length);
@@ -191,29 +202,78 @@ export function HistoryView() {
         setRefreshing(false);
       }
     },
-    [currentPage, deviceType, durationFilter, keyword, pageSize, timeFilter]
+    [deviceType, durationFilter, keyword, pageSize, timeFilter]
   );
 
   useEffect(() => {
+    setCurrentPage(1);
     void fetchHistory(1);
-  }, [keyword, timeFilter, durationFilter, deviceType, pageSize, fetchHistory]);
+  }, [fetchHistory]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchHistory(currentPage, false);
+    await fetchHistory(currentPage, false, true);
   };
 
-  const handleDownload = async (bvid: string, cid: number, title: string) => {
+  const handleDownload = async (item: HistoryItem) => {
     try {
-      const downloadQuality = await requestDownloadQuality({ bvid, cid });
+      let target = { bvid: item.bvid, cid: item.cid, title: item.title };
+      if (isBangumiHistoryItem(item)) {
+        const info = await invoke<BangumiInfo>("get_bangumi_info", { epId: item.ep_id });
+        const episode = info.episodes.find((current) => current.ep_id === item.ep_id) ?? info.episodes[0];
+        if (!episode) throw new Error("未找到可下载的番剧剧集");
+        target = {
+          bvid: episode.bvid,
+          cid: episode.cid,
+          title: `${info.title} - ${episode.long_title || episode.title}`.trim(),
+        };
+      }
+      if (!target.bvid || !target.cid) throw new Error("当前历史记录缺少可下载的视频标识");
+      const downloadQuality = await requestDownloadQuality({ bvid: target.bvid, cid: target.cid });
       if (!downloadQuality) return;
       const taskIds = await invoke<string[]>("create_download_task", {
-        params: { bvid, cid, title, cids: [cid], download_quality: downloadQuality },
+        params: { bvid: target.bvid, cid: target.cid, title: target.title, cids: [target.cid], download_quality: downloadQuality },
       });
-      notifyDownloadQueued(taskIds, title);
+      notifyDownloadQueued(taskIds, target.title);
     } catch (err) {
       setError(String(err));
     }
+  };
+
+  const handlePlay = (item: HistoryItem) => {
+    if (isBangumiHistoryItem(item)) {
+      openPlayer({
+        kind: "bangumi",
+        epId: item.ep_id ?? undefined,
+        title: item.title,
+        cover: item.cover,
+      });
+      return;
+    }
+    if (!item.bvid) {
+      setError("当前历史记录缺少可播放的视频标识");
+      return;
+    }
+    openPlayer({
+      kind: "video",
+      bvid: item.bvid,
+      cid: item.cid,
+      title: item.title,
+      cover: item.cover,
+    });
+  };
+
+  const handleOpenBrowser = (item: HistoryItem) => {
+    const url = isBangumiHistoryItem(item)
+      ? `https://www.bilibili.com/bangumi/play/ep${item.ep_id}`
+      : item.bvid
+        ? biliVideoUrl(item.bvid)
+        : "";
+    if (!url) {
+      setError("当前历史记录缺少可打开的内容标识");
+      return;
+    }
+    void openExternalUrl(url).catch((err) => setError(String(err)));
   };
 
   const pageCount = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [pageSize, total]);
@@ -382,19 +442,12 @@ export function HistoryView() {
               <AnimatePresence>
                 {items.map((item) => (
                   <HistoryCard
-                    key={`${item.bvid}-${item.cid}-${item.view_at}`}
+                    key={`${item.business}-${item.ep_id ?? item.bvid}-${item.cid}-${item.view_at}`}
                     item={item}
                     scale={cardScale}
                     onDownload={handleDownload}
-                    onPlay={() =>
-                      openPlayer({
-                        kind: "video",
-                        bvid: item.bvid,
-                        cid: item.cid,
-                        title: item.title,
-                        cover: item.cover,
-                      })
-                    }
+                    onPlay={() => handlePlay(item)}
+                    onOpenBrowser={() => handleOpenBrowser(item)}
                   />
                 ))}
               </AnimatePresence>
@@ -523,11 +576,13 @@ function HistoryCard({
   scale,
   onDownload,
   onPlay,
+  onOpenBrowser,
 }: {
   item: HistoryItem;
   scale: number;
-  onDownload: (bvid: string, cid: number, title: string) => void;
+  onDownload: (item: HistoryItem) => void;
   onPlay: () => void;
+  onOpenBrowser: () => void;
 }) {
   return (
     <motion.div
@@ -608,12 +663,12 @@ function HistoryCard({
         <IconAction title="播放视频" onClick={onPlay}>
           <Play style={{ width: 16, height: 16 }} />
         </IconAction>
-        <IconAction title="加入下载" onClick={() => onDownload(item.bvid, item.cid, item.title)}>
+        <IconAction title="加入下载" onClick={() => onDownload(item)}>
           <Download style={{ width: 16, height: 16 }} />
         </IconAction>
         <IconAction
           title="浏览器打开"
-          onClick={() => void openExternalUrl(biliVideoUrl(item.bvid)).catch((error) => console.error("打开浏览器失败:", error))}
+          onClick={onOpenBrowser}
         >
           <MoreVertical style={{ width: 16, height: 16 }} />
         </IconAction>

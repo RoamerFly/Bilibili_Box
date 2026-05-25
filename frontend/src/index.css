@@ -628,6 +628,25 @@ body {
   border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.78);
   box-shadow: 0 15px 35px rgba(70, 81, 155, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.bb-coming-soon-toast {
+  position: absolute;
+  right: 28px;
+  bottom: 84px;
+  z-index: 80;
+  padding: 12px 18px;
+  border: 1px solid #ddd9ff;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgb(30 27 75 / 14%);
+  color: #505065;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .bb-stat-violet {

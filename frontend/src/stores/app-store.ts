@@ -23,6 +23,7 @@ export interface PlayerState {
   bvid?: string;
   cid?: number;
   seasonId?: number;
+  epId?: number;
   cover?: string;
   localTaskId?: string;
 }
@@ -56,6 +57,9 @@ export interface DownloadTask {
   errorMessage?: string;
   outputPath?: string;
   createdAt?: number;
+  mediaKind?: "video" | "audio";
+  quality?: string;
+  format?: string;
 }
 
 export interface LogEntry {

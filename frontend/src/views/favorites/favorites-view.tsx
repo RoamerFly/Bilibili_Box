@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Download,
@@ -15,6 +15,7 @@ import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
 import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
+import { loadCachedPageData } from "@/lib/page-cache";
 import { useAppStore } from "@/stores/app-store";
 
 interface FavFolder {
@@ -76,6 +77,11 @@ export function FavoritesView() {
   const [currentPage, setCurrentPage] = useState(1);
   const [batchMode, setBatchMode] = useState(false);
   const [selectedMediaIds, setSelectedMediaIds] = useState<Set<number>>(new Set());
+  const selectedFolderIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    selectedFolderIdRef.current = selectedFolder?.id ?? null;
+  }, [selectedFolder?.id]);
 
   const resolveCurrentMid = useCallback(async () => {
     const savedUser = await invoke<SavedUserInfo | null>("get_saved_user_info");
@@ -97,15 +103,19 @@ export function FavoritesView() {
   }, []);
 
   const fetchFolderContent = useCallback(
-    async (folder: FavFolder, page: number) => {
+    async (folder: FavFolder, page: number, forceRefresh = false) => {
       setLoading(true);
       setError("");
       try {
-        const data = await invoke<FavInfo>("get_fav_info", {
-          mediaId: folder.id,
-          page,
-          pageSize,
-        });
+        const data = await loadCachedPageData(
+          `favorites:folder:${folder.id}:page:${page}:size:${pageSize}`,
+          () => invoke<FavInfo>("get_fav_info", {
+            mediaId: folder.id,
+            page,
+            pageSize,
+          }),
+          forceRefresh
+        );
         setSelectedFolder(data.info);
         setMedias(data.medias);
         setCurrentPage(page);
@@ -119,30 +129,37 @@ export function FavoritesView() {
     [pageSize]
   );
 
-  const fetchFolders = useCallback(async () => {
+  const fetchFolders = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setError("");
     try {
-      const mid = await resolveCurrentMid();
-      const data = await invoke<FavFolders>("get_fav_folders", { uid: mid });
+      const data = await loadCachedPageData(
+        "favorites:folders",
+        async () => {
+          const mid = await resolveCurrentMid();
+          return invoke<FavFolders>("get_fav_folders", { uid: mid });
+        },
+        forceRefresh
+      );
       setFolders(data.list);
       if (data.list.length === 0) {
         setSelectedFolder(null);
         setMedias([]);
-        return;
+        return null;
       }
-      const nextFolder = data.list.find((item) => item.id === selectedFolder?.id) ?? data.list[0];
+      const nextFolder = data.list.find((item) => item.id === selectedFolderIdRef.current) ?? data.list[0];
       setSelectedFolder(nextFolder);
+      return nextFolder;
     } catch (err) {
       setError(String(err));
       setFolders([]);
       setSelectedFolder(null);
       setMedias([]);
+      return null;
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
-  }, [resolveCurrentMid, selectedFolder?.id]);
+  }, [resolveCurrentMid]);
 
   useEffect(() => {
     void fetchFolders();
@@ -171,7 +188,15 @@ export function FavoritesView() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchFolders();
+    try {
+      const refreshedFolder = await fetchFolders(true);
+      if (refreshedFolder) {
+        const refreshedPage = refreshedFolder.id === selectedFolder?.id ? currentPage : 1;
+        await fetchFolderContent(refreshedFolder, refreshedPage, true);
+      }
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const handleDownload = async (media: FavMedia) => {

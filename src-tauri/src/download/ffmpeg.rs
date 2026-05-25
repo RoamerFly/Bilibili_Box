@@ -258,6 +258,42 @@ impl FfmpegExecutor {
         .map_err(|e| format!("Extract audio task failed: {}", e))?
     }
 
+    pub async fn convert_audio_to_mp3(
+        &self,
+        input_path: &Path,
+        output_path: &Path,
+    ) -> Result<PathBuf, String> {
+        let ffmpeg_path = self
+            .ffmpeg_path
+            .clone()
+            .ok_or_else(|| "FFmpeg is not available".to_string())?;
+        let input = input_path.to_path_buf();
+        let output = output_path.to_path_buf();
+
+        log::info!(
+            "Starting FFmpeg audio conversion: input={}, output={}",
+            input.display(),
+            output.display()
+        );
+
+        tokio::task::spawn_blocking(move || {
+            let mut cmd = FfmpegCommand::new_with_path(ffmpeg_path.as_os_str());
+            let cmd = cmd
+                .create_no_window()
+                .input(input.to_str().ok_or("Invalid audio input path")?)
+                .args(&["-vn"])
+                .args(&["-codec:a", "libmp3lame"])
+                .args(&["-q:a", "2"])
+                .output(output.to_str().ok_or("Invalid audio output path")?)
+                .overwrite();
+
+            Self::wait_for_ffmpeg(cmd)?;
+            Ok(output)
+        })
+        .await
+        .map_err(|e| format!("MP3 conversion task failed: {}", e))?
+    }
+
     fn wait_for_ffmpeg(cmd: &mut FfmpegCommand) -> Result<(), String> {
         let mut child = cmd
             .spawn()

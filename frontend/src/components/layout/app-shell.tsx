@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useEffect, type MouseEvent } from "react";
+import { useLayoutEffect, useRef, useEffect, useState, type MouseEvent } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { useConfigWatch } from "@/hooks/use-config-watch";
 import { useDownloadEvents } from "@/hooks/use-download-events";
@@ -17,6 +17,7 @@ import { SettingsView } from "@/views/settings/settings-view";
 import { AnimatePresence, motion } from "framer-motion";
 import { easeConfig } from "@/lib/utils";
 import { invoke } from "@/lib/api";
+import { COMING_SOON_EVENT } from "@/lib/coming-soon";
 
 interface Config {
   sessdata: string;
@@ -37,6 +38,7 @@ export function AppShell() {
   const setUserInfo = useAppStore((s) => s.setUserInfo);
   const bottomBarExpanded = useAppStore((s) => s.bottomBarExpanded);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [showComingSoon, setShowComingSoon] = useState(false);
 
   // 启用 config watch - 监听 sessdata 变化自动获取/清除用户信息
   useConfigWatch();
@@ -70,6 +72,20 @@ export function AppShell() {
     initConfig();
   }, [setConfig, setUserInfo]);
 
+  useEffect(() => {
+    let timer: number | undefined;
+    const handleComingSoon = () => {
+      setShowComingSoon(true);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setShowComingSoon(false), 2200);
+    };
+    window.addEventListener(COMING_SOON_EVENT, handleComingSoon);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener(COMING_SOON_EVENT, handleComingSoon);
+    };
+  }, []);
+
   return (
     <div className="bb-app-frame flex h-screen w-screen overflow-hidden">
       {/* Sidebar */}
@@ -94,6 +110,18 @@ export function AppShell() {
         <div className="absolute bottom-0 left-0 right-0 z-30">
           <BottomBar />
         </div>
+        <AnimatePresence>
+          {showComingSoon ? (
+            <motion.div
+              className="bb-coming-soon-toast"
+              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            >
+              正在实现中，敬请期待
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </main>
     </div>
   );

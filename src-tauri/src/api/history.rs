@@ -58,6 +58,8 @@ pub struct HistoryInfo {
 pub struct HistoryItem {
     pub bvid: String,
     pub cid: i64,
+    pub business: String,
+    pub ep_id: Option<i64>,
     pub title: String,
     pub cover: String,
     pub duration: u64,
@@ -158,6 +160,10 @@ impl super::BiliClient {
                         Some(HistoryItem {
                             bvid: history["bvid"].as_str().unwrap_or("").to_string(),
                             cid: history["cid"].as_i64().unwrap_or(0),
+                            business: history["business"].as_str().unwrap_or("").to_string(),
+                            ep_id: history["epid"].as_i64().or_else(|| {
+                                history["epid"].as_str().and_then(|id| id.parse().ok())
+                            }),
                             title: item["title"].as_str().unwrap_or("").to_string(),
                             cover: item["cover"].as_str().unwrap_or("").to_string(),
                             duration: item["duration"].as_u64().unwrap_or(0),

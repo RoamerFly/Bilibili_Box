@@ -8,12 +8,14 @@ import {
   MonitorPlay,
   Moon,
   Palette,
+  RotateCcw,
   Rows3,
   Sun,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { DOWNLOAD_QUALITY_OPTIONS } from "@/components/download-quality-dialog";
 import { invoke } from "@/lib/api";
+import { showComingSoon } from "@/lib/coming-soon";
 import { useAppStore } from "@/stores/app-store";
 
 type ThemeMode = "light" | "dark" | "system";
@@ -37,6 +39,8 @@ export function SettingsView() {
   const setConfig = useAppStore((s) => s.setConfig);
   const setUserInfo = useAppStore((s) => s.setUserInfo);
   const [loading, setLoading] = useState(true);
+  const [resetting, setResetting] = useState(false);
+  const [feedback, setFeedback] = useState("");
   const [backendConfig, setBackendConfig] = useState<BackendConfig | null>(null);
 
   const loadConfig = useCallback(async () => {
@@ -89,6 +93,21 @@ export function SettingsView() {
     }
   };
 
+  const handleResetConfig = async () => {
+    setResetting(true);
+    setFeedback("");
+    try {
+      const restored = await invoke<BackendConfig>("reset_config");
+      setBackendConfig(restored);
+      setConfig(restored);
+      setFeedback("已恢复默认设置");
+    } catch (err) {
+      setFeedback(`恢复默认设置失败：${String(err)}`);
+    } finally {
+      setResetting(false);
+    }
+  };
+
   if (loading || !backendConfig) {
     return (
       <div
@@ -114,13 +133,41 @@ export function SettingsView() {
         transition={{ duration: 0.3 }}
         style={{ marginBottom: "28px" }}
       >
-        <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
-          设置
-        </h1>
-        <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "5px" }}>
-          个性化配置 BiliBox
-        </p>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+          <div>
+            <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
+              设置
+            </h1>
+            <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "5px" }}>
+              个性化配置 BiliBox
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={resetting}
+            onClick={() => void handleResetConfig()}
+            style={{ ...secondaryButtonStyle, opacity: resetting ? 0.65 : 1 }}
+          >
+            <RotateCcw style={{ width: 15, height: 15, marginRight: "6px" }} />
+            {resetting ? "恢复中" : "恢复默认"}
+          </button>
+        </div>
       </motion.div>
+
+      {feedback ? (
+        <div
+          style={{
+            marginBottom: "16px",
+            padding: "11px 16px",
+            borderRadius: "10px",
+            backgroundColor: feedback.includes("失败") ? "#fef2f2" : "#f0fdf4",
+            color: feedback.includes("失败") ? "#dc2626" : "#15803d",
+            fontSize: "13.5px",
+          }}
+        >
+          {feedback}
+        </div>
+      ) : null}
 
       <motion.div
         initial={{ opacity: 0, y: 16 }}
@@ -175,7 +222,7 @@ export function SettingsView() {
           control={
             <ThemeSelector
               value={(backendConfig.theme as ThemeMode) || "system"}
-              onChange={(theme) => void saveConfig({ theme })}
+              onChange={() => showComingSoon()}
             />
           }
         />

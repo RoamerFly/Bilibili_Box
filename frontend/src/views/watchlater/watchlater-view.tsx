@@ -18,6 +18,8 @@ import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
+import { showComingSoon } from "@/lib/coming-soon";
+import { loadCachedPageData } from "@/lib/page-cache";
 import { useAppStore } from "@/stores/app-store";
 import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
 
@@ -118,15 +120,19 @@ export function WatchLaterView() {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const fetchWatchLater = useCallback(
-    async (showLoading = true) => {
+    async (showLoading = true, forceRefresh = false) => {
       if (showLoading) setLoading(true);
       setError("");
 
       try {
-        const data = await invoke<WatchLaterInfo>("get_watch_later_info", {
-          page: 1,
-          pageSize: 200,
-        });
+        const data = await loadCachedPageData(
+          "watchlater:list:200",
+          () => invoke<WatchLaterInfo>("get_watch_later_info", {
+            page: 1,
+            pageSize: 200,
+          }),
+          forceRefresh
+        );
         setItems(data.list);
         setCount(data.count);
         setSelectedIds(new Set());
@@ -177,7 +183,7 @@ export function WatchLaterView() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchWatchLater(false);
+    await fetchWatchLater(false, true);
   };
 
   const handleDownload = async (bvid: string, cid: number, title: string) => {
@@ -211,7 +217,7 @@ export function WatchLaterView() {
   };
 
   const handleClearAll = () => {
-    setError("清空稍后再看需要写接口和 CSRF，当前版本暂不处理。");
+    showComingSoon();
   };
 
   return (

@@ -19,6 +19,7 @@ pub enum DownloadStage {
     Pending,
     DownloadingVideo,
     DownloadingAudio,
+    ConvertingAudio,
     Merging,
     Completed,
     Failed,

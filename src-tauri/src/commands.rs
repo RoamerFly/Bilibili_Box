@@ -1,4 +1,6 @@
+use md5::{Digest, Md5};
 use parking_lot::RwLock;
+use serde_json::Value;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, State};
@@ -39,6 +41,83 @@ pub fn save_config(
     // 持久化到文件
     new_config.save(&app)?;
     Ok(())
+}
+
+/// 恢复默认偏好设置，同时保留当前账号登录状态。
+#[tauri::command]
+pub fn reset_config(
+    app: AppHandle,
+    config: State<'_, Arc<RwLock<Config>>>,
+    bili_client: State<'_, Arc<BiliClient>>,
+) -> Result<Config, String> {
+    let current = config.read().clone();
+    let mut restored = Config::default();
+    restored.sessdata = current.sessdata;
+    restored.cookie = current.cookie;
+    restored.save(&app)?;
+    *config.write() = restored.clone();
+    bili_client.reload_client()?;
+    Ok(restored)
+}
+
+fn cache_hash(value: &str) -> String {
+    let mut hasher = Md5::new();
+    hasher.update(value.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn page_cache_path(
+    app: &AppHandle,
+    config: &Config,
+    key: &str,
+) -> Result<std::path::PathBuf, String> {
+    if key.is_empty() || key.len() > 2048 {
+        return Err("无效的页面缓存键".to_string());
+    }
+
+    let scope = if config.sessdata.trim().is_empty() {
+        "guest".to_string()
+    } else {
+        format!("user-{}", cache_hash(&config.sessdata))
+    };
+
+    Ok(Config::page_cache_dir(app)?
+        .join(scope)
+        .join(format!("{}.json", cache_hash(key))))
+}
+
+/// 读取当前账号范围内的页面响应缓存。
+#[tauri::command]
+pub fn get_page_cache(
+    app: AppHandle,
+    config: State<'_, Arc<RwLock<Config>>>,
+    key: String,
+) -> Result<Option<Value>, String> {
+    let path = page_cache_path(&app, &config.read(), &key)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取页面缓存失败: {e}"))?;
+    let value = serde_json::from_str(&content).map_err(|e| format!("解析页面缓存失败: {e}"))?;
+    Ok(Some(value))
+}
+
+/// 将浏览型页面的接口响应保存到当前账号范围内的缓存目录。
+#[tauri::command]
+pub fn save_page_cache(
+    app: AppHandle,
+    config: State<'_, Arc<RwLock<Config>>>,
+    key: String,
+    value: Value,
+) -> Result<(), String> {
+    let path = page_cache_path(&app, &config.read(), &key)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "无法获取页面缓存目录".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("创建页面缓存目录失败: {e}"))?;
+    let content = serde_json::to_string(&value).map_err(|e| format!("序列化页面缓存失败: {e}"))?;
+    std::fs::write(path, content).map_err(|e| format!("写入页面缓存失败: {e}"))
 }
 
 /// 生成二维码

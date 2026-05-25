@@ -6,6 +6,7 @@ import {
   Loader2,
   Maximize,
   Minimize,
+  Music2,
   Pause,
   PictureInPicture2,
   Play,
@@ -28,6 +29,7 @@ interface EpisodeOption {
   title: string;
   bvid: string;
   cid: number;
+  epId?: number;
   localTaskId?: string;
 }
 
@@ -190,11 +192,14 @@ export function PlayerView() {
   }, [loadPlayableUrl, playerState]);
 
   const loadBangumiPlayer = useCallback(async () => {
-    if (!playerState?.seasonId) {
+    if (!playerState?.seasonId && !playerState?.epId) {
       throw new Error("缺少番剧标识");
     }
 
-    const info = await invoke<BangumiInfo>("get_bangumi_info", { seasonId: playerState.seasonId });
+    const info = await invoke<BangumiInfo>("get_bangumi_info", {
+      seasonId: playerState.seasonId,
+      epId: playerState.epId,
+    });
     setBangumiInfo(info);
     setVideoInfo(null);
 
@@ -203,9 +208,10 @@ export function PlayerView() {
       title: episode.long_title || episode.title,
       bvid: episode.bvid,
       cid: episode.cid,
+      epId: episode.ep_id,
     }));
     setEpisodes(nextEpisodes);
-    const nextSelected = nextEpisodes[0] ?? null;
+    const nextSelected = nextEpisodes.find((episode) => episode.epId === playerState.epId) ?? nextEpisodes[0] ?? null;
     setSelectedEpisode(nextSelected);
     setPlayUrl(nextSelected ? await loadPlayableUrl(nextSelected.bvid, nextSelected.cid) : "");
   }, [loadPlayableUrl, playerState]);
@@ -336,8 +342,13 @@ export function PlayerView() {
   const cover = bangumiInfo?.cover || videoInfo?.pic || playerState?.cover || "";
   const browserUrl = useMemo(() => {
     if (!playerState) return "";
-    if (playerState.kind === "bangumi" && playerState.seasonId) {
-      return `https://www.bilibili.com/bangumi/play/ss${playerState.seasonId}`;
+    if (playerState.kind === "bangumi") {
+      if (playerState.seasonId) {
+        return `https://www.bilibili.com/bangumi/play/ss${playerState.seasonId}`;
+      }
+      if (playerState.epId) {
+        return `https://www.bilibili.com/bangumi/play/ep${playerState.epId}`;
+      }
     }
     if (playerState.bvid) {
       return `https://www.bilibili.com/video/${playerState.bvid}`;
@@ -429,6 +440,28 @@ export function PlayerView() {
         taskIds = taskGroups.flat();
       }
       notifyDownloadQueued(taskIds, currentTitle);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const handleAudioDownload = async () => {
+    if (!selectedEpisode) return;
+    try {
+      const title =
+        playerState?.kind === "bangumi"
+          ? `${currentTitle} - ${selectedEpisode.title}`.trim()
+          : currentTitle;
+      const taskIds = await invoke<string[]>("create_download_task", {
+        params: {
+          bvid: selectedEpisode.bvid,
+          cid: selectedEpisode.cid,
+          title,
+          cids: [selectedEpisode.cid],
+          audio_only: true,
+        },
+      });
+      notifyDownloadQueued(taskIds, title, { mediaKind: "audio", quality: "音频", format: "MP3" });
     } catch (err) {
       setError(String(err));
     }
@@ -559,9 +592,6 @@ export function PlayerView() {
         <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           <HeaderButton onClick={() => void refresh()} icon={<RefreshCw style={{ width: 15, height: 15 }} />}>
             刷新
-          </HeaderButton>
-          <HeaderButton onClick={() => void handleDownload()} icon={<Download style={{ width: 15, height: 15 }} />}>
-            下载当前
           </HeaderButton>
           <HeaderButton
             onClick={() => browserUrl && void openExternalUrl(browserUrl).catch((err) => setError(String(err)))}
@@ -705,6 +735,12 @@ export function PlayerView() {
                     </span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", marginLeft: "auto" }}>
+                    <PlayerIconButton title="下载视频" onClick={() => void handleDownload()}>
+                      <Download size={18} />
+                    </PlayerIconButton>
+                    <PlayerIconButton title="下载音频为 MP3" onClick={() => void handleAudioDownload()}>
+                      <Music2 size={18} />
+                    </PlayerIconButton>
                     <select
                       aria-label="播放清晰度"
                       title="播放清晰度"

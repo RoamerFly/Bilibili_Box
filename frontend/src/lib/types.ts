@@ -250,6 +250,8 @@ export interface FavInfo {
 export interface HistoryItem {
   bvid: string;
   cid: number;
+  business: string;
+  ep_id?: number | null;
   title: string;
   cover: string;
   duration: number;
@@ -305,12 +307,14 @@ export interface CreateDownloadTaskParams {
   title: string;
   cids: number[];
   download_quality?: string;
+  audio_only?: boolean;
 }
 
 export type DownloadStage =
   | "pending"
   | "downloading_video"
   | "downloading_audio"
+  | "converting_audio"
   | "merging"
   | "completed"
   | "failed"
@@ -335,6 +339,7 @@ export interface DownloadProgress {
   cover?: string;
   duration?: number;
   quality?: string;
+  audio_only?: boolean;
   state: DownloadTaskState;
   stage?: DownloadStage;
   progress: number;

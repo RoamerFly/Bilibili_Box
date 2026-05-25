@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Semaphore;
 
 use super::ffmpeg::FfmpegExecutor;
-use crate::config::{CodecType, Config, FileExistAction, VideoQuality};
+use crate::config::{AudioQuality, CodecType, Config, FileExistAction, VideoQuality};
 use crate::danmaku::{convert_to_ass, AssConfig};
 use crate::events::{DownloadEvent, DownloadStage, TaskState};
 
@@ -41,6 +41,8 @@ pub struct DownloadProgress {
     pub duration: i64,
     #[serde(default = "default_quality_label")]
     pub quality: String,
+    #[serde(default)]
+    pub audio_only: bool,
     pub state: DownloadTaskState,
     #[serde(default)]
     pub stage: DownloadStage,
@@ -166,19 +168,27 @@ impl DownloadManager {
 
         for cid in params.cids.iter() {
             let play_info = bili_client.get_normal_url(&params.bvid, *cid).await?;
-            let selected_video = if config.download_video {
+            let selected_video = if config.download_video && !params.audio_only {
                 Self::select_video_url(&play_info.video_list, &config)
             } else {
                 None
             };
             let video_url = selected_video.as_ref().map(|(url, _)| url.clone());
-            let audio_url = if config.download_audio {
+            let selected_audio = if config.download_audio || params.audio_only {
                 Self::select_audio_url(&play_info.audio_list, &config)
             } else {
                 None
             };
+            if params.audio_only && selected_audio.is_none() {
+                return Err("当前视频没有可下载的音频流".to_string());
+            }
+            let audio_url = selected_audio.as_ref().map(|(url, _)| url.clone());
             let page_info = video_info.pages.iter().find(|page| page.cid == *cid);
-            let task_id = format!("{}_{}", params.bvid, cid);
+            let task_id = if params.audio_only {
+                format!("{}_{}_audio", params.bvid, cid)
+            } else {
+                format!("{}_{}", params.bvid, cid)
+            };
             let progress = DownloadProgress {
                 task_id: task_id.clone(),
                 aid: video_info.aid,
@@ -199,10 +209,18 @@ impl DownloadManager {
                 duration: page_info
                     .map(|page| page.duration as i64)
                     .unwrap_or(video_info.duration as i64),
-                quality: selected_video
-                    .as_ref()
-                    .map(|(_, quality)| quality.clone())
-                    .unwrap_or_else(default_quality_label),
+                quality: if params.audio_only {
+                    selected_audio
+                        .as_ref()
+                        .map(|(_, quality)| quality.clone())
+                        .unwrap_or_else(default_quality_label)
+                } else {
+                    selected_video
+                        .as_ref()
+                        .map(|(_, quality)| quality.clone())
+                        .unwrap_or_else(default_quality_label)
+                },
+                audio_only: params.audio_only,
                 state: DownloadTaskState::Pending,
                 stage: DownloadStage::Pending,
                 progress: 0.0,
@@ -407,6 +425,7 @@ impl DownloadManager {
             download_dir,
             file_exist_action,
             auto_merge,
+            audio_only,
             progress_snapshot,
             config_snapshot,
         ) = {
@@ -420,6 +439,7 @@ impl DownloadManager {
                 config.download_dir.clone(),
                 config.file_exist_action.clone(),
                 config.auto_merge,
+                progress.audio_only,
                 progress.clone(),
                 config.clone(),
             )
@@ -481,6 +501,48 @@ impl DownloadManager {
                 DownloadEnd::Completed => audio_path = Some(path),
                 end => return Ok(end),
             }
+        }
+
+        if audio_only {
+            let Some(audio) = audio_path.as_ref() else {
+                return Err("当前视频没有可下载的音频流".to_string());
+            };
+            let expected_output_path = download_path.join(format!("{}.mp3", safe_title));
+            let Some(output_path) =
+                Self::resolve_existing_file(expected_output_path.clone(), &file_exist_action)?
+            else {
+                task.write().output_path = Some(expected_output_path.to_string_lossy().to_string());
+                let _ = tokio::fs::remove_file(audio).await;
+                return Ok(DownloadEnd::Completed);
+            };
+            let ffmpeg = FfmpegExecutor::default();
+            if !ffmpeg.is_available() {
+                return Err("FFmpeg 未安装，无法转换 MP3 音频".to_string());
+            }
+
+            {
+                let mut progress = task.write();
+                progress.state = DownloadTaskState::Merging;
+                progress.stage = DownloadStage::ConvertingAudio;
+                progress.speed = 0.0;
+            }
+            let _ = app.emit(
+                "download://state_change",
+                DownloadEvent::TaskStateUpdate {
+                    task_id: task_id.to_string(),
+                    state: TaskState::Merging,
+                    error: None,
+                },
+            );
+            Self::emit_progress_snapshot(app, task_id, task, TaskState::Merging);
+
+            let output_path = ffmpeg
+                .convert_audio_to_mp3(audio, &output_path)
+                .await
+                .map_err(|error| format!("音频转换失败: {}", error))?;
+            task.write().output_path = Some(output_path.to_string_lossy().to_string());
+            let _ = tokio::fs::remove_file(audio).await;
+            return Ok(DownloadEnd::Completed);
         }
 
         // 使用 FFmpeg 合并音视频
@@ -866,7 +928,7 @@ impl DownloadManager {
         }
 
         self.find_existing_output_file(&progress)
-            .ok_or_else(|| "没有找到可播放的已下载 MP4 文件".to_string())
+            .ok_or_else(|| "没有找到可打开的已下载媒体文件".to_string())
     }
 
     fn find_existing_output_file(&self, progress: &DownloadProgress) -> Option<PathBuf> {
@@ -877,6 +939,7 @@ impl DownloadManager {
         }
 
         let folder = self.task_output_dir(progress).ok()?;
+        let expected_extension = if progress.audio_only { "mp3" } else { "mp4" };
         let mut candidates = std::fs::read_dir(&folder)
             .ok()?
             .filter_map(Result::ok)
@@ -884,7 +947,7 @@ impl DownloadManager {
             .filter(|path| {
                 path.extension()
                     .and_then(|extension| extension.to_str())
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("mp4"))
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case(expected_extension))
             })
             .collect::<Vec<_>>();
         candidates.sort_by_key(|path| {
@@ -1545,15 +1608,20 @@ impl DownloadManager {
     fn select_audio_url(
         audios: &[crate::api::video::DashAudio],
         config: &Config,
-    ) -> Option<String> {
+    ) -> Option<(String, String)> {
         for quality in &config.audio_quality_priority {
             let quality_id = *quality as i64;
             if let Some(audio) = audios.iter().find(|audio| audio.id == quality_id) {
-                return Some(audio.base_url.clone());
+                return Some((audio.base_url.clone(), quality.name().to_string()));
             }
         }
 
-        audios.first().map(|audio| audio.base_url.clone())
+        audios.first().map(|audio| {
+            (
+                audio.base_url.clone(),
+                audio_quality_name_from_id(audio.id).to_string(),
+            )
+        })
     }
 
     fn codec_matches(codecs: &str, codec_type: CodecType) -> bool {
@@ -1589,6 +1657,17 @@ fn quality_name_from_id(id: i64) -> &'static str {
     }
 }
 
+fn audio_quality_name_from_id(id: i64) -> &'static str {
+    match id {
+        value if value == AudioQuality::AudioHiRes as i64 => "无损",
+        value if value == AudioQuality::AudioDolby as i64 => "杜比全景声",
+        value if value == AudioQuality::Audio192K as i64 => "192K",
+        value if value == AudioQuality::Audio132K as i64 => "132K",
+        value if value == AudioQuality::Audio64K as i64 => "64K",
+        _ => "音频",
+    }
+}
+
 /// 创建下载任务参数
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateDownloadTaskParams {
@@ -1598,4 +1677,6 @@ pub struct CreateDownloadTaskParams {
     pub cids: Vec<i64>,
     #[serde(default)]
     pub download_quality: Option<String>,
+    #[serde(default)]
+    pub audio_only: bool,
 }
