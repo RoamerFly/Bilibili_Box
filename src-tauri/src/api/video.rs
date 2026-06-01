@@ -160,6 +160,8 @@ pub struct SearchVideoOptions {
     pub order: Option<String>,
     pub pubtime: Option<String>,
     pub duration: Option<String>,
+    pub page: Option<i64>,
+    pub page_size: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -167,6 +169,29 @@ pub struct AggregateSearchResult {
     pub keyword: String,
     pub videos: Vec<KeywordVideoResult>,
     pub bangumi: Vec<KeywordBangumiResult>,
+    pub video_page: SearchPageInfo,
+    pub bangumi_page: SearchPageInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchPageInfo {
+    pub page: i64,
+    pub page_size: i64,
+    pub total: i64,
+    pub page_count: i64,
+    pub has_more: bool,
+}
+
+impl Default for SearchPageInfo {
+    fn default() -> Self {
+        Self {
+            page: 1,
+            page_size: 20,
+            total: 0,
+            page_count: 1,
+            has_more: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -536,11 +561,16 @@ impl super::BiliClient {
         let order = normalize_search_order(options.order.as_deref());
         let (pubtime_begin_s, pubtime_end_s) = search_pubtime_range(options.pubtime.as_deref());
         let duration = normalize_search_duration(options.duration.as_deref());
+        let page = options.page.unwrap_or(1).max(1);
+        let page_size = options.page_size.unwrap_or(20).clamp(1, 50);
+        let page_string = page.to_string();
+        let page_size_string = page_size.to_string();
 
         let mut video_params = HashMap::from([
             ("search_type".to_string(), "video".to_string()),
             ("keyword".to_string(), keyword.to_string()),
-            ("page".to_string(), "1".to_string()),
+            ("page".to_string(), page.to_string()),
+            ("page_size".to_string(), page_size.to_string()),
             ("order".to_string(), order.to_string()),
             ("duration".to_string(), duration.to_string()),
             ("pubtime_begin_s".to_string(), pubtime_begin_s.clone()),
@@ -576,7 +606,8 @@ impl super::BiliClient {
                     .query(&[
                         ("search_type", "media_bangumi"),
                         ("keyword", keyword),
-                        ("page", "1"),
+                        ("page", page_string.as_str()),
+                        ("page_size", page_size_string.as_str()),
                     ])
                     .header(
                         "cookie",
@@ -593,6 +624,8 @@ impl super::BiliClient {
             keyword: keyword.to_string(),
             videos: parse_keyword_video_results(&video_data),
             bangumi: parse_keyword_bangumi_results(&bangumi_data),
+            video_page: parse_search_page_info(&video_data, page, page_size),
+            bangumi_page: parse_search_page_info(&bangumi_data, page, page_size),
         }))
     }
 
@@ -912,6 +945,58 @@ fn parse_bangumi_search_result(data: Value) -> Result<BangumiSearchResult, Strin
         evaluate,
         episodes,
     })
+}
+
+fn parse_search_page_info(
+    data: &Value,
+    requested_page: i64,
+    requested_page_size: i64,
+) -> SearchPageInfo {
+    let item_count = data
+        .get("result")
+        .and_then(|value| value.as_array())
+        .map(|items| items.len() as i64)
+        .unwrap_or(0);
+    let page = parse_i64_field(
+        data,
+        &["page", "pn", "page_no", "current_page", "currentPage"],
+    )
+    .max(1)
+    .max(requested_page.max(1));
+    let page_size = parse_i64_field(data, &["pagesize", "page_size", "ps", "pageSize"])
+        .max(1)
+        .max(requested_page_size.max(1));
+    let total = parse_i64_field(
+        data,
+        &[
+            "numResults",
+            "num_results",
+            "total",
+            "count",
+            "total_count",
+            "totalCount",
+        ],
+    )
+    .max(item_count);
+    let explicit_page_count = parse_i64_field(
+        data,
+        &["numPages", "num_pages", "page_count", "pageCount", "pages"],
+    );
+    let page_count = if explicit_page_count > 0 {
+        explicit_page_count
+    } else if total > 0 {
+        ((total + page_size - 1) / page_size).max(1)
+    } else {
+        1
+    };
+
+    SearchPageInfo {
+        page,
+        page_size,
+        total,
+        page_count,
+        has_more: page < page_count || (total == 0 && item_count >= page_size),
+    }
 }
 
 fn parse_keyword_video_results(data: &Value) -> Vec<KeywordVideoResult> {

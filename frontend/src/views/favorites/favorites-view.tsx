@@ -13,10 +13,12 @@ import { invoke } from "@/lib/api";
 import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
 import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
 import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
+import { fixedCardGridColumns, useCardLayout } from "@/hooks/use-card-layout";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { loadCachedPageData } from "@/lib/page-cache";
 import { useAppStore } from "@/stores/app-store";
+import { runPreservingMainScroll } from "@/lib/scroll-position";
 
 interface FavFolder {
   id: number;
@@ -58,6 +60,7 @@ interface SavedUserInfo {
 interface BackendConfig {
   sessdata: string;
 }
+const FAVORITES_PREFETCH_PAGES = 2;
 
 function isLoggedIn(user: SavedUserInfo | null | undefined) {
   return Boolean(user && (user.isLogin ?? user.is_login) && user.mid);
@@ -66,8 +69,7 @@ function isLoggedIn(user: SavedUserInfo | null | undefined) {
 export function FavoritesView() {
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
-  const cardScale = useAppStore((s) => Number(s.config?.card_scale ?? 1));
-  const pageSize = Math.max(4, Number(useAppStore((s) => s.config?.card_page_size ?? 12)));
+  const { pageSize, cardScale, columns } = useCardLayout();
   const [folders, setFolders] = useState<FavFolder[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<FavFolder | null>(null);
   const [medias, setMedias] = useState<FavMedia[]>([]);
@@ -75,6 +77,8 @@ export function FavoritesView() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [loadedPages, setLoadedPages] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
   const [selectedMediaIds, setSelectedMediaIds] = useState<Set<number>>(new Set());
   const selectedFolderIdRef = useRef<number | null>(null);
@@ -103,27 +107,59 @@ export function FavoritesView() {
   }, []);
 
   const fetchFolderContent = useCallback(
-    async (folder: FavFolder, page: number, forceRefresh = false) => {
-      setLoading(true);
+    async (
+      folder: FavFolder,
+      startPage: number,
+      mode: "replace" | "append" = "replace",
+      forceRefresh = false,
+      targetPage?: number
+    ) => {
+      if (mode === "replace") setLoading(true);
+      else setRefreshing(true);
       setError("");
       try {
-        const data = await loadCachedPageData(
-          `favorites:folder:${folder.id}:page:${page}:size:${pageSize}`,
-          () => invoke<FavInfo>("get_fav_info", {
-            mediaId: folder.id,
-            page,
-            pageSize,
-          }),
-          forceRefresh
-        );
-        setSelectedFolder(data.info);
-        setMedias(data.medias);
-        setCurrentPage(page);
-        setSelectedMediaIds(new Set());
+        const incoming: FavMedia[] = [];
+        let latestInfo = folder;
+        let lastLoadedPage = startPage - 1;
+        let nextHasMore = false;
+
+        for (let offset = 0; offset < FAVORITES_PREFETCH_PAGES; offset += 1) {
+          const page = startPage + offset;
+          const data = await loadCachedPageData(
+            `favorites:folder:${folder.id}:page:${page}:size:${pageSize}`,
+            () => invoke<FavInfo>("get_fav_info", {
+              mediaId: folder.id,
+              page,
+              pageSize,
+            }),
+            forceRefresh
+          );
+          latestInfo = data.info;
+          incoming.push(...(data.medias || []));
+          lastLoadedPage = page;
+          nextHasMore = data.has_more;
+          if (!data.has_more || !data.medias.length) break;
+        }
+
+        setSelectedFolder(latestInfo);
+        setMedias((previous) => {
+          const merged = mode === "append" ? [...previous, ...incoming] : incoming;
+          return Array.from(new Map(merged.map((media) => [media.id, media])).values());
+        });
+        setLoadedPages((previous) => mode === "append" ? Math.max(previous, lastLoadedPage) : lastLoadedPage);
+        setCurrentPage((previous) => targetPage ?? (mode === "append" ? previous : 1));
+        setHasMore(nextHasMore);
+        if (mode === "replace") setSelectedMediaIds(new Set());
       } catch (err) {
         setError(String(err));
+        if (mode === "replace") {
+          setMedias([]);
+          setLoadedPages(0);
+          setHasMore(false);
+        }
       } finally {
         setLoading(false);
+        setRefreshing(false);
       }
     },
     [pageSize]
@@ -169,31 +205,40 @@ export function FavoritesView() {
     if (!selectedFolder) {
       return;
     }
-    void fetchFolderContent(selectedFolder, 1);
+    void fetchFolderContent(selectedFolder, 1, "replace");
   }, [fetchFolderContent, selectedFolder?.id, pageSize]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [pageSize]);
 
   const pageCount = useMemo(
     () => Math.max(1, Math.ceil((selectedFolder?.media_count || 0) / pageSize)),
     [pageSize, selectedFolder?.media_count]
   );
+  const loadedPageCount = useMemo(
+    () => Math.max(1, loadedPages, Math.ceil(medias.length / pageSize)),
+    [loadedPages, medias.length, pageSize]
+  );
 
   const visiblePages = useMemo(
-    () => buildVisiblePages(currentPage, pageCount, 7),
-    [currentPage, pageCount]
+    () => buildVisiblePages(currentPage, loadedPageCount, 7),
+    [currentPage, loadedPageCount]
   );
+  const pagedMedias = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return medias.slice(start, start + pageSize);
+  }, [currentPage, medias, pageSize]);
+  const currentPageAllSelected = pagedMedias.length > 0 && pagedMedias.every((media) => selectedMediaIds.has(media.id));
+  const handlePageChange = (page: number) => {
+    runPreservingMainScroll(() => setCurrentPage(page));
+  };
+  const handleLoadMore = (targetPage?: number) => {
+    if (!selectedFolder) return;
+    void fetchFolderContent(selectedFolder, loadedPageCount + 1, "append", false, targetPage);
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
       const refreshedFolder = await fetchFolders(true);
-      if (refreshedFolder) {
-        const refreshedPage = refreshedFolder.id === selectedFolder?.id ? currentPage : 1;
-        await fetchFolderContent(refreshedFolder, refreshedPage, true);
-      }
+      if (refreshedFolder) await fetchFolderContent(refreshedFolder, 1, "replace", true);
     } finally {
       setRefreshing(false);
     }
@@ -244,11 +289,16 @@ export function FavoritesView() {
   };
 
   const handleSelectAll = () => {
-    if (selectedMediaIds.size === medias.length) {
-      setSelectedMediaIds(new Set());
-      return;
-    }
-    setSelectedMediaIds(new Set(medias.map((media) => media.id)));
+    const pageIds = pagedMedias.map((media) => media.id);
+    const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedMediaIds.has(id));
+    setSelectedMediaIds((previous) => {
+      const next = new Set(previous);
+      pageIds.forEach((id) => {
+        if (allPageSelected) next.delete(id);
+        else next.add(id);
+      });
+      return next;
+    });
   };
 
   const handleBatchDownload = async () => {
@@ -377,6 +427,8 @@ export function FavoritesView() {
                     onClick={() => {
                       setSelectedFolder(folder);
                       setCurrentPage(1);
+                      setLoadedPages(0);
+                      setHasMore(false);
                     }}
                     style={{
                       display: "flex",
@@ -434,7 +486,7 @@ export function FavoritesView() {
                   {selectedFolder?.title || "选择收藏夹"}
                 </h2>
                 <p style={{ marginTop: "3px", fontSize: "13px", color: "#8b8b9a" }}>
-                  当前页显示 {medias.length} 项，共 {selectedFolder?.media_count || 0} 项
+                  当前页显示 {pagedMedias.length} 项，共 {selectedFolder?.media_count || 0} 项
                 </p>
               </div>
 
@@ -446,7 +498,7 @@ export function FavoritesView() {
                 {batchMode ? (
                   <>
                     <GhostButton onClick={handleSelectAll}>
-                      {selectedMediaIds.size === medias.length && medias.length > 0 ? "取消全选" : "全选"}
+                      {currentPageAllSelected ? "取消全选" : "全选当前"}
                     </GhostButton>
                     <GhostButton onClick={() => void handleBatchDownload()} disabled={selectedMediaIds.size === 0}>
                       下载选中
@@ -470,18 +522,19 @@ export function FavoritesView() {
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "1fr",
+                      gridTemplateColumns: fixedCardGridColumns(columns),
                       gap: "14px",
                     }}
                   >
                     <AnimatePresence>
-                      {medias.map((media) => (
+                      {pagedMedias.map((media) => (
                         <FavoriteCard
                           key={media.id}
                           media={media}
                           batchMode={batchMode}
                           selected={selectedMediaIds.has(media.id)}
                           scale={cardScale}
+                          compact={columns > 1}
                           onDownload={handleDownload}
                           onOpenBrowser={handleOpenBrowser}
                           onOpenPlayer={handleOpenPlayer}
@@ -494,21 +547,38 @@ export function FavoritesView() {
 
                 <div style={{ display: "flex", justifyContent: "center", marginTop: "18px", paddingTop: "14px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-                    <PageButton disabled={currentPage <= 1} onClick={() => selectedFolder && void fetchFolderContent(selectedFolder, currentPage - 1)}>
+                    <span style={{ fontSize: "13px", color: "#8b8b9a", padding: "0 4px" }}>
+                      已载入 {loadedPageCount}/{pageCount} 页
+                    </span>
+                    <PageButton disabled={currentPage <= 1} onClick={() => handlePageChange(currentPage - 1)}>
                       上一页
                     </PageButton>
                     {visiblePages.map((page) => (
                       <PageButton
                         key={page}
                         active={page === currentPage}
-                        onClick={() => selectedFolder && void fetchFolderContent(selectedFolder, page)}
+                        onClick={() => handlePageChange(page)}
                       >
                         {page}
                       </PageButton>
                     ))}
-                    <PageButton disabled={currentPage >= pageCount} onClick={() => selectedFolder && void fetchFolderContent(selectedFolder, currentPage + 1)}>
+                    <PageButton
+                      disabled={(currentPage >= loadedPageCount && !hasMore) || refreshing}
+                      onClick={() => {
+                        if (currentPage < loadedPageCount) {
+                          handlePageChange(currentPage + 1);
+                          return;
+                        }
+                        handleLoadMore(loadedPageCount + 1);
+                      }}
+                    >
                       下一页
                     </PageButton>
+                    {hasMore ? (
+                      <PageButton disabled={refreshing} onClick={() => handleLoadMore()}>
+                        {refreshing ? "加载中" : "加载更多"}
+                      </PageButton>
+                    ) : null}
                   </div>
                 </div>
               </>
@@ -526,6 +596,7 @@ function FavoriteCard({
   batchMode,
   selected,
   scale,
+  compact,
   onDownload,
   onOpenBrowser,
   onOpenPlayer,
@@ -535,38 +606,20 @@ function FavoriteCard({
   batchMode: boolean;
   selected: boolean;
   scale: number;
+  compact: boolean;
   onDownload: (media: FavMedia) => void;
   onOpenBrowser: (bvid: string) => void;
   onOpenPlayer: (media: FavMedia) => void;
   onToggleSelect: (mediaId: number) => void;
 }) {
   const imageWidth = 176 * scale;
-
-  return (
-    <motion.div
-      whileHover={{ y: -2 }}
-      onClick={() => (batchMode ? onToggleSelect(media.id) : onOpenPlayer(media))}
-      style={{
-        display: "grid",
-        gridTemplateColumns: batchMode ? `24px ${imageWidth}px minmax(0, 1fr)` : `${imageWidth}px minmax(0, 1fr)`,
-        columnGap: "14px",
-        rowGap: "10px",
-        padding: `${14 * scale}px`,
-        borderRadius: `${14 * scale}px`,
-        backgroundColor: selected ? "#f8f7ff" : "#fff",
-        border: selected ? "1.5px solid #c7c2ff" : "1px solid #ececf2",
-        cursor: "pointer",
-      }}
-    >
-      {batchMode ? (
-        <SelectionBox selected={selected} onClick={() => onToggleSelect(media.id)} />
-      ) : null}
-
+  const content = (
+    <>
       <div
         style={{
-          width: `${imageWidth}px`,
+          width: compact ? "100%" : `${imageWidth}px`,
           aspectRatio: "16 / 9",
-          borderRadius: "10px",
+          borderRadius: `${10 * scale}px`,
           overflow: "hidden",
           backgroundColor: "#f3f4f6",
           position: "relative",
@@ -582,13 +635,13 @@ function FavoriteCard({
         <div
           style={{
             position: "absolute",
-            right: "6px",
-            bottom: "6px",
-            padding: "2px 7px",
-            borderRadius: "6px",
+            right: `${6 * scale}px`,
+            bottom: `${6 * scale}px`,
+            padding: `${2 * scale}px ${7 * scale}px`,
+            borderRadius: `${6 * scale}px`,
             backgroundColor: "rgba(0,0,0,0.72)",
             color: "#fff",
-            fontSize: "11.5px",
+            fontSize: `${11.5 * scale}px`,
             fontWeight: 600,
           }}
         >
@@ -615,9 +668,10 @@ function FavoriteCard({
           UP 主：{media.upper.name}
         </div>
 
-        <div style={{ marginTop: "auto", paddingTop: `${12 * scale}px`, display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end", gridColumn: "1 / -1" }}>
+        <div style={{ marginTop: "auto", paddingTop: `${12 * scale}px`, display: "flex", gap: `${8 * scale}px`, flexWrap: "wrap", justifyContent: "flex-end", gridColumn: "1 / -1" }}>
           <GhostButton
-            icon={<PlayIcon />}
+            scale={scale}
+            icon={<PlayIcon scale={scale} />}
             onClick={(event) => {
               event.stopPropagation();
               onOpenPlayer(media);
@@ -626,7 +680,8 @@ function FavoriteCard({
             播放
           </GhostButton>
           <GhostButton
-            icon={<Download style={{ width: 15, height: 15 }} />}
+            scale={scale}
+            icon={<Download style={{ width: 15 * scale, height: 15 * scale }} />}
             onClick={(event) => {
               event.stopPropagation();
               void onDownload(media);
@@ -635,7 +690,8 @@ function FavoriteCard({
             下载
           </GhostButton>
           <GhostButton
-            icon={<ExternalLink style={{ width: 15, height: 15 }} />}
+            scale={scale}
+            icon={<ExternalLink style={{ width: 15 * scale, height: 15 * scale }} />}
             onClick={(event) => {
               event.stopPropagation();
               onOpenBrowser(media.bvid);
@@ -645,6 +701,31 @@ function FavoriteCard({
           </GhostButton>
         </div>
       </div>
+    </>
+  );
+
+  return (
+    <motion.div
+      whileHover={{ y: -2 }}
+      onClick={() => (batchMode ? onToggleSelect(media.id) : onOpenPlayer(media))}
+      style={{
+        display: "grid",
+        gridTemplateColumns: compact
+          ? batchMode ? `${24 * scale}px minmax(0, 1fr)` : "1fr"
+          : batchMode ? `${24 * scale}px ${imageWidth}px minmax(0, 1fr)` : `${imageWidth}px minmax(0, 1fr)`,
+        columnGap: `${14 * scale}px`,
+        rowGap: `${10 * scale}px`,
+        padding: `${14 * scale}px`,
+        borderRadius: `${14 * scale}px`,
+        backgroundColor: selected ? "#f8f7ff" : "#fff",
+        border: selected ? "1.5px solid #c7c2ff" : "1px solid #ececf2",
+        cursor: "pointer",
+      }}
+    >
+      {batchMode ? (
+        <SelectionBox scale={scale} selected={selected} onClick={() => onToggleSelect(media.id)} />
+      ) : null}
+      {compact && batchMode ? <div style={{ minWidth: 0, display: "grid", gap: `${10 * scale}px` }}>{content}</div> : content}
     </motion.div>
   );
 }
@@ -688,11 +769,13 @@ function GhostButton({
   children,
   icon,
   disabled = false,
+  scale = 1,
   onClick,
 }: {
   children: React.ReactNode;
   icon?: React.ReactNode;
   disabled?: boolean;
+  scale?: number;
   onClick?: React.MouseEventHandler<HTMLButtonElement>;
 }) {
   return (
@@ -703,10 +786,10 @@ function GhostButton({
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: "6px",
-        padding: "8px 14px",
-        borderRadius: "10px",
-        fontSize: "13.5px",
+        gap: `${6 * scale}px`,
+        padding: `${8 * scale}px ${14 * scale}px`,
+        borderRadius: `${10 * scale}px`,
+        fontSize: `${13.5 * scale}px`,
         fontWeight: 600,
         color: disabled ? "#b9b9c7" : "#505065",
         backgroundColor: "#fff",
@@ -757,9 +840,11 @@ function PageButton({
 function SelectionBox({
   selected,
   onClick,
+  scale = 1,
 }: {
   selected: boolean;
   onClick: () => void;
+  scale?: number;
 }) {
   return (
     <div
@@ -768,26 +853,26 @@ function SelectionBox({
         onClick();
       }}
       style={{
-        width: "20px",
-        height: "20px",
-        borderRadius: "6px",
+        width: `${20 * scale}px`,
+        height: `${20 * scale}px`,
+        borderRadius: `${6 * scale}px`,
         border: selected ? "none" : "2px solid #c8c8d2",
         backgroundColor: selected ? "#6366f1" : "#fff",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         cursor: "pointer",
-        marginTop: "6px",
+        marginTop: `${6 * scale}px`,
       }}
     >
-      {selected ? <Check style={{ width: 13, height: 13, color: "#fff" }} /> : null}
+      {selected ? <Check style={{ width: 13 * scale, height: 13 * scale, color: "#fff" }} /> : null}
     </div>
   );
 }
 
-function PlayIcon() {
+function PlayIcon({ scale = 1 }: { scale?: number }) {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <svg width={15 * scale} height={15 * scale} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M8 6.82v10.36c0 .79.87 1.27 1.54.84l8.14-5.18a1 1 0 0 0 0-1.68L9.54 5.98A1 1 0 0 0 8 6.82Z" />
     </svg>
   );

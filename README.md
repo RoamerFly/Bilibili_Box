@@ -123,7 +123,7 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 
 ### 方式一：下载发行版（推荐普通用户）
 
-前往 [Releases](https://github.com/1623658271/Bilibili_Box/releases/latest) 页面下载对应平台的安装包或便携版。
+前往 [Releases](https://github.com/RoamerFly/Bilibili_Box/releases/latest) 页面下载对应平台的安装包或便携版；国内也可参考 [GitCode 镜像](https://gitcode.com/roverfly/Bilibili_box)。
 
 | 平台 | 版本 |
 | --- | --- |
@@ -150,7 +150,7 @@ Windows 需要安装 Microsoft Visual C++ Build Tools，或安装 Visual Studio 
 
 ```bash
 # 克隆项目
-git clone https://github.com/1623658271/Bilibili_Box.git
+git clone https://github.com/RoamerFly/Bilibili_Box.git
 cd Bilibili_Box
 
 # 安装依赖
@@ -217,7 +217,7 @@ bilibili-box/
 
 ### Q: 如何导入/导出下载列表？
 
-下载任务保存在 `data/download/` 下的 `.download_tasks/` 目录中，便携版可直接复制整个 `data/` 文件夹。
+下载文件保存在当前用户的 `data/{user_name}/download/` 目录中，下载任务缓存保存在 `data/{user_name}/cache/download_tasks/`，便携版可直接复制整个 `data/` 文件夹。
 
 ## 免责声明
 

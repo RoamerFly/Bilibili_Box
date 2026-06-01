@@ -17,9 +17,11 @@ import { invoke } from "@/lib/api";
 import { loadCachedPageData } from "@/lib/page-cache";
 import { formatBiliImageUrl } from "@/lib/utils";
 import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
+import { fixedCardGridColumns, useCardLayout } from "@/hooks/use-card-layout";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { CardViewMode, useAppStore } from "@/stores/app-store";
+import { runPreservingMainScroll } from "@/lib/scroll-position";
 
 type FollowStatus = "following" | "finished" | "paused";
 
@@ -81,8 +83,7 @@ export function BangumiView() {
   const openPlayer = useAppStore((s) => s.openPlayer);
   const viewMode = useAppStore((s) => s.cardViewModes.bangumi ?? "grid");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
-  const cardScale = useAppStore((s) => Number(s.config?.card_scale ?? 1));
-  const pageSize = Math.max(4, Number(useAppStore((s) => s.config?.card_page_size ?? 12)));
+  const { pageSize, cardScale, columns } = useCardLayout();
   const [items, setItems] = useState<BangumiFollowItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -206,6 +207,8 @@ export function BangumiView() {
                 cid: ep.cid,
                 title: `${title} - ${ep.long_title || ep.title}`.trim(),
                 cids: [ep.cid],
+                collection_title: title,
+                episode_title: ep.long_title || ep.title,
                 download_quality: downloadQuality,
               },
             })
@@ -398,7 +401,7 @@ export function BangumiView() {
                     display: "grid",
                     gridTemplateColumns:
                       viewMode === "grid"
-                        ? `repeat(auto-fit, minmax(${220 * cardScale}px, 1fr))`
+                        ? fixedCardGridColumns(columns)
                         : "1fr",
                     gap: "16px",
                   }}
@@ -419,15 +422,15 @@ export function BangumiView() {
 
                 <div style={{ display: "flex", justifyContent: "center", marginTop: "22px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-                    <PageButton disabled={currentPage <= 1} onClick={() => setCurrentPage((prev) => prev - 1)}>
+                    <PageButton disabled={currentPage <= 1} onClick={() => runPreservingMainScroll(() => setCurrentPage((prev) => prev - 1))}>
                       上一页
                     </PageButton>
                     {visiblePages.map((page) => (
-                      <PageButton key={page} active={page === currentPage} onClick={() => setCurrentPage(page)}>
+                      <PageButton key={page} active={page === currentPage} onClick={() => runPreservingMainScroll(() => setCurrentPage(page))}>
                         {page}
                       </PageButton>
                     ))}
-                    <PageButton disabled={currentPage >= pageCount} onClick={() => setCurrentPage((prev) => prev + 1)}>
+                    <PageButton disabled={currentPage >= pageCount} onClick={() => runPreservingMainScroll(() => setCurrentPage((prev) => prev + 1))}>
                       下一页
                     </PageButton>
                   </div>
@@ -503,7 +506,7 @@ function BangumiCard({
       style={{
         display: isGrid ? "block" : "grid",
         gridTemplateColumns: isGrid ? undefined : `${144 * scale}px minmax(0, 1fr)`,
-        gap: isGrid ? undefined : "14px",
+        gap: isGrid ? undefined : `${14 * scale}px`,
         borderRadius: `${14 * scale}px`,
         backgroundColor: "#fff",
         border: "1px solid #ececf2",
@@ -587,7 +590,7 @@ function BangumiCard({
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            gap: "10px",
+            gap: `${10 * scale}px`,
           }}
         >
           <span style={{ fontSize: `${12 * scale}px`, color: "#8b8b9a" }}>

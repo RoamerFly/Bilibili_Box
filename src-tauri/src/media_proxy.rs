@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::api::video::{DashAudio, DashSegmentBase, DashVideo, PlayUrlInfo};
 use crate::api::BiliClient;
 
-const TOKEN_TTL: Duration = Duration::from_secs(2 * 60 * 60);
+const TOKEN_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MEDIA_PROTOCOL: &str = "bili-media";
 const DEFAULT_CHUNK_SIZE: u64 = 1024 * 1024;
 const MAX_CHUNK_SIZE: u64 = 2 * 1024 * 1024;
@@ -283,8 +283,11 @@ impl MediaProxyServer {
 
         let token = target.trim_matches('/');
         let source = {
-            let entries = self.entries.read();
-            entries.get(token).map(|entry| entry.source.clone())
+            let mut entries = self.entries.write();
+            entries.get_mut(token).map(|entry| {
+                entry.created_at = Instant::now();
+                entry.source.clone()
+            })
         };
         let Some(source) = source else {
             return Ok(build_text_response(
@@ -475,7 +478,7 @@ impl MediaProxyServer {
 
         Response::builder()
             .status(StatusCode::PARTIAL_CONTENT)
-            .header(CONTENT_TYPE, "video/mp4")
+            .header(CONTENT_TYPE, local_media_content_type(&file_path))
             .header(CONTENT_LENGTH, body_length.to_string())
             .header(
                 CONTENT_RANGE,
@@ -590,6 +593,22 @@ fn local_range_window(range: Option<&str>, total_size: u64) -> (u64, u64) {
         .min(start.saturating_add(MAX_CHUNK_SIZE.saturating_sub(1)))
         .min(total_size.saturating_sub(1));
     (start, end)
+}
+
+fn local_media_content_type(file_path: &PathBuf) -> &'static str {
+    match file_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("mp3") => "audio/mpeg",
+        Some("m4a") => "audio/mp4",
+        Some("mkv") => "video/x-matroska",
+        Some("webm") => "video/webm",
+        Some("m4s") => "video/mp4",
+        _ => "video/mp4",
+    }
 }
 
 pub fn build_media_protocol_url(token: &str) -> String {

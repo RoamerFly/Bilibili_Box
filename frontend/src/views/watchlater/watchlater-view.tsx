@@ -15,6 +15,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import { invoke } from "@/lib/api";
 import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
+import { fixedCardGridColumns, useCardLayout } from "@/hooks/use-card-layout";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
@@ -22,6 +23,7 @@ import { showComingSoon } from "@/lib/coming-soon";
 import { loadCachedPageData } from "@/lib/page-cache";
 import { useAppStore } from "@/stores/app-store";
 import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
+import { runPreservingMainScroll } from "@/lib/scroll-position";
 
 interface WatchLaterItem {
   aid: number;
@@ -104,8 +106,7 @@ export function WatchLaterView() {
   const openPlayer = useAppStore((s) => s.openPlayer);
   const viewMode = useAppStore((s) => s.cardViewModes.watchlater ?? "list");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
-  const cardScale = useAppStore((s) => Number(s.config?.card_scale ?? 1));
-  const pageSize = Math.max(4, Number(useAppStore((s) => s.config?.card_page_size ?? 12)));
+  const { pageSize, cardScale, columns } = useCardLayout();
   const [items, setItems] = useState<WatchLaterItem[]>([]);
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -369,7 +370,7 @@ export function WatchLaterView() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: viewMode === "grid" ? `repeat(auto-fit, minmax(${420 * cardScale}px, 1fr))` : "1fr",
+                  gridTemplateColumns: viewMode === "grid" ? fixedCardGridColumns(columns) : "1fr",
                   gap: "10px",
                 }}
               >
@@ -408,15 +409,15 @@ export function WatchLaterView() {
                     border: "1.5px solid #ececf2",
                   }}
                 >
-                  <PageButton disabled={currentPage <= 1} onClick={() => setCurrentPage((prev) => prev - 1)}>
+                  <PageButton disabled={currentPage <= 1} onClick={() => runPreservingMainScroll(() => setCurrentPage((prev) => prev - 1))}>
                     上一页
                   </PageButton>
                   {visiblePages.map((page) => (
-                    <PageButton key={page} active={page === currentPage} onClick={() => setCurrentPage(page)}>
+                    <PageButton key={page} active={page === currentPage} onClick={() => runPreservingMainScroll(() => setCurrentPage(page))}>
                       {page}
                     </PageButton>
                   ))}
-                  <PageButton disabled={currentPage >= pageCount} onClick={() => setCurrentPage((prev) => prev + 1)}>
+                  <PageButton disabled={currentPage >= pageCount} onClick={() => runPreservingMainScroll(() => setCurrentPage((prev) => prev + 1))}>
                     下一页
                   </PageButton>
                 </div>
@@ -450,23 +451,23 @@ function WatchLaterCard({
       whileHover={{ backgroundColor: "#fafafe" }}
       style={{
         display: "grid",
-        gridTemplateColumns: `20px ${160 * scale}px minmax(0, 1fr)`,
+        gridTemplateColumns: `${20 * scale}px ${160 * scale}px minmax(0, 1fr)`,
         alignItems: "start",
-        columnGap: "16px",
-        rowGap: "12px",
+        columnGap: `${16 * scale}px`,
+        rowGap: `${12 * scale}px`,
         padding: `${13 * scale}px ${16 * scale}px`,
         borderRadius: `${13 * scale}px`,
         backgroundColor: selected ? "#f8f7ff" : "#fff",
         border: selected ? "2px solid #c7c2ff" : "1px solid #ececf2",
       }}
     >
-      <SelectionBox selected={selected} onClick={onSelect} />
+      <SelectionBox scale={scale} selected={selected} onClick={onSelect} />
 
       <div
         style={{
           width: `${160 * scale}px`,
           height: `${90 * scale}px`,
-          borderRadius: "10px",
+          borderRadius: `${10 * scale}px`,
           overflow: "hidden",
           flexShrink: 0,
           position: "relative",
@@ -485,13 +486,13 @@ function WatchLaterCard({
         <div
           style={{
             position: "absolute",
-            bottom: "6px",
-            right: "6px",
-            padding: "2px 7px",
-            borderRadius: "5px",
+            bottom: `${6 * scale}px`,
+            right: `${6 * scale}px`,
+            padding: `${2 * scale}px ${7 * scale}px`,
+            borderRadius: `${5 * scale}px`,
             backgroundColor: "rgba(0,0,0,0.72)",
             color: "#fff",
-            fontSize: "11.5px",
+            fontSize: `${11.5 * scale}px`,
             fontWeight: 600,
           }}
         >
@@ -499,7 +500,7 @@ function WatchLaterCard({
         </div>
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: `${6 * scale}px` }}>
         <p
           style={{
             fontSize: `${14.5 * scale}px`,
@@ -514,24 +515,25 @@ function WatchLaterCard({
         >
           {item.title}
         </p>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: `${13 * scale}px`, color: "#7a7a8c", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: `${10 * scale}px`, fontSize: `${13 * scale}px`, color: "#7a7a8c", flexWrap: "wrap" }}>
           <span style={{ fontWeight: 500 }}>UP：{item.owner.name}</span>
           <span>{formatAddTime(item.add_at)}</span>
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "8px", flexShrink: 0, gridColumn: "2 / -1" }}>
-        <IconAction title="播放视频" onClick={onPlay}>
-          <Play style={{ width: 14, height: 14 }} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: `${8 * scale}px`, flexShrink: 0, gridColumn: "2 / -1" }}>
+        <IconAction scale={scale} title="播放视频" onClick={onPlay}>
+          <Play style={{ width: 14 * scale, height: 14 * scale }} />
         </IconAction>
-        <IconAction title="加入下载" onClick={() => onDownload(item.bvid, item.cid, item.title)}>
-          <Download style={{ width: 15, height: 15 }} />
+        <IconAction scale={scale} title="加入下载" onClick={() => onDownload(item.bvid, item.cid, item.title)}>
+          <Download style={{ width: 15 * scale, height: 15 * scale }} />
         </IconAction>
         <IconAction
+          scale={scale}
           title="浏览器打开"
           onClick={() => void openExternalUrl(biliVideoUrl(item.bvid)).catch((error) => console.error("打开浏览器失败:", error))}
         >
-          <MoreVertical style={{ width: 17, height: 17 }} />
+          <MoreVertical style={{ width: 17 * scale, height: 17 * scale }} />
         </IconAction>
       </div>
     </motion.div>
@@ -724,17 +726,19 @@ function PageButton({
 function SelectionBox({
   selected,
   onClick,
+  scale = 1,
 }: {
   selected: boolean;
   onClick: () => void;
+  scale?: number;
 }) {
   return (
     <div
       onClick={onClick}
       style={{
-        width: "20px",
-        height: "20px",
-        borderRadius: "5px",
+        width: `${20 * scale}px`,
+        height: `${20 * scale}px`,
+        borderRadius: `${5 * scale}px`,
         border: selected ? "none" : "2px solid #c8c8d2",
         backgroundColor: selected ? "#6366f1" : "#fff",
         display: "flex",
@@ -745,7 +749,7 @@ function SelectionBox({
       }}
     >
       {selected ? (
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <svg width={12 * scale} height={12 * scale} viewBox="0 0 12 12" fill="none">
           <path d="M2.5 6L5 8.5L9.5 3.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       ) : null}
@@ -757,10 +761,12 @@ function IconAction({
   children,
   title,
   onClick,
+  scale = 1,
 }: {
   children: React.ReactNode;
   title: string;
   onClick: () => void;
+  scale?: number;
 }) {
   return (
     <button
@@ -770,9 +776,9 @@ function IconAction({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        width: "34px",
-        height: "34px",
-        borderRadius: "9px",
+        width: `${34 * scale}px`,
+        height: `${34 * scale}px`,
+        borderRadius: `${9 * scale}px`,
         color: "#8b8b9a",
         backgroundColor: "transparent",
         border: "1.5px solid #e5e5ec",

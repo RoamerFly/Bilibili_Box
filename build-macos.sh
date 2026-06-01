@@ -92,7 +92,7 @@ npm run tauri -- build
 echo
 echo "[5/5] Preparing portable package in $OUTPUT_DIR..."
 rm -rf "$OUTPUT_DIR"
-mkdir -p "$OUTPUT_DIR/env" "$OUTPUT_DIR/data/user" "$OUTPUT_DIR/data/download"
+mkdir -p "$OUTPUT_DIR/env" "$OUTPUT_DIR/data/guest/cache" "$OUTPUT_DIR/data/guest/download"
 if [[ -f "THIRD_PARTY_NOTICES.md" ]]; then
     install -m 644 "THIRD_PARTY_NOTICES.md" "$OUTPUT_DIR/THIRD_PARTY_NOTICES.md"
 fi

@@ -91,8 +91,9 @@ if exist "%OUTPUT_DIR%" (
     )
 )
 mkdir "%OUTPUT_DIR%\env" >nul
-mkdir "%OUTPUT_DIR%\data\user" >nul
-mkdir "%OUTPUT_DIR%\data\download" >nul
+mkdir "%OUTPUT_DIR%\data\guest" >nul
+mkdir "%OUTPUT_DIR%\data\guest\cache" >nul
+mkdir "%OUTPUT_DIR%\data\guest\download" >nul
 if exist "THIRD_PARTY_NOTICES.md" copy "THIRD_PARTY_NOTICES.md" "%OUTPUT_DIR%\" /y >nul
 
 if exist "%TAURI_RELEASE_DIR%\bilibili-box.exe" (

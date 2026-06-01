@@ -6,6 +6,8 @@ export interface Config {
   start_maximized: boolean;
   card_scale: number;
   card_page_size: number;
+  card_page_rows: number;
+  card_page_columns: number;
   enable_file_logger: boolean;
   sessdata: string;
   cookie?: string;
@@ -160,6 +162,8 @@ export interface AggregateSearchResult {
   keyword: string;
   videos: AggregateKeywordVideoResult[];
   bangumi: AggregateKeywordBangumiResult[];
+  video_page: SearchPageInfo;
+  bangumi_page: SearchPageInfo;
 }
 
 export type SearchOrder = "totalrank" | "click" | "pubdate" | "dm" | "stow";
@@ -170,6 +174,14 @@ export interface SearchFilters {
   order: SearchOrder;
   pubtime: SearchDate;
   duration: SearchDuration;
+}
+
+export interface SearchPageInfo {
+  page: number;
+  page_size: number;
+  total: number;
+  page_count: number;
+  has_more: boolean;
 }
 
 export interface BangumiSearchResult {
@@ -306,6 +318,8 @@ export interface CreateDownloadTaskParams {
   cid: number;
   title: string;
   cids: number[];
+  collection_title?: string;
+  episode_title?: string;
   download_quality?: string;
   audio_only?: boolean;
 }
@@ -350,6 +364,8 @@ export interface DownloadProgress {
   audio_url?: string;
   error?: string;
   output_path?: string;
+  collection_title?: string;
+  episode_title?: string;
   created_at?: number;
 }
 

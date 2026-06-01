@@ -13,6 +13,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import { invoke } from "@/lib/api";
 import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
+import { fixedCardGridColumns, useCardLayout } from "@/hooks/use-card-layout";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
@@ -20,6 +21,7 @@ import { loadCachedPageData } from "@/lib/page-cache";
 import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
 import type { BangumiInfo } from "@/lib/types";
 import { useAppStore } from "@/stores/app-store";
+import { runPreservingMainScroll } from "@/lib/scroll-position";
 
 type ViewMode = "list" | "grid";
 type TimeFilter = "all" | "today" | "yesterday" | "week";
@@ -72,6 +74,7 @@ const DEVICE_OPTIONS: Array<{ value: DeviceType; label: string }> = [
   { value: "Pad", label: "平板" },
   { value: "TV", label: "TV" },
 ];
+const HISTORY_PREFETCH_PAGES = 2;
 
 function getTimeRange(filter: TimeFilter) {
   const now = new Date();
@@ -153,8 +156,7 @@ export function HistoryView() {
   const openPlayer = useAppStore((s) => s.openPlayer);
   const viewMode = useAppStore((s) => s.cardViewModes.history ?? "list");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
-  const cardScale = useAppStore((s) => Number(s.config?.card_scale ?? 1));
-  const pageSize = Math.max(4, Number(useAppStore((s) => s.config?.card_page_size ?? 12)));
+  const { pageSize, cardScale, columns } = useCardLayout();
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -166,37 +168,74 @@ export function HistoryView() {
   const [deviceType, setDeviceType] = useState<DeviceType>("All");
   const [currentPage, setCurrentPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [loadedPages, setLoadedPages] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [timeMenuOpen, setTimeMenuOpen] = useState(false);
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
   const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
   const fetchHistory = useCallback(
-    async (page = 1, showLoading = true, forceRefresh = false) => {
-      if (showLoading) setLoading(true);
+    async (
+      startPage = 1,
+      mode: "replace" | "append" = "replace",
+      showLoading = true,
+      forceRefresh = false,
+      targetPage?: number
+    ) => {
+      if (showLoading && mode === "replace") {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
       setError("");
 
       try {
         const timeRange = getTimeRange(timeFilter);
         const durationRange = getDurationRange(durationFilter);
-        const params = {
-          pn: page,
-          ps: pageSize,
-          keyword,
-          ...timeRange,
-          ...durationRange,
-          device_type: deviceType,
-        };
-        const data = await loadCachedPageData(
-          `history:${JSON.stringify(params)}`,
-          () => invoke<HistoryInfo>("get_history_info", { params }),
-          forceRefresh
-        );
-        setItems(data.list || []);
-        setCurrentPage(data.page?.pn || page);
-        setTotal(data.page?.total || data.list.length);
+        const incoming: HistoryItem[] = [];
+        let nextTotal = 0;
+        let lastLoadedPage = startPage - 1;
+
+        for (let offset = 0; offset < HISTORY_PREFETCH_PAGES; offset += 1) {
+          const page = startPage + offset;
+          const params = {
+            pn: page,
+            ps: pageSize,
+            keyword,
+            ...timeRange,
+            ...durationRange,
+            device_type: deviceType,
+          };
+          const data = await loadCachedPageData(
+            `history:${JSON.stringify(params)}`,
+            () => invoke<HistoryInfo>("get_history_info", { params }),
+            forceRefresh
+          );
+          incoming.push(...(data.list || []));
+          nextTotal = data.page?.total || incoming.length;
+          lastLoadedPage = data.page?.pn || page;
+          if (!data.list?.length || lastLoadedPage * pageSize >= nextTotal) {
+            break;
+          }
+        }
+
+        setItems((previous) => {
+          const merged = mode === "append" ? [...previous, ...incoming] : incoming;
+          return Array.from(
+            new Map(merged.map((item) => [`${item.business}-${item.ep_id ?? item.bvid}-${item.cid}-${item.view_at}`, item])).values()
+          );
+        });
+        setLoadedPages((previous) => mode === "append" ? Math.max(previous, lastLoadedPage) : lastLoadedPage);
+        setCurrentPage((previous) => targetPage ?? (mode === "append" ? previous : 1));
+        setTotal(nextTotal);
+        setHasMore(lastLoadedPage * pageSize < nextTotal);
       } catch (err) {
         setError(String(err));
-        setItems([]);
-        setTotal(0);
+        if (mode === "replace") {
+          setItems([]);
+          setTotal(0);
+          setLoadedPages(0);
+          setHasMore(false);
+        }
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -207,32 +246,50 @@ export function HistoryView() {
 
   useEffect(() => {
     setCurrentPage(1);
-    void fetchHistory(1);
+    setLoadedPages(0);
+    void fetchHistory(1, "replace");
   }, [fetchHistory]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchHistory(currentPage, false, true);
+    await fetchHistory(1, "replace", false, true);
   };
 
   const handleDownload = async (item: HistoryItem) => {
     try {
-      let target = { bvid: item.bvid, cid: item.cid, title: item.title };
+      let target = {
+        bvid: item.bvid,
+        cid: item.cid,
+        title: item.title,
+        collectionTitle: undefined as string | undefined,
+        episodeTitle: undefined as string | undefined,
+      };
       if (isBangumiHistoryItem(item)) {
         const info = await invoke<BangumiInfo>("get_bangumi_info", { epId: item.ep_id });
         const episode = info.episodes.find((current) => current.ep_id === item.ep_id) ?? info.episodes[0];
         if (!episode) throw new Error("未找到可下载的番剧剧集");
+        const episodeTitle = episode.long_title || episode.title;
         target = {
           bvid: episode.bvid,
           cid: episode.cid,
-          title: `${info.title} - ${episode.long_title || episode.title}`.trim(),
+          title: `${info.title} - ${episodeTitle}`.trim(),
+          collectionTitle: info.title,
+          episodeTitle,
         };
       }
       if (!target.bvid || !target.cid) throw new Error("当前历史记录缺少可下载的视频标识");
       const downloadQuality = await requestDownloadQuality({ bvid: target.bvid, cid: target.cid });
       if (!downloadQuality) return;
       const taskIds = await invoke<string[]>("create_download_task", {
-        params: { bvid: target.bvid, cid: target.cid, title: target.title, cids: [target.cid], download_quality: downloadQuality },
+        params: {
+          bvid: target.bvid,
+          cid: target.cid,
+          title: target.title,
+          cids: [target.cid],
+          collection_title: target.collectionTitle,
+          episode_title: target.episodeTitle,
+          download_quality: downloadQuality,
+        },
       });
       notifyDownloadQueued(taskIds, target.title);
     } catch (err) {
@@ -277,7 +334,21 @@ export function HistoryView() {
   };
 
   const pageCount = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [pageSize, total]);
-  const visiblePages = useMemo(() => buildVisiblePages(currentPage, pageCount), [currentPage, pageCount]);
+  const loadedPageCount = useMemo(
+    () => Math.max(1, loadedPages, Math.ceil(items.length / pageSize)),
+    [items.length, loadedPages, pageSize]
+  );
+  const visiblePages = useMemo(() => buildVisiblePages(currentPage, loadedPageCount), [currentPage, loadedPageCount]);
+  const pagedItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return items.slice(start, start + pageSize);
+  }, [currentPage, items, pageSize]);
+  const handlePageChange = (page: number) => {
+    runPreservingMainScroll(() => setCurrentPage(page));
+  };
+  const handleLoadMore = (targetPage?: number) => {
+    void fetchHistory(loadedPageCount + 1, "append", false, false, targetPage);
+  };
 
   return (
     <div
@@ -435,12 +506,12 @@ export function HistoryView() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: viewMode === "grid" ? `repeat(auto-fit, minmax(${420 * cardScale}px, 1fr))` : "1fr",
+                gridTemplateColumns: viewMode === "grid" ? fixedCardGridColumns(columns) : "1fr",
                 gap: "10px",
               }}
             >
               <AnimatePresence>
-                {items.map((item) => (
+                {pagedItems.map((item) => (
                   <HistoryCard
                     key={`${item.business}-${item.ep_id ?? item.bvid}-${item.cid}-${item.view_at}`}
                     item={item}
@@ -466,17 +537,34 @@ export function HistoryView() {
                 border: "1.5px solid #ececf2",
               }}
             >
-              <PageButton disabled={currentPage <= 1} onClick={() => void fetchHistory(currentPage - 1)}>
+              <span style={{ fontSize: "13px", color: "#8b8b9a", padding: "0 4px" }}>
+                已载入 {loadedPageCount}/{pageCount} 页
+              </span>
+              <PageButton disabled={currentPage <= 1} onClick={() => handlePageChange(currentPage - 1)}>
                 上一页
               </PageButton>
               {visiblePages.map((page) => (
-                <PageButton key={page} active={page === currentPage} onClick={() => void fetchHistory(page)}>
+                <PageButton key={page} active={page === currentPage} onClick={() => handlePageChange(page)}>
                   {page}
                 </PageButton>
               ))}
-              <PageButton disabled={currentPage >= pageCount} onClick={() => void fetchHistory(currentPage + 1)}>
+              <PageButton
+                disabled={(currentPage >= loadedPageCount && !hasMore) || refreshing}
+                onClick={() => {
+                  if (currentPage < loadedPageCount) {
+                    handlePageChange(currentPage + 1);
+                    return;
+                  }
+                  handleLoadMore(loadedPageCount + 1);
+                }}
+              >
                 下一页
               </PageButton>
+              {hasMore ? (
+                <PageButton disabled={refreshing} onClick={() => handleLoadMore()}>
+                  {refreshing ? "加载中" : "加载更多"}
+                </PageButton>
+              ) : null}
             </div>
           </div>
         </>
@@ -592,8 +680,8 @@ function HistoryCard({
         display: "grid",
         gridTemplateColumns: `${160 * scale}px minmax(0, 1fr)`,
         alignItems: "start",
-        columnGap: "16px",
-        rowGap: "12px",
+        columnGap: `${16 * scale}px`,
+        rowGap: `${12 * scale}px`,
         padding: `${13 * scale}px ${16 * scale}px`,
         borderRadius: `${13 * scale}px`,
         backgroundColor: "#fff",
@@ -604,7 +692,7 @@ function HistoryCard({
         style={{
           width: `${160 * scale}px`,
           height: `${90 * scale}px`,
-          borderRadius: "10px",
+          borderRadius: `${10 * scale}px`,
           overflow: "hidden",
           position: "relative",
           flexShrink: 0,
@@ -623,13 +711,13 @@ function HistoryCard({
         <div
           style={{
             position: "absolute",
-            right: "6px",
-            bottom: "6px",
-            padding: "2px 7px",
-            borderRadius: "5px",
+            right: `${6 * scale}px`,
+            bottom: `${6 * scale}px`,
+            padding: `${2 * scale}px ${7 * scale}px`,
+            borderRadius: `${5 * scale}px`,
             backgroundColor: "rgba(0,0,0,0.72)",
             color: "#fff",
-            fontSize: "11.5px",
+            fontSize: `${11.5 * scale}px`,
             fontWeight: 600,
           }}
         >
@@ -652,25 +740,26 @@ function HistoryCard({
         >
           {item.title}
         </p>
-        <div style={{ marginTop: `${8 * scale}px`, fontSize: `${13 * scale}px`, color: "#7a7a8c", display: "flex", gap: "12px", flexWrap: "wrap" }}>
+        <div style={{ marginTop: `${8 * scale}px`, fontSize: `${13 * scale}px`, color: "#7a7a8c", display: "flex", gap: `${12 * scale}px`, flexWrap: "wrap" }}>
           <span>UP：{item.author.name}</span>
           <span>{getProgressLabel(item.progress, item.duration)}</span>
           <span>{formatViewTime(item.view_at)}</span>
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "8px", flexShrink: 0, gridColumn: "1 / -1" }}>
-        <IconAction title="播放视频" onClick={onPlay}>
-          <Play style={{ width: 16, height: 16 }} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: `${8 * scale}px`, flexShrink: 0, gridColumn: "1 / -1" }}>
+        <IconAction scale={scale} title="播放视频" onClick={onPlay}>
+          <Play style={{ width: 16 * scale, height: 16 * scale }} />
         </IconAction>
-        <IconAction title="加入下载" onClick={() => onDownload(item)}>
-          <Download style={{ width: 16, height: 16 }} />
+        <IconAction scale={scale} title="加入下载" onClick={() => onDownload(item)}>
+          <Download style={{ width: 16 * scale, height: 16 * scale }} />
         </IconAction>
         <IconAction
+          scale={scale}
           title="浏览器打开"
           onClick={onOpenBrowser}
         >
-          <MoreVertical style={{ width: 16, height: 16 }} />
+          <MoreVertical style={{ width: 16 * scale, height: 16 * scale }} />
         </IconAction>
       </div>
     </motion.div>
@@ -779,10 +868,12 @@ function IconAction({
   children,
   title,
   onClick,
+  scale = 1,
 }: {
   children: React.ReactNode;
   title: string;
   onClick: () => void;
+  scale?: number;
 }) {
   return (
     <button
@@ -792,9 +883,9 @@ function IconAction({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        width: "34px",
-        height: "34px",
-        borderRadius: "9px",
+        width: `${34 * scale}px`,
+        height: `${34 * scale}px`,
+        borderRadius: `${9 * scale}px`,
         border: "1.5px solid #e5e5ec",
         backgroundColor: "transparent",
         color: "#8b8b9a",

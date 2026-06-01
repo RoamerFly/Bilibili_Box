@@ -2,7 +2,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -55,6 +55,10 @@ pub struct DownloadProgress {
     pub error: Option<String>,
     #[serde(default)]
     pub output_path: Option<String>,
+    #[serde(default)]
+    pub collection_title: Option<String>,
+    #[serde(default)]
+    pub episode_title: Option<String>,
     #[serde(default)]
     pub created_at: i64,
 }
@@ -189,22 +193,33 @@ impl DownloadManager {
             } else {
                 format!("{}_{}", params.bvid, cid)
             };
+            let page_episode_title =
+                page_info.and_then(|page| Self::trimmed_string(Some(&page.part)));
+            let collection_title = Self::trimmed_string(params.collection_title.as_deref())
+                .or_else(|| (params.cids.len() > 1).then(|| video_info.title.clone()));
+            let episode_title = Self::trimmed_string(params.episode_title.as_deref())
+                .or_else(|| page_episode_title.clone());
+            let base_title = if params.title.trim().is_empty() {
+                video_info.title.clone()
+            } else {
+                params.title.clone()
+            };
+            let title = if collection_title.is_some() {
+                episode_title.clone().unwrap_or(base_title)
+            } else if params.cids.len() > 1 {
+                page_info
+                    .map(|page| format!("{} - {}", video_info.title, page.part))
+                    .unwrap_or_else(|| format!("{} - {}", params.title, cid))
+            } else {
+                base_title
+            };
+
             let progress = DownloadProgress {
                 task_id: task_id.clone(),
                 aid: video_info.aid,
                 bvid: params.bvid.clone(),
                 cid: *cid,
-                title: if params.cids.len() > 1 {
-                    page_info
-                        .map(|page| format!("{} - {}", video_info.title, page.part))
-                        .unwrap_or_else(|| format!("{} - {}", params.title, cid))
-                } else {
-                    if params.title.trim().is_empty() {
-                        video_info.title.clone()
-                    } else {
-                        params.title.clone()
-                    }
-                },
+                title,
                 cover: video_info.pic.clone(),
                 duration: page_info
                     .map(|page| page.duration as i64)
@@ -231,6 +246,8 @@ impl DownloadManager {
                 audio_url: audio_url.clone(),
                 error: None,
                 output_path: None,
+                collection_title,
+                episode_title,
                 created_at: Self::now_millis(),
             };
 
@@ -446,12 +463,21 @@ impl DownloadManager {
         };
 
         // 创建下载目录
-        let safe_title = Self::sanitize_path_component(&title);
-        let download_dir = Config::resolve_download_dir(app, &download_dir)?;
-        let download_path = download_dir.join(&safe_title);
-        tokio::fs::create_dir_all(&download_path)
+        let download_root = Config::resolve_download_dir(app, &download_dir)?;
+        let output_dir = Self::output_dir_from_root(&download_root, &progress_snapshot);
+        let output_stem = Self::output_stem(&progress_snapshot);
+        let temp_dir = Self::task_temp_dir(app, task_id)?;
+        let fragment_dir = if auto_merge || audio_only {
+            temp_dir.clone()
+        } else {
+            output_dir.clone()
+        };
+        tokio::fs::create_dir_all(&output_dir)
             .await
             .map_err(|e| format!("创建下载目录失败: {}", e))?;
+        tokio::fs::create_dir_all(&fragment_dir)
+            .await
+            .map_err(|e| format!("创建下载缓存目录失败: {}", e))?;
 
         // 发送准备事件
         let _ = app.emit(
@@ -464,7 +490,7 @@ impl DownloadManager {
         // 下载视频流
         let mut video_path = None;
         if let Some(video_url) = video_url {
-            let path = download_path.join(format!("{}.video.m4s", safe_title));
+            let path = fragment_dir.join(format!("{}.video.m4s", output_stem));
             match Self::download_file(
                 app,
                 task_id,
@@ -485,7 +511,7 @@ impl DownloadManager {
         // 下载音频流
         let mut audio_path = None;
         if let Some(audio_url) = audio_url {
-            let path = download_path.join(format!("{}.audio.m4s", safe_title));
+            let path = fragment_dir.join(format!("{}.audio.m4s", output_stem));
             match Self::download_file(
                 app,
                 task_id,
@@ -507,12 +533,13 @@ impl DownloadManager {
             let Some(audio) = audio_path.as_ref() else {
                 return Err("当前视频没有可下载的音频流".to_string());
             };
-            let expected_output_path = download_path.join(format!("{}.mp3", safe_title));
+            let expected_output_path = output_dir.join(format!("{}.mp3", output_stem));
             let Some(output_path) =
                 Self::resolve_existing_file(expected_output_path.clone(), &file_exist_action)?
             else {
                 task.write().output_path = Some(expected_output_path.to_string_lossy().to_string());
                 let _ = tokio::fs::remove_file(audio).await;
+                let _ = tokio::fs::remove_dir_all(&temp_dir).await;
                 return Ok(DownloadEnd::Completed);
             };
             let ffmpeg = FfmpegExecutor::default();
@@ -542,6 +569,7 @@ impl DownloadManager {
                 .map_err(|error| format!("音频转换失败: {}", error))?;
             task.write().output_path = Some(output_path.to_string_lossy().to_string());
             let _ = tokio::fs::remove_file(audio).await;
+            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
             return Ok(DownloadEnd::Completed);
         }
 
@@ -552,19 +580,21 @@ impl DownloadManager {
                     app,
                     &progress_snapshot,
                     &config_snapshot,
-                    &download_path,
-                    &safe_title,
+                    &output_dir,
+                    &output_stem,
                     &file_exist_action,
                 )
                 .await;
+                let _ = tokio::fs::remove_dir_all(&temp_dir).await;
                 return Ok(DownloadEnd::Completed);
             };
 
-            let expected_output_path = download_path.join(format!("{}.mp4", safe_title));
+            let expected_output_path = output_dir.join(format!("{}.mp4", output_stem));
             let Some(output_path) =
                 Self::resolve_existing_file(expected_output_path.clone(), &file_exist_action)?
             else {
                 task.write().output_path = Some(expected_output_path.to_string_lossy().to_string());
+                let _ = tokio::fs::remove_dir_all(&temp_dir).await;
                 return Ok(DownloadEnd::Completed);
             };
 
@@ -617,11 +647,14 @@ impl DownloadManager {
             app,
             &progress_snapshot,
             &config_snapshot,
-            &download_path,
-            &safe_title,
+            &output_dir,
+            &output_stem,
             &file_exist_action,
         )
         .await;
+        if auto_merge || audio_only {
+            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        }
 
         Ok(DownloadEnd::Completed)
     }
@@ -732,7 +765,7 @@ impl DownloadManager {
                             bvid: Some(progress_data.bvid),
                             cid: progress_data.cid,
                             episode_title: progress_data.title,
-                            collection_title: String::new(),
+                            collection_title: progress_data.collection_title.unwrap_or_default(),
                             url: None,
                             download_dir: String::new(),
                             state: crate::events::TaskState::Downloading,
@@ -766,7 +799,7 @@ impl DownloadManager {
                     bvid: Some(progress_data.bvid),
                     cid: progress_data.cid,
                     episode_title: progress_data.title,
-                    collection_title: String::new(),
+                    collection_title: progress_data.collection_title.unwrap_or_default(),
                     url: None,
                     download_dir: String::new(),
                     state,
@@ -938,24 +971,57 @@ impl DownloadManager {
             }
         }
 
-        let folder = self.task_output_dir(progress).ok()?;
+        if let Ok(expected_path) = self.expected_output_file(progress) {
+            if expected_path.is_file() {
+                return Some(expected_path);
+            }
+        }
+
+        let config = self.app.state::<Arc<RwLock<Config>>>();
+        let root = Config::resolve_download_dir(&self.app, &config.read().download_dir).ok()?;
         let expected_extension = if progress.audio_only { "mp3" } else { "mp4" };
-        let mut candidates = std::fs::read_dir(&folder)
-            .ok()?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.extension()
-                    .and_then(|extension| extension.to_str())
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case(expected_extension))
-            })
-            .collect::<Vec<_>>();
-        candidates.sort_by_key(|path| {
-            std::fs::metadata(path)
-                .and_then(|meta| meta.modified())
-                .ok()
-        });
-        candidates.pop()
+        let expected_stem = Self::output_stem(progress);
+        let mut candidate_dirs = vec![Self::output_dir_from_root(&root, progress)];
+        let legacy_dir = root.join(Self::sanitize_path_component(&progress.title));
+        if !candidate_dirs.iter().any(|dir| dir == &legacy_dir) {
+            candidate_dirs.push(legacy_dir);
+        }
+
+        for folder in candidate_dirs {
+            let Ok(entries) = std::fs::read_dir(&folder) else {
+                continue;
+            };
+            let mut candidates = entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    let extension_matches = path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(|extension| {
+                            extension.eq_ignore_ascii_case(expected_extension)
+                        });
+                    let stem_matches =
+                        path.file_stem()
+                            .and_then(|stem| stem.to_str())
+                            .is_some_and(|stem| {
+                                stem == expected_stem
+                                    || stem.starts_with(&format!("{expected_stem} ("))
+                            });
+                    extension_matches && stem_matches
+                })
+                .collect::<Vec<_>>();
+            candidates.sort_by_key(|path| {
+                std::fs::metadata(path)
+                    .and_then(|meta| meta.modified())
+                    .ok()
+            });
+            if let Some(path) = candidates.pop() {
+                return Some(path);
+            }
+        }
+
+        None
     }
 
     pub fn get_task_folder(&self, task_id: &str) -> Result<PathBuf, String> {
@@ -966,6 +1032,138 @@ impl DownloadManager {
             .map(|task| task.read().clone())
             .ok_or_else(|| "下载任务不存在".to_string())?;
         self.task_output_dir(&progress)
+    }
+
+    pub fn reload_current_profile_tasks(&self) {
+        for control in self.controls.read().values() {
+            control.cancel();
+        }
+        self.tasks.write().clear();
+        self.controls.write().clear();
+        self.restore_tasks();
+    }
+
+    pub fn migrate_legacy_tasks_to_current_profile(
+        &self,
+        include_legacy_tasks: bool,
+        include_guest_tasks: bool,
+    ) -> Result<(), String> {
+        let dest_dir = Self::task_data_dir(&self.app)?;
+        std::fs::create_dir_all(&dest_dir).map_err(|e| format!("创建任务目录失败: {}", e))?;
+
+        let mut sources = Vec::new();
+        if include_legacy_tasks {
+            if let Ok(dir) = Self::legacy_task_data_dir(&self.app) {
+                sources.push((dir, false));
+            }
+        }
+        if include_guest_tasks {
+            let guest_dir = Config::data_root_dir(&self.app)?
+                .join("guest")
+                .join("cache")
+                .join("download_tasks");
+            sources.push((guest_dir, true));
+        }
+
+        for (source_dir, remove_after_copy) in sources {
+            if source_dir == dest_dir || !source_dir.is_dir() {
+                continue;
+            }
+            let Ok(entries) = std::fs::read_dir(&source_dir) else {
+                continue;
+            };
+            for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
+                if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+                    continue;
+                }
+                let Some(file_name) = path.file_name() else {
+                    continue;
+                };
+                let dest_path = dest_dir.join(file_name);
+                if !dest_path.exists() {
+                    let _ = std::fs::copy(&path, &dest_path);
+                }
+                if remove_after_copy {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn expected_output_file(&self, progress: &DownloadProgress) -> Result<PathBuf, String> {
+        let config = self.app.state::<Arc<RwLock<Config>>>();
+        let root = Config::resolve_download_dir(&self.app, &config.read().download_dir)?;
+        let extension = if progress.audio_only { "mp3" } else { "mp4" };
+        Ok(Self::output_dir_from_root(&root, progress).join(format!(
+            "{}.{}",
+            Self::output_stem(progress),
+            extension
+        )))
+    }
+
+    fn output_dir_from_root(root: &Path, progress: &DownloadProgress) -> PathBuf {
+        if let Some(collection_title) = Self::trimmed_string(progress.collection_title.as_deref()) {
+            root.join(Self::sanitize_path_component(&collection_title))
+        } else {
+            root.to_path_buf()
+        }
+    }
+
+    fn output_stem(progress: &DownloadProgress) -> String {
+        let name = Self::trimmed_string(progress.episode_title.as_deref())
+            .unwrap_or_else(|| progress.title.clone());
+        Self::sanitize_path_component(&name)
+    }
+
+    fn task_temp_dir(app: &AppHandle, task_id: &str) -> Result<PathBuf, String> {
+        Ok(Config::user_cache_dir(app)?
+            .join("download")
+            .join(Self::sanitize_path_component(task_id)))
+    }
+
+    fn trimmed_string(value: Option<&str>) -> Option<String> {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    }
+
+    fn legacy_task_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+        let app_data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+        Ok(app_data_dir.join(".download_tasks"))
+    }
+
+    fn safe_remove_empty_dir(path: &Path, root: &Path) {
+        if path == root || !path.starts_with(root) {
+            return;
+        }
+        let Ok(mut entries) = std::fs::read_dir(path) else {
+            return;
+        };
+        if entries.next().is_none() {
+            let _ = std::fs::remove_dir(path);
+        }
+    }
+
+    fn delete_related_sidecars(folder: &Path, stem: &str) {
+        let Ok(entries) = std::fs::read_dir(folder) else {
+            return;
+        };
+        let prefix = format!("{stem}.");
+        let renamed_prefix = format!("{stem} (");
+        for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
+            let Some(file_name) = path.file_name().and_then(|file_name| file_name.to_str()) else {
+                continue;
+            };
+            if file_name.starts_with(&prefix) || file_name.starts_with(&renamed_prefix) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
     }
 
     /// 获取任务数量
@@ -1019,14 +1217,12 @@ impl DownloadManager {
     }
 
     fn task_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-        let app_data_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
-        Ok(app_data_dir.join(".download_tasks"))
+        Ok(Config::user_cache_dir(app)?.join("download_tasks"))
     }
 
     fn restore_tasks(&self) {
+        self.cleanup_legacy_guest_task_leaks();
+
         let Ok(task_dir) = self.get_task_dir() else {
             return;
         };
@@ -1068,6 +1264,34 @@ impl DownloadManager {
         }
     }
 
+    fn cleanup_legacy_guest_task_leaks(&self) {
+        if Config::current_profile_name(&self.app).ok().as_deref() != Some("guest") {
+            return;
+        }
+
+        let Ok(current_dir) = Self::task_data_dir(&self.app) else {
+            return;
+        };
+        let Ok(legacy_dir) = Self::legacy_task_data_dir(&self.app) else {
+            return;
+        };
+        if current_dir == legacy_dir || !current_dir.is_dir() || !legacy_dir.is_dir() {
+            return;
+        }
+
+        let Ok(entries) = std::fs::read_dir(&current_dir) else {
+            return;
+        };
+        for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
+            let Some(file_name) = path.file_name() else {
+                continue;
+            };
+            if legacy_dir.join(file_name).is_file() {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+
     fn task_output_dir(&self, progress: &DownloadProgress) -> Result<PathBuf, String> {
         if let Some(output_path) = progress.output_path.as_deref().map(PathBuf::from) {
             if let Some(parent) = output_path.parent() {
@@ -1076,7 +1300,11 @@ impl DownloadManager {
         }
         let config = self.app.state::<Arc<RwLock<Config>>>();
         let root = Config::resolve_download_dir(&self.app, &config.read().download_dir)?;
-        Ok(root.join(Self::sanitize_path_component(&progress.title)))
+        let legacy_dir = root.join(Self::sanitize_path_component(&progress.title));
+        if legacy_dir.is_dir() {
+            return Ok(legacy_dir);
+        }
+        Ok(Self::output_dir_from_root(&root, progress))
     }
 
     async fn delete_task_files(&self, progress: &DownloadProgress) -> Result<(), String> {
@@ -1086,10 +1314,39 @@ impl DownloadManager {
         if !folder.starts_with(&root) {
             return Err("拒绝删除下载目录以外的文件".to_string());
         }
-        if folder.exists() {
+
+        let output_file = self.find_existing_output_file(progress);
+        if let Some(path) = output_file.as_ref() {
+            if path.starts_with(&root) && path.is_file() {
+                let _ = tokio::fs::remove_file(path).await;
+            }
+        }
+
+        let output_stem = output_file
+            .as_ref()
+            .and_then(|path| path.file_stem())
+            .and_then(|stem| stem.to_str())
+            .map(ToString::to_string)
+            .unwrap_or_else(|| Self::output_stem(progress));
+        Self::delete_related_sidecars(&folder, &output_stem);
+        Self::delete_related_sidecars(&folder, &Self::output_stem(progress));
+
+        let temp_dir = Self::task_temp_dir(&self.app, &progress.task_id)?;
+        if temp_dir.exists() && temp_dir.starts_with(Config::user_cache_dir(&self.app)?) {
+            let _ = tokio::fs::remove_dir_all(temp_dir).await;
+        }
+
+        let legacy_dir = root.join(Self::sanitize_path_component(&progress.title));
+        if folder == legacy_dir
+            && folder != root
+            && Self::trimmed_string(progress.collection_title.as_deref()).is_none()
+            && folder.exists()
+        {
             tokio::fs::remove_dir_all(&folder)
                 .await
                 .map_err(|e| format!("删除本地文件失败: {}", e))?;
+        } else {
+            Self::safe_remove_empty_dir(&folder, &root);
         }
         Ok(())
     }
@@ -1675,6 +1932,10 @@ pub struct CreateDownloadTaskParams {
     pub cid: i64,
     pub title: String,
     pub cids: Vec<i64>,
+    #[serde(default)]
+    pub collection_title: Option<String>,
+    #[serde(default)]
+    pub episode_title: Option<String>,
     #[serde(default)]
     pub download_quality: Option<String>,
     #[serde(default)]

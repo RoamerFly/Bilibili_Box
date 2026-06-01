@@ -16,7 +16,9 @@ import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
 import { loadCachedPageData } from "@/lib/page-cache";
 import { formatBiliImageUrl, formatDuration, formatNumber } from "@/lib/utils";
-import { buildVisiblePages, useResponsivePageSize } from "@/hooks/use-responsive-page-size";
+import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
+import { fixedCardGridColumns, useCardLayout } from "@/hooks/use-card-layout";
+import { runPreservingMainScroll } from "@/lib/scroll-position";
 import { useAppStore } from "@/stores/app-store";
 
 interface BackendVideo {
@@ -98,10 +100,18 @@ const itemVariants = {
 
 export function RecommendView() {
   const openPlayer = useAppStore((s) => s.openPlayer);
-  const cardScale = useAppStore((s) => Number(s.config?.card_scale ?? 1));
+  const { pageSize, cardScale, columns } = useCardLayout();
   const recommendPageState = useAppStore((s) => s.recommendPageState);
   const setRecommendPageState = useAppStore((s) => s.setRecommendPageState);
-  const { activeCategory, searchQuery, videos, sortMode, currentPage, loadedCategory } = recommendPageState;
+  const {
+    activeCategory,
+    searchQuery,
+    videos,
+    sortMode,
+    currentPage,
+    loadedCategory,
+    hasMoreByCategory,
+  } = recommendPageState;
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showMoreCategories, setShowMoreCategories] = useState(false);
   const [isLoading, setIsLoading] = useState(loadedCategory !== activeCategory);
@@ -115,14 +125,6 @@ export function RecommendView() {
     () => ALL_CATEGORIES.find((category) => category.label === activeCategory) ?? CATEGORIES[0],
     [activeCategory]
   );
-
-  const { pageSize } = useResponsivePageSize({
-    minCardWidth: 290 * cardScale,
-    gap: 18,
-    rowHeight: 276 * cardScale,
-    reservedHeight: 300,
-    minPageSize: 6,
-  });
 
   const transformVideo = useCallback(
     (video: BackendVideo): RecommendVideo => ({
@@ -138,15 +140,18 @@ export function RecommendView() {
     []
   );
 
-  const fetchVideos = useCallback(async (category: RecommendCategory, advanceBatch = false) => {
+  const fetchVideos = useCallback(async (
+    category: RecommendCategory,
+    mode: "replace" | "append" = "replace",
+    forceRefresh = false
+  ) => {
     const requestId = ++requestIdRef.current;
+    const append = mode === "append";
     const currentBatch = batchIndexesRef.current[category.label] ?? 1;
-    const batch = advanceBatch ? currentBatch + 1 : currentBatch;
-    const nextBatchIndexes = { ...batchIndexesRef.current, [category.label]: batch };
-    batchIndexesRef.current = nextBatchIndexes;
-    setRecommendPageState({ batchIndexes: nextBatchIndexes });
+    const batch = append ? currentBatch + 1 : 1;
+    const requestPageSize = Math.min(category.rid === null ? 30 : 60, Math.max(12, pageSize * 3));
 
-    if (advanceBatch) {
+    if (append) {
       setIsRefreshing(true);
     } else {
       setIsLoading(true);
@@ -154,17 +159,32 @@ export function RecommendView() {
     setError("");
     try {
       const response = await loadCachedPageData(
-        `recommend:${category.label}`,
+        `recommend:${category.label}:batch:${batch}:size:${requestPageSize}`,
         () => category.rid === null
-          ? invoke<BackendVideo[]>("get_recommended_videos", { freshIndex: batch, pageSize: 30 })
-          : invoke<BackendVideo[]>("get_region_videos", { rid: category.rid, page: batch, pageSize: 60 }),
-        advanceBatch
+          ? invoke<BackendVideo[]>("get_recommended_videos", { freshIndex: batch, pageSize: requestPageSize })
+          : invoke<BackendVideo[]>("get_region_videos", { rid: category.rid, page: batch, pageSize: requestPageSize }),
+        forceRefresh
       );
       if (requestId !== requestIdRef.current) return;
-      const deduped = Array.from(new Map(response.map((item) => [item.bvid, item])).values());
+      const currentState = useAppStore.getState().recommendPageState;
+      const incoming = response.map(transformVideo);
+      const baseVideos = append && currentState.loadedCategory === category.label
+        ? currentState.videos
+        : [];
+      const deduped = Array.from(
+        new Map([...baseVideos, ...incoming].map((item) => [item.bvid, item])).values()
+      );
+      const nextBatchIndexes = { ...batchIndexesRef.current, [category.label]: batch };
+      batchIndexesRef.current = nextBatchIndexes;
       setRecommendPageState({
-        videos: deduped.map(transformVideo),
+        videos: deduped,
         loadedCategory: category.label,
+        batchIndexes: nextBatchIndexes,
+        currentPage: append ? currentState.currentPage : 1,
+        hasMoreByCategory: {
+          ...currentState.hasMoreByCategory,
+          [category.label]: response.length >= requestPageSize,
+        },
       });
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
@@ -176,7 +196,7 @@ export function RecommendView() {
         setIsRefreshing(false);
       }
     }
-  }, [setRecommendPageState, transformVideo]);
+  }, [pageSize, setRecommendPageState, transformVideo]);
 
   useEffect(() => {
     if (loadedCategory === activeCategoryInfo.label) return;
@@ -194,8 +214,17 @@ export function RecommendView() {
 
   const handleRefresh = () => {
     setRecommendPageState({ currentPage: 1 });
-    void fetchVideos(activeCategoryInfo, true);
+    void fetchVideos(activeCategoryInfo, "replace", true);
   };
+
+  const handleLoadMore = useCallback(async (targetPage?: number) => {
+    await fetchVideos(activeCategoryInfo, "append");
+    if (targetPage) {
+      runPreservingMainScroll(() => setRecommendPageState({ currentPage: targetPage }));
+    }
+  }, [activeCategoryInfo, fetchVideos, setRecommendPageState]);
+
+  const hasMore = hasMoreByCategory[activeCategoryInfo.label] ?? true;
 
   const displayedVideos = useMemo(() => {
     let result = [...videos];
@@ -247,6 +276,16 @@ export function RecommendView() {
     const start = (currentPage - 1) * pageSize;
     return displayedVideos.slice(start, start + pageSize);
   }, [currentPage, displayedVideos, pageSize]);
+
+  const handleNextPage = () => {
+    if (currentPage < pageCount) {
+      runPreservingMainScroll(() => setRecommendPageState({ currentPage: currentPage + 1 }));
+      return;
+    }
+    if (hasMore && !isRefreshing && !isLoading) {
+      void handleLoadMore(pageCount + 1);
+    }
+  };
 
   const handleToggleSort = () => {
     const nextSortMode = sortMode === "default"
@@ -537,7 +576,7 @@ export function RecommendView() {
               variants={itemVariants}
               style={{
                 display: "grid",
-                gridTemplateColumns: `repeat(auto-fit, minmax(${290 * cardScale}px, 1fr))`,
+                gridTemplateColumns: fixedCardGridColumns(columns),
                 gap: "18px",
               }}
             >
@@ -556,17 +595,22 @@ export function RecommendView() {
 
             <div style={{ display: "flex", justifyContent: "center", marginTop: "24px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-                <PageButton disabled={currentPage <= 1} onClick={() => setRecommendPageState({ currentPage: currentPage - 1 })}>
+                <PageButton disabled={currentPage <= 1} onClick={() => runPreservingMainScroll(() => setRecommendPageState({ currentPage: currentPage - 1 }))}>
                   上一页
                 </PageButton>
                 {visiblePages.map((page) => (
-                  <PageButton key={page} active={page === currentPage} onClick={() => setRecommendPageState({ currentPage: page })}>
+                  <PageButton key={page} active={page === currentPage} onClick={() => runPreservingMainScroll(() => setRecommendPageState({ currentPage: page }))}>
                     {page}
                   </PageButton>
                 ))}
-                <PageButton disabled={currentPage >= pageCount} onClick={() => setRecommendPageState({ currentPage: currentPage + 1 })}>
+                <PageButton disabled={currentPage >= pageCount && (!hasMore || isRefreshing || isLoading)} onClick={handleNextPage}>
                   下一页
                 </PageButton>
+                {hasMore ? (
+                  <PageButton disabled={isRefreshing || isLoading} onClick={() => void handleLoadMore()}>
+                    {isRefreshing ? "加载中" : "加载更多"}
+                  </PageButton>
+                ) : null}
               </div>
             </div>
           </>
@@ -626,13 +670,13 @@ function VideoCard({
           <div
             style={{
               position: "absolute",
-              bottom: "8px",
-              right: "8px",
+              bottom: `${8 * scale}px`,
+              right: `${8 * scale}px`,
               backgroundColor: "rgba(0,0,0,0.65)",
-              borderRadius: "6px",
-              padding: "2px 7px",
+              borderRadius: `${6 * scale}px`,
+              padding: `${2 * scale}px ${7 * scale}px`,
               color: "#fff",
-              fontSize: "12px",
+              fontSize: `${12 * scale}px`,
               fontWeight: 600,
             }}
           >
@@ -651,7 +695,7 @@ function VideoCard({
               WebkitLineClamp: 2,
               WebkitBoxOrient: "vertical",
               overflow: "hidden",
-              minHeight: "40px",
+              minHeight: `${40 * scale}px`,
             }}
           >
             {video.title}
@@ -670,27 +714,27 @@ function VideoCard({
             {video.author}
           </div>
 
-            <div style={{ marginTop: `${8 * scale}px`, display: "flex", alignItems: "center", gap: "14px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-              <Eye style={{ width: 13, height: 13, color: "#aaaabb" }} />
-              <span style={{ fontSize: "12px", color: "#9999aa" }}>{video.views}</span>
+            <div style={{ marginTop: `${8 * scale}px`, display: "flex", alignItems: "center", gap: `${14 * scale}px` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: `${5 * scale}px` }}>
+              <Eye style={{ width: 13 * scale, height: 13 * scale, color: "#aaaabb" }} />
+              <span style={{ fontSize: `${12 * scale}px`, color: "#9999aa" }}>{video.views}</span>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-              <ThumbsUp style={{ width: 13, height: 13, color: "#aaaabb" }} />
-              <span style={{ fontSize: "12px", color: "#9999aa" }}>{video.likes}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: `${5 * scale}px` }}>
+              <ThumbsUp style={{ width: 13 * scale, height: 13 * scale, color: "#aaaabb" }} />
+              <span style={{ fontSize: `${12 * scale}px`, color: "#9999aa" }}>{video.likes}</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div style={{ padding: `0 ${14 * scale}px ${14 * scale}px`, display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-        <MiniButton icon={<PlayIcon />} onClick={() => onOpenPlayer(video)}>
+      <div style={{ padding: `0 ${14 * scale}px ${14 * scale}px`, display: "flex", gap: `${8 * scale}px`, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <MiniButton scale={scale} icon={<PlayIcon scale={scale} />} onClick={() => onOpenPlayer(video)}>
           播放
         </MiniButton>
-        <MiniButton icon={<Download style={{ width: 15, height: 15 }} />} onClick={() => void onDownload(video)}>
+        <MiniButton scale={scale} icon={<Download style={{ width: 15 * scale, height: 15 * scale }} />} onClick={() => void onDownload(video)}>
           下载
         </MiniButton>
-        <MiniButton icon={<ExternalLink style={{ width: 15, height: 15 }} />} onClick={() => onOpenBrowser(video.bvid)}>
+        <MiniButton scale={scale} icon={<ExternalLink style={{ width: 15 * scale, height: 15 * scale }} />} onClick={() => onOpenBrowser(video.bvid)}>
           浏览器
         </MiniButton>
       </div>
@@ -701,10 +745,12 @@ function VideoCard({
 function MiniButton({
   children,
   icon,
+  scale,
   onClick,
 }: {
   children: React.ReactNode;
   icon: React.ReactNode;
+  scale: number;
   onClick: () => void;
 }) {
   return (
@@ -714,13 +760,13 @@ function MiniButton({
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: "6px",
-        padding: "8px 12px",
-        borderRadius: "10px",
+        gap: `${6 * scale}px`,
+        padding: `${8 * scale}px ${12 * scale}px`,
+        borderRadius: `${10 * scale}px`,
         border: "1px solid #e2e2ea",
         backgroundColor: "#fff",
         color: "#505065",
-        fontSize: "13px",
+        fontSize: `${13 * scale}px`,
         fontWeight: 600,
         cursor: "pointer",
       }}
@@ -764,9 +810,9 @@ function PageButton({
   );
 }
 
-function PlayIcon() {
+function PlayIcon({ scale = 1 }: { scale?: number }) {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <svg width={15 * scale} height={15 * scale} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M8 6.82v10.36c0 .79.87 1.27 1.54.84l8.14-5.18a1 1 0 0 0 0-1.68L9.54 5.98A1 1 0 0 0 8 6.82Z" />
     </svg>
   );

@@ -30,6 +30,9 @@ import type {
 } from "@/lib/types";
 import { useAppStore } from "@/stores/app-store";
 import { formatBiliImageUrl, formatDateTime, formatDuration, formatNumber } from "@/lib/utils";
+import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
+import { fixedCardGridColumns, useCardLayout } from "@/hooks/use-card-layout";
+import { runPreservingMainScroll } from "@/lib/scroll-position";
 
 const orderOptions: Array<{ value: SearchOrder; label: string }> = [
   { value: "totalrank", label: "综合排序" },
@@ -56,6 +59,27 @@ const durationOptions: Array<{ value: SearchDuration; label: string }> = [
 ];
 
 type SearchResultType = "all" | "video" | "bangumi";
+const SEARCH_PREFETCH_PAGES = 2;
+
+function mergeAggregateSearchResult(
+  base: AggregateSearchResult | null,
+  incoming: AggregateSearchResult
+): AggregateSearchResult {
+  const videos = Array.from(
+    new Map([...(base?.videos ?? []), ...incoming.videos].map((item) => [item.bvid, item])).values()
+  );
+  const bangumi = Array.from(
+    new Map([...(base?.bangumi ?? []), ...incoming.bangumi].map((item) => [item.season_id, item])).values()
+  );
+
+  return {
+    ...incoming,
+    videos,
+    bangumi,
+    video_page: incoming.video_page,
+    bangumi_page: incoming.bangumi_page,
+  };
+}
 
 export function SearchView() {
   const openPlayer = useAppStore((s) => s.openPlayer);
@@ -66,7 +90,16 @@ export function SearchView() {
   const [error, setError] = useState("");
   const [activeResultType, setActiveResultType] = useState<SearchResultType>("all");
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
-  const { input: searchInput, filters: currentFilters, lastAggregateInput, result } = searchPageState;
+  const cardLayout = useCardLayout();
+  const {
+    input: searchInput,
+    filters: currentFilters,
+    lastAggregateInput,
+    result,
+    currentPage,
+    loadedPages,
+  } = searchPageState;
+  const { pageSize, cardScale, columns } = cardLayout;
 
   const placeholder = useMemo(
     () => "输入关键词、BV/AV、ep/ss、视频链接或番剧链接",
@@ -80,45 +113,105 @@ export function SearchView() {
     [setSearchPageState]
   );
 
-  const runSearch = useCallback(async (rawInput: string, filters: SearchFilters) => {
+  const runSearch = useCallback(async (
+    rawInput: string,
+    filters: SearchFilters,
+    options: { mode?: "replace" | "append"; targetPage?: number; pageCount?: number } = {}
+  ) => {
     const input = rawInput.trim();
     if (!input) {
       setError("请输入搜索内容");
       return;
     }
 
+    const mode = options.mode ?? "replace";
+    const pageCount = options.pageCount ?? SEARCH_PREFETCH_PAGES;
+    const currentSearchState = useAppStore.getState().searchPageState;
+    const currentAggregate: AggregateSearchResult | null = currentSearchState.result?.type === "Aggregate"
+      ? currentSearchState.result
+      : null;
+    const startPage = mode === "append"
+      ? Math.max(1, currentSearchState.loadedPages + 1)
+      : 1;
     const requestId = searchRequestIdRef.current + 1;
     searchRequestIdRef.current = requestId;
     setLoading(true);
     setError("");
     try {
-      const data = await invoke<SearchResponse>("search_video", {
-        input,
-        order: filters.order,
-        pubtime: filters.pubtime,
-        duration: filters.duration,
-      });
+      let mergedAggregate = mode === "append" ? currentAggregate : null;
+      let directResult: SearchResponse | null = null;
+      let lastAggregatePage = 0;
+      let lastHasMore = false;
+
+      for (let offset = 0; offset < pageCount; offset += 1) {
+        const page = startPage + offset;
+        const data = await invoke<SearchResponse>("search_video", {
+          input,
+          order: filters.order,
+          pubtime: filters.pubtime,
+          duration: filters.duration,
+          page,
+          pageSize,
+        });
+        if (requestId !== searchRequestIdRef.current) return;
+
+        if (data.type !== "Aggregate") {
+          directResult = data;
+          break;
+        }
+
+        mergedAggregate = mergeAggregateSearchResult(mergedAggregate, data);
+        lastAggregatePage = page;
+        lastHasMore = data.video_page.has_more || data.bangumi_page.has_more;
+        if (!lastHasMore) break;
+      }
+
       if (requestId !== searchRequestIdRef.current) return;
-      const latestState = useAppStore.getState().searchPageState;
-      setSearchPageState({
-        filters,
-        result: data,
-        lastAggregateInput: data.type === "Aggregate" ? input : latestState.lastAggregateInput,
-      });
+      if (directResult) {
+        setSearchPageState({
+          filters,
+          result: directResult,
+          currentPage: 1,
+          pageSize,
+          loadedPages: 0,
+          hasMore: false,
+          lastAggregateInput: currentSearchState.lastAggregateInput,
+        });
+        return;
+      }
+
+      if (mergedAggregate) {
+        const loadedPageCount = Math.max(
+          1,
+          Math.ceil(Math.max(mergedAggregate.videos.length, mergedAggregate.bangumi.length) / pageSize),
+          lastAggregatePage
+        );
+        setSearchPageState({
+          filters,
+          result: { type: "Aggregate", ...mergedAggregate },
+          currentPage: options.targetPage ?? (mode === "append" ? currentSearchState.currentPage : 1),
+          pageSize,
+          loadedPages: loadedPageCount,
+          hasMore: lastHasMore,
+          lastAggregateInput: input,
+        });
+      }
     } catch (err) {
       if (requestId !== searchRequestIdRef.current) return;
       setError(String(err));
-      setSearchPageState({ result: null });
+      if (mode === "replace") {
+        setSearchPageState({ result: null, loadedPages: 0, hasMore: false });
+      }
     } finally {
       if (requestId === searchRequestIdRef.current) {
         setLoading(false);
       }
     }
-  }, [setSearchPageState]);
+  }, [pageSize, setSearchPageState]);
 
   const handleSearch = useCallback(
     async (rawInput = searchInput) => {
-      await runSearch(rawInput, currentFilters);
+      await runSearch(rawInput, currentFilters, { mode: "replace" });
     },
     [currentFilters, runSearch, searchInput]
   );
@@ -128,15 +221,112 @@ export function SearchView() {
       setSearchPageState({ filters: nextFilters });
 
       if (result?.type === "Aggregate" && lastAggregateInput) {
-        void runSearch(lastAggregateInput, nextFilters);
+        void runSearch(lastAggregateInput, nextFilters, { mode: "replace" });
       }
     },
     [lastAggregateInput, result?.type, runSearch, setSearchPageState]
   );
 
-  const queueDownload = async (bvid: string, cid: number, title: string, downloadQuality: string) => {
+  const handlePageChange = useCallback(
+    (page: number) => {
+      runPreservingMainScroll(() => setSearchPageState({ currentPage: page }));
+    },
+    [setSearchPageState]
+  );
+
+  const handleLoadMore = useCallback(
+    (targetPage?: number) => {
+      if (!lastAggregateInput) return;
+      void runSearch(lastAggregateInput, currentFilters, { mode: "append", targetPage });
+    },
+    [currentFilters, lastAggregateInput, runSearch]
+  );
+
+  useEffect(() => {
+    if (searchPageState.pageSize === pageSize) return;
+    setSearchPageState({ pageSize, currentPage: 1, loadedPages: 0, hasMore: false });
+    if (result?.type === "Aggregate" && lastAggregateInput) {
+      void runSearch(lastAggregateInput, currentFilters, { mode: "replace" });
+    }
+  }, [
+    currentFilters,
+    lastAggregateInput,
+    pageSize,
+    result?.type,
+    runSearch,
+    searchPageState.pageSize,
+    setSearchPageState,
+  ]);
+
+  const aggregatePageInfo = useMemo(() => {
+    if (result?.type !== "Aggregate") return null;
+    if (activeResultType === "bangumi") return result.bangumi_page;
+    if (activeResultType === "video") return result.video_page;
+    return result.video_page.total > 0 || result.bangumi_page.total === 0
+      ? result.video_page
+      : result.bangumi_page;
+  }, [activeResultType, result]);
+
+  const aggregateLoadedPageCount = useMemo(() => {
+    if (result?.type !== "Aggregate") return 0;
+    const videoPages = Math.ceil(result.videos.length / pageSize);
+    const bangumiPages = Math.ceil(result.bangumi.length / pageSize);
+    if (activeResultType === "video") return Math.max(1, videoPages);
+    if (activeResultType === "bangumi") return Math.max(1, bangumiPages);
+    return Math.max(1, videoPages, bangumiPages, loadedPages);
+  }, [activeResultType, loadedPages, pageSize, result]);
+
+  const aggregateTotalPageCount = useMemo(() => {
+    if (result?.type !== "Aggregate") return 1;
+    if (activeResultType === "video") return result.video_page.page_count;
+    if (activeResultType === "bangumi") return result.bangumi_page.page_count;
+    return Math.max(result.video_page.page_count, result.bangumi_page.page_count);
+  }, [activeResultType, result]);
+
+  const aggregateCanLoadMore = useMemo(() => {
+    if (result?.type !== "Aggregate") return false;
+    const hasMoreByType = activeResultType === "video"
+      ? result.video_page.has_more
+      : activeResultType === "bangumi"
+        ? result.bangumi_page.has_more
+        : result.video_page.has_more || result.bangumi_page.has_more;
+    return hasMoreByType && aggregateLoadedPageCount < aggregateTotalPageCount;
+  }, [activeResultType, aggregateLoadedPageCount, aggregateTotalPageCount, result]);
+
+  const visibleAggregateResult = useMemo(() => {
+    if (result?.type !== "Aggregate") return null;
+    const start = (Math.max(1, currentPage) - 1) * pageSize;
+    return {
+      ...result,
+      videos: result.videos.slice(start, start + pageSize),
+      bangumi: result.bangumi.slice(start, start + pageSize),
+    };
+  }, [currentPage, pageSize, result]);
+
+  useEffect(() => {
+    if (result?.type !== "Aggregate" || aggregateLoadedPageCount <= 0) return;
+    if (currentPage > aggregateLoadedPageCount) {
+      setSearchPageState({ currentPage: aggregateLoadedPageCount });
+    }
+  }, [aggregateLoadedPageCount, currentPage, result?.type, setSearchPageState]);
+
+  const queueDownload = async (
+    bvid: string,
+    cid: number,
+    title: string,
+    downloadQuality: string,
+    options?: { collectionTitle?: string; episodeTitle?: string }
+  ) => {
     const taskIds = await invoke<string[]>("create_download_task", {
-      params: { bvid, cid, title, cids: [cid], download_quality: downloadQuality },
+      params: {
+        bvid,
+        cid,
+        title,
+        cids: [cid],
+        collection_title: options?.collectionTitle,
+        episode_title: options?.episodeTitle,
+        download_quality: downloadQuality,
+      },
     });
     notifyDownloadQueued(taskIds, title);
   };
@@ -182,6 +372,8 @@ export function SearchView() {
               cid: episode.cid,
               title: `${detail.title || bangumi.title} - ${episode.long_title || episode.title}`.trim(),
               cids: [episode.cid],
+              collection_title: detail.title || bangumi.title,
+              episode_title: episode.long_title || episode.title,
               download_quality: downloadQuality,
             },
           })
@@ -443,19 +635,37 @@ export function SearchView() {
           ) : null}
 
           {result.type === "Aggregate" ? (
-            <AggregateResult
-              result={result}
-              activeType={activeResultType}
-              onOpenVideoPlayer={handleOpenVideoPlayer}
-              onOpenBangumiPlayer={handleOpenBangumiPlayer}
-              onDownloadVideo={handleSearchVideoDownload}
-              onDownloadBangumi={handleSearchBangumiDownload}
-              onResolveVideoDownloadTargets={resolveSearchVideoDownloadTargets}
-              onResolveBangumiDownloadTargets={resolveSearchBangumiDownloadTargets}
-              onRequestDownloadQuality={requestDownloadQuality}
-              onDownloadError={(err) => setError(String(err))}
-              onOpenBrowser={handleOpenBrowser}
-            />
+            <>
+              {visibleAggregateResult ? (
+              <AggregateResult
+                result={visibleAggregateResult}
+                activeType={activeResultType}
+                columns={columns}
+                scale={cardScale}
+                onOpenVideoPlayer={handleOpenVideoPlayer}
+                onOpenBangumiPlayer={handleOpenBangumiPlayer}
+                onDownloadVideo={handleSearchVideoDownload}
+                onDownloadBangumi={handleSearchBangumiDownload}
+                onResolveVideoDownloadTargets={resolveSearchVideoDownloadTargets}
+                onResolveBangumiDownloadTargets={resolveSearchBangumiDownloadTargets}
+                onRequestDownloadQuality={requestDownloadQuality}
+                onDownloadError={(err) => setError(String(err))}
+                onOpenBrowser={handleOpenBrowser}
+              />
+              ) : null}
+              {aggregatePageInfo && Math.max(aggregateLoadedPageCount, aggregateTotalPageCount) > 1 ? (
+                <SearchPagination
+                  currentPage={currentPage}
+                  loadedPageCount={aggregateLoadedPageCount}
+                  totalPageCount={aggregateTotalPageCount}
+                  total={aggregatePageInfo.total}
+                  loading={loading}
+                  canLoadMore={aggregateCanLoadMore}
+                  onPageChange={handlePageChange}
+                  onLoadMore={handleLoadMore}
+                />
+              ) : null}
+            </>
           ) : null}
         </motion.div>
       ) : !loading ? (
@@ -731,6 +941,8 @@ function BangumiResult({
 function AggregateResult({
   result,
   activeType,
+  columns,
+  scale,
   onOpenVideoPlayer,
   onOpenBangumiPlayer,
   onDownloadVideo,
@@ -743,6 +955,8 @@ function AggregateResult({
 }: {
   result: Extract<SearchResponse, { type: "Aggregate" }>;
   activeType: SearchResultType;
+  columns: number;
+  scale: number;
   onOpenVideoPlayer: (video: { bvid: string; cid?: number; title: string; pic?: string }) => void;
   onOpenBangumiPlayer: (bangumi: { season_id: number; title: string; cover: string }) => void;
   onDownloadVideo: (video: AggregateSearchResult["videos"][number], quality?: string) => Promise<boolean>;
@@ -754,6 +968,7 @@ function AggregateResult({
   onOpenBrowser: (url: string) => void;
 }) {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [multiSelectEnabled, setMultiSelectEnabled] = useState(false);
   const [batchDownloading, setBatchDownloading] = useState(false);
   const showVideos = activeType === "all" || activeType === "video";
   const showBangumi = activeType === "all" || activeType === "bangumi";
@@ -765,9 +980,18 @@ function AggregateResult({
 
   useEffect(() => {
     setSelectedKeys(new Set());
+    setMultiSelectEnabled(false);
   }, [result]);
 
+  const toggleMultiSelect = () => {
+    setMultiSelectEnabled((enabled) => {
+      if (enabled) setSelectedKeys(new Set());
+      return !enabled;
+    });
+  };
+
   const toggleSelection = (key: string) => {
+    if (!multiSelectEnabled) return;
     setSelectedKeys((previous) => {
       const next = new Set(previous);
       if (next.has(key)) {
@@ -780,6 +1004,7 @@ function AggregateResult({
   };
 
   const toggleVisibleSelection = () => {
+    if (!multiSelectEnabled) return;
     setSelectedKeys((previous) => {
       const next = new Set(previous);
       if (allVisibleSelected) {
@@ -831,28 +1056,37 @@ function AggregateResult({
           当前类别 {activeType === "all" ? "全部" : activeType === "video" ? "视频" : "番剧"}
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap" }}>
-          <GhostActionButton onClick={toggleVisibleSelection} icon={<span aria-hidden="true">{allVisibleSelected ? "✓" : "□"}</span>}>
-            {allVisibleSelected ? "取消当前全选" : "全选当前"}
+          <GhostActionButton onClick={toggleMultiSelect} icon={<span aria-hidden="true">{multiSelectEnabled ? "✓" : "□"}</span>}>
+            {multiSelectEnabled ? "关闭多选" : "开启多选"}
           </GhostActionButton>
-          <GhostActionButton
-            onClick={() => void handleBatchDownload()}
-            icon={batchDownloading ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Download style={{ width: 15, height: 15 }} />}
-            disabled={batchDownloading || selectedKeys.size === 0}
-          >
-            下载选中 {selectedKeys.size ? `(${selectedKeys.size})` : ""}
-          </GhostActionButton>
+          {multiSelectEnabled ? (
+            <>
+              <GhostActionButton onClick={toggleVisibleSelection} icon={<span aria-hidden="true">{allVisibleSelected ? "✓" : "□"}</span>}>
+                {allVisibleSelected ? "取消当前全选" : "全选当前"}
+              </GhostActionButton>
+              <GhostActionButton
+                onClick={() => void handleBatchDownload()}
+                icon={batchDownloading ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Download style={{ width: 15, height: 15 }} />}
+                disabled={batchDownloading || selectedKeys.size === 0}
+              >
+                下载选中 {selectedKeys.size ? `(${selectedKeys.size})` : ""}
+              </GhostActionButton>
+            </>
+          ) : null}
         </div>
       </div>
 
       {showVideos && result.videos.length ? (
         <>
           <SectionHeader title="视频结果" count={result.videos.length} />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(370px, 1fr))", gap: "14px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: fixedCardGridColumns(columns), gap: `${14 * scale}px` }}>
             {result.videos.map((video) => (
               <AggregateVideoCard
                 key={video.bvid}
                 video={video}
-                selected={selectedKeys.has(`video:${video.bvid}`)}
+                selectable={multiSelectEnabled}
+                selected={multiSelectEnabled && selectedKeys.has(`video:${video.bvid}`)}
+                scale={scale}
                 onToggleSelection={() => toggleSelection(`video:${video.bvid}`)}
                 onDownload={() => void onDownloadVideo(video)}
                 onOpenBrowser={() => onOpenBrowser(`https://www.bilibili.com/video/${video.bvid}`)}
@@ -866,12 +1100,14 @@ function AggregateResult({
       {showBangumi && result.bangumi.length ? (
         <>
           <SectionHeader title="番剧结果" count={result.bangumi.length} />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "14px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: fixedCardGridColumns(columns), gap: `${14 * scale}px` }}>
             {result.bangumi.map((bangumi) => (
               <AggregateBangumiCard
                 key={bangumi.season_id}
                 bangumi={bangumi}
-                selected={selectedKeys.has(`bangumi:${bangumi.season_id}`)}
+                selectable={multiSelectEnabled}
+                selected={multiSelectEnabled && selectedKeys.has(`bangumi:${bangumi.season_id}`)}
+                scale={scale}
                 onToggleSelection={() => toggleSelection(`bangumi:${bangumi.season_id}`)}
                 onDownload={() => void onDownloadBangumi(bangumi)}
                 onOpenBrowser={() => onOpenBrowser(`https://www.bilibili.com/bangumi/play/ss${bangumi.season_id}`)}
@@ -889,27 +1125,126 @@ function AggregateResult({
   );
 }
 
+function SearchPagination({
+  currentPage,
+  loadedPageCount,
+  totalPageCount,
+  total,
+  loading,
+  canLoadMore,
+  onPageChange,
+  onLoadMore,
+}: {
+  currentPage: number;
+  loadedPageCount: number;
+  totalPageCount: number;
+  total: number;
+  loading: boolean;
+  canLoadMore: boolean;
+  onPageChange: (page: number) => void;
+  onLoadMore: (targetPage?: number) => void;
+}) {
+  const safePageCount = Math.max(1, loadedPageCount || 1);
+  const safeTotalPageCount = Math.max(safePageCount, totalPageCount || 1);
+  const safeCurrentPage = Math.min(Math.max(1, currentPage || 1), safePageCount);
+  const visiblePages = buildVisiblePages(safeCurrentPage, safePageCount, 7);
+  const canGoNext = safeCurrentPage < safePageCount || canLoadMore;
+
+  return (
+    <div style={{ display: "flex", justifyContent: "center", marginTop: "22px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
+        <span style={{ fontSize: "13px", color: "#8b8b9a", marginRight: "4px" }}>
+          共 {total} 条，已载入 {safePageCount}/{safeTotalPageCount} 页
+        </span>
+        <SearchPageButton disabled={safeCurrentPage <= 1} onClick={() => onPageChange(safeCurrentPage - 1)}>
+          上一页
+        </SearchPageButton>
+        {visiblePages.map((page) => (
+          <SearchPageButton key={page} active={page === safeCurrentPage} onClick={() => onPageChange(page)}>
+            {page}
+          </SearchPageButton>
+        ))}
+        <SearchPageButton
+          disabled={!canGoNext || loading}
+          onClick={() => {
+            if (safeCurrentPage < safePageCount) {
+              onPageChange(safeCurrentPage + 1);
+              return;
+            }
+            onLoadMore(safePageCount + 1);
+          }}
+        >
+          下一页
+        </SearchPageButton>
+        {canLoadMore ? (
+          <SearchPageButton disabled={loading} onClick={() => onLoadMore()}>
+            {loading ? "加载中" : "加载更多"}
+          </SearchPageButton>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SearchPageButton({
+  children,
+  active = false,
+  disabled = false,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      style={{
+        minWidth: "40px",
+        height: "36px",
+        padding: "0 12px",
+        borderRadius: "10px",
+        border: active ? "1px solid #6366f1" : "1px solid #e2e2ea",
+        backgroundColor: active ? "#6366f1" : "#fff",
+        color: disabled ? "#c0c0c8" : active ? "#fff" : "#505065",
+        fontSize: "13px",
+        fontWeight: 600,
+        cursor: disabled ? "not-allowed" : "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 function AggregateVideoCard({
   video,
+  selectable,
   selected,
+  scale,
   onToggleSelection,
   onDownload,
   onOpenBrowser,
   onPlay,
 }: {
   video: AggregateSearchResult["videos"][number];
+  selectable: boolean;
   selected: boolean;
+  scale: number;
   onToggleSelection: () => void;
   onDownload: () => void;
   onOpenBrowser: () => void;
   onPlay: () => void;
 }) {
   return (
-    <div style={{ borderRadius: "14px", backgroundColor: "#fff", border: selected ? "1.5px solid #6366f1" : "1px solid #ececf2", padding: "13px 14px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "148px minmax(0, 1fr)", gap: "13px", alignItems: "start" }}>
+    <div style={{ borderRadius: `${14 * scale}px`, backgroundColor: "#fff", border: selected ? "1.5px solid #6366f1" : "1px solid #ececf2", padding: `${13 * scale}px ${14 * scale}px` }}>
+      <div style={{ display: "grid", gridTemplateColumns: `${Math.max(118 * scale, 148 * scale)}px minmax(0, 1fr)`, gap: `${13 * scale}px`, alignItems: "start" }}>
         <div
           onClick={onPlay}
-          style={{ aspectRatio: "16 / 9", borderRadius: "10px", overflow: "hidden", backgroundColor: "#f0f0f5", position: "relative", cursor: "pointer" }}
+          style={{ aspectRatio: "16 / 9", borderRadius: `${10 * scale}px`, overflow: "hidden", backgroundColor: "#f0f0f5", position: "relative", cursor: "pointer" }}
         >
           <img
             src={formatBiliImageUrl(video.pic, "@672w_378h_1c.webp")}
@@ -921,31 +1256,33 @@ function AggregateVideoCard({
           <span
             style={{
               position: "absolute",
-              right: "7px",
-              bottom: "7px",
-              padding: "2px 7px",
-              borderRadius: "6px",
+              right: `${7 * scale}px`,
+              bottom: `${7 * scale}px`,
+              padding: `${2 * scale}px ${7 * scale}px`,
+              borderRadius: `${6 * scale}px`,
               backgroundColor: "rgba(0,0,0,0.7)",
               color: "#fff",
-              fontSize: "12px",
+              fontSize: `${12 * scale}px`,
               fontWeight: 700,
             }}
           >
             {video.duration || "--:--"}
           </span>
-          <input
-            type="checkbox"
-            checked={selected}
-            onClick={(event) => event.stopPropagation()}
-            onChange={onToggleSelection}
-            aria-label={`选择视频 ${video.title}`}
-            style={{ position: "absolute", top: "8px", left: "8px", width: "17px", height: "17px", accentColor: "#6366f1", cursor: "pointer" }}
-          />
+          {selectable ? (
+            <input
+              type="checkbox"
+              checked={selected}
+              onClick={(event) => event.stopPropagation()}
+              onChange={onToggleSelection}
+              aria-label={`选择视频 ${video.title}`}
+              style={{ position: "absolute", top: `${8 * scale}px`, left: `${8 * scale}px`, width: `${17 * scale}px`, height: `${17 * scale}px`, accentColor: "#6366f1", cursor: "pointer" }}
+            />
+          ) : null}
         </div>
         <div style={{ minWidth: 0 }}>
           <h3
             style={{
-              fontSize: "15px",
+              fontSize: `${15 * scale}px`,
               fontWeight: 700,
               color: "#1a1a2e",
               lineHeight: 1.45,
@@ -957,29 +1294,29 @@ function AggregateVideoCard({
           >
             {video.title}
           </h3>
-          <div style={{ marginTop: "8px", display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-            <AvatarImage src={video.author_face || ""} alt={video.author} size={24} />
-            <span style={{ fontSize: "12.5px", color: "#505065", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ marginTop: `${8 * scale}px`, display: "flex", alignItems: "center", gap: `${8 * scale}px`, minWidth: 0 }}>
+            <AvatarImage src={video.author_face || ""} alt={video.author} size={24 * scale} />
+            <span style={{ fontSize: `${12.5 * scale}px`, color: "#505065", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {video.author || "未知 UP"}
             </span>
-            <span style={{ fontSize: "12px", color: "#999aaa", whiteSpace: "nowrap" }}>{formatDateTime(video.pubdate)}</span>
+            <span style={{ fontSize: `${12 * scale}px`, color: "#999aaa", whiteSpace: "nowrap" }}>{formatDateTime(video.pubdate)}</span>
           </div>
         </div>
       </div>
-      <div style={{ marginTop: "11px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "11px", color: "#7a7a8c", fontSize: "12.5px", flexWrap: "wrap" }}>
-        <MetaPill icon={<Eye style={{ width: 13, height: 13 }} />} text={`播放 ${formatNumber(video.play)}`} />
-        <MetaPill icon={<ThumbsUp style={{ width: 13, height: 13 }} />} text={`点赞 ${formatNumber(video.like || 0)}`} />
-        <MetaPill icon={<Star style={{ width: 13, height: 13 }} />} text={`收藏 ${formatNumber(video.favorite || 0)}`} />
-        <MetaPill icon={<MessageCircle style={{ width: 13, height: 13 }} />} text={`评论 ${formatNumber(video.reply || 0)}`} />
+      <div style={{ marginTop: `${11 * scale}px`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: `${11 * scale}px`, color: "#7a7a8c", fontSize: `${12.5 * scale}px`, flexWrap: "wrap" }}>
+        <MetaPill icon={<Eye style={{ width: 13 * scale, height: 13 * scale }} />} text={`播放 ${formatNumber(video.play)}`} />
+        <MetaPill icon={<ThumbsUp style={{ width: 13 * scale, height: 13 * scale }} />} text={`点赞 ${formatNumber(video.like || 0)}`} />
+        <MetaPill icon={<Star style={{ width: 13 * scale, height: 13 * scale }} />} text={`收藏 ${formatNumber(video.favorite || 0)}`} />
+        <MetaPill icon={<MessageCircle style={{ width: 13 * scale, height: 13 * scale }} />} text={`评论 ${formatNumber(video.reply || 0)}`} />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "8px", marginTop: "13px" }}>
-        <CardActionButton primary onClick={onPlay} icon={<Play style={{ width: 14, height: 14 }} />}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: `${8 * scale}px`, marginTop: `${13 * scale}px` }}>
+        <CardActionButton scale={scale} primary onClick={onPlay} icon={<Play style={{ width: 14 * scale, height: 14 * scale }} />}>
           播放
         </CardActionButton>
-        <CardActionButton onClick={onDownload} icon={<Download style={{ width: 14, height: 14 }} />}>
+        <CardActionButton scale={scale} onClick={onDownload} icon={<Download style={{ width: 14 * scale, height: 14 * scale }} />}>
           下载
         </CardActionButton>
-        <CardActionButton onClick={onOpenBrowser} icon={<ExternalLink style={{ width: 14, height: 14 }} />}>
+        <CardActionButton scale={scale} onClick={onOpenBrowser} icon={<ExternalLink style={{ width: 14 * scale, height: 14 * scale }} />}>
           浏览器
         </CardActionButton>
       </div>
@@ -989,23 +1326,27 @@ function AggregateVideoCard({
 
 function AggregateBangumiCard({
   bangumi,
+  selectable,
   selected,
+  scale,
   onToggleSelection,
   onDownload,
   onOpenBrowser,
   onPlay,
 }: {
   bangumi: AggregateSearchResult["bangumi"][number];
+  selectable: boolean;
   selected: boolean;
+  scale: number;
   onToggleSelection: () => void;
   onDownload: () => void;
   onOpenBrowser: () => void;
   onPlay: () => void;
 }) {
   return (
-    <div style={{ borderRadius: "14px", backgroundColor: "#fff", border: selected ? "1.5px solid #6366f1" : "1px solid #ececf2", padding: "13px 14px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "116px minmax(0, 1fr)", gap: "14px", alignItems: "start" }}>
-        <div onClick={onPlay} style={{ aspectRatio: "3 / 4", borderRadius: "10px", overflow: "hidden", backgroundColor: "#f0f0f5", cursor: "pointer", position: "relative" }}>
+    <div style={{ borderRadius: `${14 * scale}px`, backgroundColor: "#fff", border: selected ? "1.5px solid #6366f1" : "1px solid #ececf2", padding: `${13 * scale}px ${14 * scale}px` }}>
+      <div style={{ display: "grid", gridTemplateColumns: `${Math.max(92 * scale, 116 * scale)}px minmax(0, 1fr)`, gap: `${14 * scale}px`, alignItems: "start" }}>
+        <div onClick={onPlay} style={{ aspectRatio: "3 / 4", borderRadius: `${10 * scale}px`, overflow: "hidden", backgroundColor: "#f0f0f5", cursor: "pointer", position: "relative" }}>
           <img
             src={formatBiliImageUrl(bangumi.cover, "@308w_410h_1c.webp")}
             alt={bangumi.title}
@@ -1013,31 +1354,33 @@ function AggregateBangumiCard({
             referrerPolicy="no-referrer"
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
-          <input
-            type="checkbox"
-            checked={selected}
-            onClick={(event) => event.stopPropagation()}
-            onChange={onToggleSelection}
-            aria-label={`选择番剧 ${bangumi.title}`}
-            style={{ position: "absolute", top: "8px", left: "8px", width: "17px", height: "17px", accentColor: "#6366f1", cursor: "pointer" }}
-          />
+          {selectable ? (
+            <input
+              type="checkbox"
+              checked={selected}
+              onClick={(event) => event.stopPropagation()}
+              onChange={onToggleSelection}
+              aria-label={`选择番剧 ${bangumi.title}`}
+              style={{ position: "absolute", top: `${8 * scale}px`, left: `${8 * scale}px`, width: `${17 * scale}px`, height: `${17 * scale}px`, accentColor: "#6366f1", cursor: "pointer" }}
+            />
+          ) : null}
         </div>
         <div style={{ minWidth: 0 }}>
-          <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#1a1a2e", lineHeight: 1.45 }}>{bangumi.title}</h3>
-          <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#8b8b9a", display: "flex", alignItems: "center", gap: "6px" }}>
-            <Calendar style={{ width: 13, height: 13 }} />
+          <h3 style={{ fontSize: `${15 * scale}px`, fontWeight: 700, color: "#1a1a2e", lineHeight: 1.45 }}>{bangumi.title}</h3>
+          <div style={{ marginTop: `${6 * scale}px`, fontSize: `${12.5 * scale}px`, color: "#8b8b9a", display: "flex", alignItems: "center", gap: `${6 * scale}px` }}>
+            <Calendar style={{ width: 13 * scale, height: 13 * scale }} />
             {bangumi.index_show || "番剧"}
           </div>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "8px", marginTop: "13px" }}>
-        <CardActionButton primary onClick={onPlay} icon={<Play style={{ width: 14, height: 14 }} />}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: `${8 * scale}px`, marginTop: `${13 * scale}px` }}>
+        <CardActionButton scale={scale} primary onClick={onPlay} icon={<Play style={{ width: 14 * scale, height: 14 * scale }} />}>
           播放
         </CardActionButton>
-        <CardActionButton onClick={onDownload} icon={<Download style={{ width: 14, height: 14 }} />}>
+        <CardActionButton scale={scale} onClick={onDownload} icon={<Download style={{ width: 14 * scale, height: 14 * scale }} />}>
           下载
         </CardActionButton>
-        <CardActionButton onClick={onOpenBrowser} icon={<ExternalLink style={{ width: 14, height: 14 }} />}>
+        <CardActionButton scale={scale} onClick={onOpenBrowser} icon={<ExternalLink style={{ width: 14 * scale, height: 14 * scale }} />}>
           浏览器
         </CardActionButton>
       </div>
@@ -1124,11 +1467,13 @@ function CardActionButton({
   children,
   icon,
   onClick,
+  scale,
   primary = false,
 }: {
   children: React.ReactNode;
   icon: React.ReactNode;
   onClick: () => void;
+  scale: number;
   primary?: boolean;
 }) {
   return (
@@ -1139,17 +1484,17 @@ function CardActionButton({
       whileTap={{ scale: 0.97 }}
       style={{
         minWidth: 0,
-        height: "36px",
+        height: `${36 * scale}px`,
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: "5px",
-        padding: "0 7px",
-        borderRadius: "9px",
+        gap: `${5 * scale}px`,
+        padding: `0 ${7 * scale}px`,
+        borderRadius: `${9 * scale}px`,
         border: primary ? "1px solid #6366f1" : "1px solid #dddde8",
         backgroundColor: primary ? "#6366f1" : "#fff",
         color: primary ? "#fff" : "#505065",
-        fontSize: "12.5px",
+        fontSize: `${12.5 * scale}px`,
         fontWeight: 600,
         cursor: "pointer",
         fontFamily: "inherit",

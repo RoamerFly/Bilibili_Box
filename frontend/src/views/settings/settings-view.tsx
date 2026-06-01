@@ -8,6 +8,7 @@ import {
   MonitorPlay,
   Moon,
   Palette,
+  RefreshCw,
   RotateCcw,
   Rows3,
   Sun,
@@ -25,6 +26,8 @@ interface BackendConfig {
   start_maximized: boolean;
   card_scale: number;
   card_page_size: number;
+  card_page_rows: number;
+  card_page_columns: number;
   sessdata: string;
   cookie?: string;
   theme: string;
@@ -34,12 +37,27 @@ interface BackendConfig {
   [key: string]: unknown;
 }
 
+interface UpdateCheckResult {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  release_name?: string | null;
+  release_url: string;
+  body: string;
+  asset?: {
+    name: string;
+    url: string;
+    size: number;
+  } | null;
+}
+
 export function SettingsView() {
   const userInfo = useAppStore((s) => s.userInfo);
   const setConfig = useAppStore((s) => s.setConfig);
   const setUserInfo = useAppStore((s) => s.setUserInfo);
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [backendConfig, setBackendConfig] = useState<BackendConfig | null>(null);
 
@@ -70,6 +88,20 @@ export function SettingsView() {
   );
 
   const isLoggedIn = useMemo(() => userInfo !== null, [userInfo]);
+  const cardPageRows = Math.max(1, Math.min(8, Math.round(backendConfig?.card_page_rows ?? 3)));
+  const cardPageColumns = Math.max(1, Math.min(8, Math.round(backendConfig?.card_page_columns ?? 2)));
+  const saveCardGrid = useCallback(
+    async (rows: number, columns: number) => {
+      const nextRows = Math.max(1, Math.min(8, Math.round(rows)));
+      const nextColumns = Math.max(1, Math.min(8, Math.round(columns)));
+      await saveConfig({
+        card_page_rows: nextRows,
+        card_page_columns: nextColumns,
+        card_page_size: nextRows * nextColumns,
+      });
+    },
+    [saveConfig]
+  );
 
   const handleLogout = async () => {
     const currentConfig = await invoke<BackendConfig>("get_config");
@@ -108,6 +140,32 @@ export function SettingsView() {
     }
   };
 
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    setFeedback("");
+    try {
+      const result = await invoke<UpdateCheckResult>("check_update");
+      if (!result.update_available) {
+        setFeedback(`当前已是最新版 ${result.current_version}`);
+        return;
+      }
+      if (!result.asset) {
+        setFeedback(`发现新版本 ${result.latest_version}，但没有适合当前系统的安装包`);
+        return;
+      }
+      setFeedback(`发现新版本 ${result.latest_version}，正在下载 ${result.asset.name}`);
+      await invoke("download_and_install_update", {
+        assetUrl: result.asset.url,
+        assetName: result.asset.name,
+      });
+      setFeedback("安装程序已启动，应用即将退出");
+    } catch (err) {
+      setFeedback(`检查更新失败：${String(err)}`);
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
   if (loading || !backendConfig) {
     return (
       <div
@@ -142,15 +200,26 @@ export function SettingsView() {
               个性化配置 BiliBox
             </p>
           </div>
-          <button
-            type="button"
-            disabled={resetting}
-            onClick={() => void handleResetConfig()}
-            style={{ ...secondaryButtonStyle, opacity: resetting ? 0.65 : 1 }}
-          >
-            <RotateCcw style={{ width: 15, height: 15, marginRight: "6px" }} />
-            {resetting ? "恢复中" : "恢复默认"}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              disabled={checkingUpdate || resetting}
+              onClick={() => void handleCheckUpdate()}
+              style={{ ...secondaryButtonStyle, opacity: checkingUpdate || resetting ? 0.65 : 1 }}
+            >
+              <RefreshCw className={checkingUpdate ? "animate-spin" : undefined} style={{ width: 15, height: 15, marginRight: "6px" }} />
+              {checkingUpdate ? "检查中" : "检查更新"}
+            </button>
+            <button
+              type="button"
+              disabled={resetting || checkingUpdate}
+              onClick={() => void handleResetConfig()}
+              style={{ ...secondaryButtonStyle, opacity: resetting || checkingUpdate ? 0.65 : 1 }}
+            >
+              <RotateCcw style={{ width: 15, height: 15, marginRight: "6px" }} />
+              {resetting ? "恢复中" : "恢复默认"}
+            </button>
+          </div>
         </div>
       </motion.div>
 
@@ -352,15 +421,40 @@ export function SettingsView() {
         <SettingRow
           icon={<Rows3 style={{ width: 21, height: 21, color: "#0891b2" }} />}
           iconBgColor="#ecfeff"
-          title="每页卡片数量"
-          description="固定卡片列表每页显示数量，卡片区域单独滚动"
+          title="每页卡片行列数"
+          description="设置每页卡片的行数和列数，卡片会随网格密度自动缩放"
           control={
-            <NumberStepper
-              value={backendConfig.card_page_size || 12}
-              min={4}
-              max={60}
-              onChange={(value) => void saveConfig({ card_page_size: value })}
-            />
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <StepperField
+                label="行"
+                value={cardPageRows}
+                min={1}
+                max={8}
+                onChange={(value) => void saveCardGrid(value, cardPageColumns)}
+              />
+              <StepperField
+                label="列"
+                value={cardPageColumns}
+                min={1}
+                max={8}
+                onChange={(value) => void saveCardGrid(cardPageRows, value)}
+              />
+              <span
+                style={{
+                  minWidth: "76px",
+                  textAlign: "center",
+                  padding: "9px 12px",
+                  borderRadius: "10px",
+                  backgroundColor: "#f7f7fb",
+                  color: "#505065",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {cardPageRows * cardPageColumns} 张/页
+              </span>
+            </div>
           }
         />
 
@@ -608,6 +702,27 @@ function NumberStepper({
       >
         +
       </button>
+    </div>
+  );
+}
+
+function StepperField({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+      <span style={{ fontSize: "13px", fontWeight: 700, color: "#6f6f82" }}>{label}</span>
+      <NumberStepper value={value} min={min} max={max} onChange={onChange} />
     </div>
   );
 }

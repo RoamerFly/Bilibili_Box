@@ -120,6 +120,8 @@ pub fn run() {
             commands::get_saved_user_info,
             commands::clear_user_info,
             commands::open_external_url,
+            commands::check_update,
+            commands::download_and_install_update,
             commands::window_minimize,
             commands::window_toggle_maximize,
             commands::window_close,

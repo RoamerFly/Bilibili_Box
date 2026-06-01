@@ -81,6 +81,8 @@ export interface AppConfig {
   cookie?: string;
   card_scale?: number;
   card_page_size?: number;
+  card_page_rows?: number;
+  card_page_columns?: number;
   [key: string]: unknown;
 }
 
@@ -89,6 +91,10 @@ export interface SearchPageState {
   filters: SearchFilters;
   lastAggregateInput: string;
   result: SearchResponse | null;
+  currentPage: number;
+  pageSize: number;
+  loadedPages: number;
+  hasMore: boolean;
 }
 
 export interface RecommendPageVideo {
@@ -110,6 +116,7 @@ export interface RecommendPageState {
   currentPage: number;
   loadedCategory: string | null;
   batchIndexes: Record<string, number>;
+  hasMoreByCategory: Record<string, boolean>;
 }
 
 const defaultSearchFilters: SearchFilters = {
@@ -123,6 +130,10 @@ const defaultSearchPageState: SearchPageState = {
   filters: defaultSearchFilters,
   lastAggregateInput: "",
   result: null,
+  currentPage: 1,
+  pageSize: 6,
+  loadedPages: 0,
+  hasMore: false,
 };
 
 const defaultRecommendPageState: RecommendPageState = {
@@ -133,6 +144,7 @@ const defaultRecommendPageState: RecommendPageState = {
   currentPage: 1,
   loadedCategory: null,
   batchIndexes: { 全部: 1 },
+  hasMoreByCategory: {},
 };
 
 interface AppState {

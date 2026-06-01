@@ -14,6 +14,7 @@ import { invoke } from "@/lib/api";
 import { DownloadProgress, DownloadStage } from "@/lib/types";
 import { useAppStore } from "@/stores/app-store";
 import { DownloadDeleteDialog } from "@/components/download-delete-dialog";
+import { useCardLayout } from "@/hooks/use-card-layout";
 
 // ====== 类型定义 ======
 type TaskState = "Pending" | "Downloading" | "Merging" | "Paused" | "Completed" | "Failed";
@@ -87,7 +88,7 @@ export function DownloadsView() {
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
   const setView = useAppStore((s) => s.setView);
   const openPlayer = useAppStore((s) => s.openPlayer);
-  const pageSize = Math.max(4, Number(useAppStore((s) => s.config?.card_page_size ?? 12)));
+  const { pageSize } = useCardLayout();
 
   // 获取数据
   const fetchTasks = useCallback(async () => {

@@ -1,6 +1,9 @@
 use md5::{Digest, Md5};
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, State};
@@ -22,6 +25,58 @@ use crate::config::Config;
 use crate::download::{CreateDownloadTaskParams, DownloadManager, DownloadProgress};
 use crate::media_proxy::{MediaProxyServer, RegisteredPlayable};
 use crate::plugin::{PluginInfo, PluginManager};
+
+const GITHUB_API_LATEST_RELEASE_URL: &str =
+    "https://api.github.com/repos/RoamerFly/Bilibili_Box/releases/latest";
+const GITHUB_LATEST_RELEASE_URL: &str = "https://github.com/RoamerFly/Bilibili_Box/releases/latest";
+const GITHUB_RELEASE_DOWNLOAD_BASE: &str =
+    "https://github.com/RoamerFly/Bilibili_Box/releases/download";
+const GITCODE_LATEST_RELEASE_URL: &str =
+    "https://gitcode.com/roverfly/Bilibili_box/releases/latest";
+const GITCODE_RELEASE_DOWNLOAD_BASE: &str =
+    "https://gitcode.com/roverfly/Bilibili_box/releases/download";
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateAsset {
+    pub name: String,
+    pub url: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateCheckResult {
+    pub current_version: String,
+    pub latest_version: String,
+    pub update_available: bool,
+    pub release_name: Option<String>,
+    pub release_url: String,
+    pub body: String,
+    pub asset: Option<UpdateAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    name: Option<String>,
+    html_url: String,
+    body: Option<String>,
+    assets: Vec<GithubReleaseAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+    size: u64,
+}
+
+struct UpdateRelease {
+    tag_name: String,
+    release_name: Option<String>,
+    release_url: String,
+    body: String,
+    asset: Option<UpdateAsset>,
+}
 
 /// 获取配置
 #[tauri::command]
@@ -146,15 +201,36 @@ pub async fn get_user_info(
     bili_client.get_user_info(&sessdata).await
 }
 
-/// 保存已登录用户信息到 exe 同级 data/user/user.json
+/// 保存已登录用户信息到当前用户的 data/{profile}/user.json。
 #[tauri::command]
-pub fn save_user_info(app: AppHandle, user_info: UserInfo) -> Result<(), String> {
+pub fn save_user_info(
+    app: AppHandle,
+    config: State<'_, Arc<RwLock<Config>>>,
+    download_manager: State<'_, Arc<DownloadManager>>,
+    user_info: UserInfo,
+) -> Result<(), String> {
+    let profile = Config::profile_name_from_user(&user_info.uname, user_info.mid);
+    let previous_profile =
+        Config::current_profile_name(&app).unwrap_or_else(|_| "guest".to_string());
+    let should_migrate_legacy = Config::legacy_profile_matches(&app, user_info.mid);
+    let current_config = config.read().clone();
+    Config::set_current_profile(&app, &profile)?;
+    let migrated_config =
+        Config::migrate_legacy_config_for_profile(&app, user_info.mid, &current_config)?;
+    *config.write() = migrated_config.clone();
+    migrated_config.save(&app)?;
     let user_dir = Config::user_data_dir(&app)?;
     std::fs::create_dir_all(&user_dir).map_err(|e| format!("创建用户数据目录失败: {}", e))?;
     let user_path = Config::user_info_path(&app)?;
     let user_json =
         serde_json::to_string_pretty(&user_info).map_err(|e| format!("序列化用户信息失败: {e}"))?;
     std::fs::write(&user_path, user_json).map_err(|e| format!("写入用户信息失败: {e}"))?;
+    download_manager.migrate_legacy_tasks_to_current_profile(
+        should_migrate_legacy,
+        previous_profile == "guest",
+    )?;
+    Config::clear_guest_account_data(&app)?;
+    download_manager.reload_current_profile_tasks();
     Ok(())
 }
 
@@ -175,11 +251,17 @@ pub fn get_saved_user_info(app: AppHandle) -> Result<Option<UserInfo>, String> {
 
 /// 清除本地用户信息
 #[tauri::command]
-pub fn clear_user_info(app: AppHandle) -> Result<(), String> {
+pub fn clear_user_info(
+    app: AppHandle,
+    download_manager: State<'_, Arc<DownloadManager>>,
+) -> Result<(), String> {
     let user_path = Config::user_info_path(&app)?;
     if user_path.exists() {
         std::fs::remove_file(&user_path).map_err(|e| format!("删除用户信息失败: {e}"))?;
     }
+    Config::set_current_profile(&app, "guest")?;
+    Config::ensure_user_dirs(&app)?;
+    download_manager.reload_current_profile_tasks();
     Ok(())
 }
 
@@ -193,6 +275,462 @@ pub fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
             .map_err(|e| format!("打开浏览器失败: {e}")),
         _ => Err("只允许打开 http/https 链接".to_string()),
     }
+}
+
+#[tauri::command]
+pub async fn check_update(app: AppHandle) -> Result<UpdateCheckResult, String> {
+    let current_version = app.package_info().version.to_string();
+    let client = update_http_client()?;
+    let release = fetch_update_release(&client).await?;
+    let latest_version = normalize_version(&release.tag_name);
+    let update_available = is_version_newer(&latest_version, &current_version);
+
+    Ok(UpdateCheckResult {
+        current_version,
+        latest_version,
+        update_available,
+        release_name: release.release_name,
+        release_url: release.release_url,
+        body: release.body,
+        asset: release.asset,
+    })
+}
+
+#[tauri::command]
+pub async fn download_and_install_update(
+    app: AppHandle,
+    asset_url: String,
+    asset_name: String,
+) -> Result<(), String> {
+    let parsed = Url::parse(asset_url.trim()).map_err(|e| format!("无效的更新地址: {e}"))?;
+    if parsed.scheme() != "https" {
+        return Err("更新包必须来自 HTTPS 地址".to_string());
+    }
+
+    let file_name = sanitize_update_file_name(&asset_name);
+    let update_dir = app
+        .path()
+        .temp_dir()
+        .map_err(|e| format!("获取临时目录失败: {e}"))?
+        .join("BiliBoxUpdate");
+    tokio::fs::create_dir_all(&update_dir)
+        .await
+        .map_err(|e| format!("创建更新缓存目录失败: {e}"))?;
+    let update_path = update_dir.join(file_name);
+
+    let bytes = reqwest::Client::new()
+        .get(parsed.as_str())
+        .header("User-Agent", "BiliBox")
+        .send()
+        .await
+        .map_err(|e| format!("下载更新失败: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("下载更新失败: {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| format!("读取更新包失败: {e}"))?;
+    tokio::fs::write(&update_path, bytes)
+        .await
+        .map_err(|e| format!("保存更新包失败: {e}"))?;
+
+    launch_update_file(&app, &update_path)?;
+    Ok(())
+}
+
+fn update_http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) BiliBox")
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| format!("创建更新检查客户端失败: {e}"))
+}
+
+async fn fetch_update_release(client: &reqwest::Client) -> Result<UpdateRelease, String> {
+    let mut errors = Vec::new();
+
+    match fetch_github_api_release(client).await {
+        Ok(release) => return Ok(release),
+        Err(error) => errors.push(error),
+    }
+
+    match fetch_github_web_release(client).await {
+        Ok(release) => return Ok(release),
+        Err(error) => errors.push(error),
+    }
+
+    match fetch_gitcode_web_release(client).await {
+        Ok(release) => return Ok(release),
+        Err(error) => errors.push(error),
+    }
+
+    Err(format!("检查更新失败: {}", errors.join("；")))
+}
+
+async fn fetch_github_api_release(client: &reqwest::Client) -> Result<UpdateRelease, String> {
+    let response = client
+        .get(GITHUB_API_LATEST_RELEASE_URL)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("GitHub API 请求失败: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("GitHub API 返回 HTTP {}", response.status()));
+    }
+
+    let release = response
+        .json::<GithubRelease>()
+        .await
+        .map_err(|e| format!("解析 GitHub 更新信息失败: {e}"))?;
+    let asset = select_update_asset(&release.assets)
+        .map(|asset| UpdateAsset {
+            name: asset.name.clone(),
+            url: asset.browser_download_url.clone(),
+            size: asset.size,
+        })
+        .or_else(|| {
+            platform_update_assets(&release.tag_name, ReleaseHost::Github)
+                .into_iter()
+                .next()
+        });
+
+    Ok(UpdateRelease {
+        tag_name: release.tag_name,
+        release_name: release.name,
+        release_url: release.html_url,
+        body: release.body.unwrap_or_default(),
+        asset,
+    })
+}
+
+async fn fetch_github_web_release(client: &reqwest::Client) -> Result<UpdateRelease, String> {
+    let response = client
+        .head(GITHUB_LATEST_RELEASE_URL)
+        .send()
+        .await
+        .map_err(|e| format!("GitHub Releases 页面请求失败: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "GitHub Releases 页面返回 HTTP {}",
+            response.status()
+        ));
+    }
+
+    let final_url = response.url().clone();
+    let tag_name = tag_from_release_url(&final_url)
+        .ok_or_else(|| format!("无法从 GitHub Releases 地址解析版本: {final_url}"))?;
+    let asset = select_reachable_update_asset(
+        client,
+        platform_update_assets(&tag_name, ReleaseHost::Github),
+        true,
+    )
+    .await;
+
+    Ok(UpdateRelease {
+        release_name: Some(format!("Bilibili_Box {tag_name}")),
+        release_url: final_url.to_string(),
+        body: String::new(),
+        tag_name,
+        asset,
+    })
+}
+
+async fn fetch_gitcode_web_release(client: &reqwest::Client) -> Result<UpdateRelease, String> {
+    let response = client
+        .get(GITCODE_LATEST_RELEASE_URL)
+        .send()
+        .await
+        .map_err(|e| format!("GitCode Releases 页面请求失败: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "GitCode Releases 页面返回 HTTP {}",
+            response.status()
+        ));
+    }
+
+    let final_url = response.url().clone();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("读取 GitCode Releases 页面失败: {e}"))?;
+    let tag_name = tag_from_release_url(&final_url)
+        .or_else(|| find_latest_semver_tag(&body))
+        .ok_or_else(|| "无法从 GitCode Releases 页面解析版本".to_string())?;
+    let asset = select_reachable_update_asset(
+        client,
+        platform_update_assets(&tag_name, ReleaseHost::GitCode),
+        false,
+    )
+    .await;
+
+    Ok(UpdateRelease {
+        release_name: Some(format!("Bilibili_Box {tag_name}")),
+        release_url: final_url.to_string(),
+        body: String::new(),
+        tag_name,
+        asset,
+    })
+}
+
+#[derive(Clone, Copy)]
+enum ReleaseHost {
+    Github,
+    GitCode,
+}
+
+fn platform_update_assets(tag_name: &str, host: ReleaseHost) -> Vec<UpdateAsset> {
+    let base_url = match host {
+        ReleaseHost::Github => GITHUB_RELEASE_DOWNLOAD_BASE,
+        ReleaseHost::GitCode => GITCODE_RELEASE_DOWNLOAD_BASE,
+    };
+    let platform = match std::env::consts::OS {
+        "windows" => "windows-x64",
+        "macos" => {
+            if std::env::consts::ARCH == "aarch64" {
+                "macos-arm64"
+            } else {
+                "macos-x64"
+            }
+        }
+        "linux" => "linux-x64",
+        _ => "unknown",
+    };
+    let asset_names = match std::env::consts::OS {
+        "windows" => vec![
+            format!("Bilibili_Box-{tag_name}-{platform}-installer.exe"),
+            format!("Bilibili_Box-{tag_name}-{platform}-portable.zip"),
+        ],
+        "macos" => vec![
+            format!("Bilibili_Box-{tag_name}-{platform}-installer.dmg"),
+            format!("Bilibili_Box-{tag_name}-{platform}-portable.zip"),
+        ],
+        "linux" => vec![
+            format!("Bilibili_Box-{tag_name}-{platform}-installer.deb"),
+            format!("Bilibili_Box-{tag_name}-{platform}-installer.rpm"),
+            format!("Bilibili_Box-{tag_name}-{platform}-portable.tar.gz"),
+        ],
+        _ => vec![format!("Bilibili_Box-{tag_name}-{platform}-portable.zip")],
+    };
+
+    asset_names
+        .into_iter()
+        .map(|name| UpdateAsset {
+            url: format!("{base_url}/{tag_name}/{name}"),
+            name,
+            size: 0,
+        })
+        .collect()
+}
+
+async fn select_reachable_update_asset(
+    client: &reqwest::Client,
+    candidates: Vec<UpdateAsset>,
+    allow_unverified_fallback: bool,
+) -> Option<UpdateAsset> {
+    let mut fallback = None;
+    for mut candidate in candidates {
+        if fallback.is_none() {
+            fallback = Some(candidate.clone());
+        }
+        let Ok(response) = client.head(&candidate.url).send().await else {
+            continue;
+        };
+        if response.status().is_success() || response.status().is_redirection() {
+            candidate.size = response.content_length().unwrap_or(0);
+            return Some(candidate);
+        }
+    }
+    allow_unverified_fallback.then_some(fallback).flatten()
+}
+
+fn tag_from_release_url(url: &Url) -> Option<String> {
+    let segments = url.path_segments()?.collect::<Vec<_>>();
+    segments
+        .windows(2)
+        .find_map(|window| (window[0] == "tag").then(|| window[1].to_string()))
+}
+
+fn find_latest_semver_tag(content: &str) -> Option<String> {
+    let mut tags = Vec::new();
+    for marker in ["v", "V"] {
+        for part in content.split(marker).skip(1) {
+            let version = part
+                .chars()
+                .take_while(|ch| ch.is_ascii_digit() || *ch == '.')
+                .collect::<String>();
+            if version.split('.').filter(|part| !part.is_empty()).count() >= 2 {
+                tags.push(format!("v{version}"));
+            }
+        }
+    }
+    tags.sort_by(|left, right| {
+        parse_version_parts(&normalize_version(left))
+            .cmp(&parse_version_parts(&normalize_version(right)))
+    });
+    tags.pop()
+}
+
+fn normalize_version(version: &str) -> String {
+    version
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .split_once('-')
+        .map(|(stable, _)| stable)
+        .unwrap_or_else(|| version.trim().trim_start_matches(['v', 'V']))
+        .to_string()
+}
+
+fn is_version_newer(latest: &str, current: &str) -> bool {
+    let latest_parts = parse_version_parts(latest);
+    let current_parts = parse_version_parts(current);
+    if latest_parts.is_empty() || current_parts.is_empty() {
+        return latest != current;
+    }
+
+    let length = latest_parts.len().max(current_parts.len()).max(3);
+    for index in 0..length {
+        let latest_value = latest_parts.get(index).copied().unwrap_or(0);
+        let current_value = current_parts.get(index).copied().unwrap_or(0);
+        if latest_value != current_value {
+            return latest_value > current_value;
+        }
+    }
+    false
+}
+
+fn parse_version_parts(version: &str) -> Vec<u64> {
+    version
+        .split('.')
+        .filter_map(|part| {
+            let digits = part
+                .chars()
+                .take_while(|ch| ch.is_ascii_digit())
+                .collect::<String>();
+            (!digits.is_empty())
+                .then(|| digits.parse::<u64>().ok())
+                .flatten()
+        })
+        .collect()
+}
+
+fn select_update_asset(assets: &[GithubReleaseAsset]) -> Option<&GithubReleaseAsset> {
+    assets
+        .iter()
+        .max_by_key(|asset| update_asset_score(&asset.name))
+}
+
+fn update_asset_score(name: &str) -> i32 {
+    let lower = name.to_ascii_lowercase();
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+    let mut score = 0;
+
+    match os {
+        "windows" => {
+            if lower.ends_with(".exe") || lower.ends_with(".msi") {
+                score += 80;
+            }
+            if lower.contains("windows") || lower.contains("win") {
+                score += 50;
+            }
+        }
+        "macos" => {
+            if lower.ends_with(".dmg") || lower.ends_with(".pkg") {
+                score += 80;
+            }
+            if lower.contains("mac") || lower.contains("darwin") || lower.contains("osx") {
+                score += 50;
+            }
+        }
+        "linux" => {
+            if lower.ends_with(".appimage") || lower.ends_with(".deb") || lower.ends_with(".rpm") {
+                score += 80;
+            }
+            if lower.contains("linux") {
+                score += 50;
+            }
+        }
+        _ => {}
+    }
+
+    if lower.ends_with(".zip") || lower.ends_with(".tar.gz") {
+        score += 10;
+    }
+    if lower.contains("installer") || lower.contains("setup") {
+        score += 20;
+    }
+    if arch == "x86_64"
+        && (lower.contains("x64") || lower.contains("x86_64") || lower.contains("amd64"))
+    {
+        score += 15;
+    }
+    if arch == "aarch64" && (lower.contains("arm64") || lower.contains("aarch64")) {
+        score += 15;
+    }
+    if lower.contains("debug") || lower.contains("symbols") {
+        score -= 100;
+    }
+
+    score
+}
+
+fn sanitize_update_file_name(name: &str) -> String {
+    let sanitized = name
+        .chars()
+        .map(|ch| match ch {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            ch if ch.is_control() => '_',
+            ch => ch,
+        })
+        .collect::<String>();
+    let sanitized = sanitized.trim().trim_matches('.');
+    if sanitized.is_empty() {
+        "BiliBoxUpdate".to_string()
+    } else {
+        sanitized.to_string()
+    }
+}
+
+fn launch_update_file(app: &AppHandle, update_path: &PathBuf) -> Result<(), String> {
+    let extension = update_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+
+    let is_installer = matches!(
+        extension.as_str(),
+        "exe" | "msi" | "dmg" | "pkg" | "appimage" | "deb" | "rpm"
+    );
+
+    if is_installer {
+        #[cfg(target_os = "windows")]
+        Command::new(update_path)
+            .spawn()
+            .map_err(|e| format!("启动安装程序失败: {e}"))?;
+
+        #[cfg(target_os = "macos")]
+        Command::new("open")
+            .arg(update_path)
+            .spawn()
+            .map_err(|e| format!("启动安装程序失败: {e}"))?;
+
+        #[cfg(target_os = "linux")]
+        Command::new(update_path)
+            .spawn()
+            .map_err(|e| format!("启动安装程序失败: {e}"))?;
+
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(800)).await;
+            app.exit(0);
+        });
+        return Ok(());
+    }
+
+    app.opener()
+        .open_path(update_path.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| format!("打开更新包失败: {e}"))
 }
 
 #[tauri::command]
@@ -344,6 +882,8 @@ pub async fn search_video(
     order: Option<String>,
     pubtime: Option<String>,
     duration: Option<String>,
+    page: Option<i64>,
+    page_size: Option<i64>,
 ) -> Result<SearchResult, String> {
     bili_client
         .search_video_with_options(
@@ -352,6 +892,8 @@ pub async fn search_video(
                 order,
                 pubtime,
                 duration,
+                page,
+                page_size,
             },
         )
         .await
@@ -671,6 +1213,7 @@ pub fn open_download_folder(
 ) -> Result<(), String> {
     let configured_path = config.read().download_dir.clone();
     let path = Config::resolve_download_dir(&app, &configured_path)?;
+    std::fs::create_dir_all(&path).map_err(|e| format!("创建下载目录失败: {}", e))?;
 
     #[cfg(target_os = "windows")]
     std::process::Command::new("explorer")

@@ -136,6 +136,11 @@ export function PlayerView() {
     const localPlayUrl = playerState.localTaskId
       ? await invoke<string>("get_downloaded_play_url", { taskId: playerState.localTaskId }).catch(() => "")
       : "";
+    if (localPlayUrl) {
+      setAvailableQualities([]);
+      setDashPlayback(null);
+      setPlayUrl(localPlayUrl);
+    }
     let info: VideoInfo;
     try {
       info = await invoke<VideoInfo>("get_normal_info", { bvid: playerState.bvid });
@@ -382,6 +387,7 @@ export function PlayerView() {
       return;
     }
     try {
+      const isBangumi = playerState?.kind === "bangumi";
       const downloadQuality = await requestDownloadQuality({
         bvid: selectedEpisode.bvid,
         cid: selectedEpisode.cid,
@@ -392,10 +398,12 @@ export function PlayerView() {
           bvid: selectedEpisode.bvid,
           cid: selectedEpisode.cid,
           title:
-            playerState?.kind === "bangumi"
+            isBangumi
               ? `${currentTitle} - ${selectedEpisode.title}`.trim()
               : currentTitle,
           cids: [selectedEpisode.cid],
+          collection_title: isBangumi ? currentTitle : undefined,
+          episode_title: isBangumi ? selectedEpisode.title : undefined,
           download_quality: downloadQuality,
         },
       });
@@ -432,6 +440,8 @@ export function PlayerView() {
                 cid: episode.cid,
                 title: `${currentTitle} - ${episode.title}`.trim(),
                 cids: [episode.cid],
+                collection_title: currentTitle,
+                episode_title: episode.title,
                 download_quality: downloadQuality,
               },
             })
@@ -448,8 +458,9 @@ export function PlayerView() {
   const handleAudioDownload = async () => {
     if (!selectedEpisode) return;
     try {
+      const isBangumi = playerState?.kind === "bangumi";
       const title =
-        playerState?.kind === "bangumi"
+        isBangumi
           ? `${currentTitle} - ${selectedEpisode.title}`.trim()
           : currentTitle;
       const taskIds = await invoke<string[]>("create_download_task", {
@@ -458,6 +469,8 @@ export function PlayerView() {
           cid: selectedEpisode.cid,
           title,
           cids: [selectedEpisode.cid],
+          collection_title: isBangumi ? currentTitle : undefined,
+          episode_title: isBangumi ? selectedEpisode.title : undefined,
           audio_only: true,
         },
       });
