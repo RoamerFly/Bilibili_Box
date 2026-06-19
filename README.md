@@ -24,6 +24,7 @@
     <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.x-24c8db?style=for-the-badge&logo=tauri&logoColor=white" />
     <img alt="React" src="https://img.shields.io/badge/React-19-61dafb?style=for-the-badge&logo=react&logoColor=20232a" />
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.x-3178c6?style=for-the-badge&logo=typescript&logoColor=white" />
+    <img alt="Downloads" src="https://img.shields.io/github/downloads/RoamerFly/Bilibili_Box/total?style=for-the-badge&logo=github&color=34d399" />
     <img alt="License" src="https://img.shields.io/badge/License-MIT-7c3aed?style=for-the-badge" />
   </p>
 </div>
