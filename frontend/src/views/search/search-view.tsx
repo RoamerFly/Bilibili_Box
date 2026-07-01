@@ -83,6 +83,7 @@ function mergeAggregateSearchResult(
 
 export function SearchView() {
   const openPlayer = useAppStore((s) => s.openPlayer);
+  const openUpProfile = useAppStore((s) => s.openUpProfile);
   const searchPageState = useAppStore((s) => s.searchPageState);
   const setSearchPageState = useAppStore((s) => s.setSearchPageState);
   const searchRequestIdRef = useRef(0);
@@ -621,6 +622,7 @@ export function SearchView() {
               onDownload={handleDownload}
               onOpenBrowser={handleOpenBrowser}
               onOpenPlayer={handleOpenVideoPlayer}
+              onOpenAuthor={openUpProfile}
             />
           ) : null}
 
@@ -651,6 +653,7 @@ export function SearchView() {
                 onRequestDownloadQuality={requestDownloadQuality}
                 onDownloadError={(err) => setError(String(err))}
                 onOpenBrowser={handleOpenBrowser}
+                onOpenAuthor={openUpProfile}
               />
               ) : null}
               {aggregatePageInfo && Math.max(aggregateLoadedPageCount, aggregateTotalPageCount) > 1 ? (
@@ -688,12 +691,14 @@ function NormalVideoResult({
   onDownload,
   onOpenBrowser,
   onOpenPlayer,
+  onOpenAuthor,
 }: {
   video: VideoInfo;
   onCopyBvid: (bvid: string) => void;
   onDownload: (bvid: string, cid: number, title: string) => void;
   onOpenBrowser: (url: string) => void;
   onOpenPlayer: (video: { bvid: string; cid?: number; title: string; pic?: string }) => void;
+  onOpenAuthor: (author: { mid: number; name?: string; face?: string }) => void;
 }) {
   return (
     <div
@@ -757,7 +762,7 @@ function NormalVideoResult({
           </h3>
 
           <div style={{ display: "flex", alignItems: "center", gap: "9px", marginBottom: "12px" }}>
-            <AvatarImage src={video.owner.face} alt={video.owner.name} size={30} />
+            <AvatarImage src={video.owner.face} alt={video.owner.name} size={30} onClick={() => onOpenAuthor({ mid: video.owner.mid, name: video.owner.name, face: video.owner.face })} />
             <span style={{ fontSize: "13.5px", color: "#505065", fontWeight: 500 }}>{video.owner.name}</span>
             <span style={{ fontSize: "12.5px", color: "#9a9aa8" }}>发布于 {formatDateTime(video.pubdate)}</span>
           </div>
@@ -952,6 +957,7 @@ function AggregateResult({
   onRequestDownloadQuality,
   onDownloadError,
   onOpenBrowser,
+  onOpenAuthor,
 }: {
   result: Extract<SearchResponse, { type: "Aggregate" }>;
   activeType: SearchResultType;
@@ -966,6 +972,7 @@ function AggregateResult({
   onRequestDownloadQuality: (targets: DownloadQualityTarget[]) => Promise<string | null>;
   onDownloadError: (error: unknown) => void;
   onOpenBrowser: (url: string) => void;
+  onOpenAuthor: (author: { mid: number; name?: string; face?: string }) => void;
 }) {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [multiSelectEnabled, setMultiSelectEnabled] = useState(false);
@@ -1091,6 +1098,7 @@ function AggregateResult({
                 onDownload={() => void onDownloadVideo(video)}
                 onOpenBrowser={() => onOpenBrowser(`https://www.bilibili.com/video/${video.bvid}`)}
                 onPlay={() => onOpenVideoPlayer({ bvid: video.bvid, title: video.title, pic: video.pic })}
+                onOpenAuthor={onOpenAuthor}
               />
             ))}
           </div>
@@ -1229,6 +1237,7 @@ function AggregateVideoCard({
   onDownload,
   onOpenBrowser,
   onPlay,
+  onOpenAuthor,
 }: {
   video: AggregateSearchResult["videos"][number];
   selectable: boolean;
@@ -1238,12 +1247,13 @@ function AggregateVideoCard({
   onDownload: () => void;
   onOpenBrowser: () => void;
   onPlay: () => void;
+  onOpenAuthor: (author: { mid: number; name?: string; face?: string }) => void;
 }) {
   return (
     <div style={{ borderRadius: `${14 * scale}px`, backgroundColor: "#fff", border: selected ? "1.5px solid #6366f1" : "1px solid #ececf2", padding: `${13 * scale}px ${14 * scale}px` }}>
       <div style={{ display: "grid", gridTemplateColumns: `${Math.max(118 * scale, 148 * scale)}px minmax(0, 1fr)`, gap: `${13 * scale}px`, alignItems: "start" }}>
         <div
-          onClick={onPlay}
+          onClick={selectable ? onToggleSelection : onPlay}
           style={{ aspectRatio: "16 / 9", borderRadius: `${10 * scale}px`, overflow: "hidden", backgroundColor: "#f0f0f5", position: "relative", cursor: "pointer" }}
         >
           <img
@@ -1295,7 +1305,12 @@ function AggregateVideoCard({
             {video.title}
           </h3>
           <div style={{ marginTop: `${8 * scale}px`, display: "flex", alignItems: "center", gap: `${8 * scale}px`, minWidth: 0 }}>
-            <AvatarImage src={video.author_face || ""} alt={video.author} size={24 * scale} />
+            <AvatarImage
+              src={video.author_face || ""}
+              alt={video.author}
+              size={24 * scale}
+              onClick={video.mid ? () => onOpenAuthor({ mid: video.mid || 0, name: video.author, face: video.author_face }) : undefined}
+            />
             <span style={{ fontSize: `${12.5 * scale}px`, color: "#505065", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {video.author || "未知 UP"}
             </span>
@@ -1346,7 +1361,7 @@ function AggregateBangumiCard({
   return (
     <div style={{ borderRadius: `${14 * scale}px`, backgroundColor: "#fff", border: selected ? "1.5px solid #6366f1" : "1px solid #ececf2", padding: `${13 * scale}px ${14 * scale}px` }}>
       <div style={{ display: "grid", gridTemplateColumns: `${Math.max(92 * scale, 116 * scale)}px minmax(0, 1fr)`, gap: `${14 * scale}px`, alignItems: "start" }}>
-        <div onClick={onPlay} style={{ aspectRatio: "3 / 4", borderRadius: `${10 * scale}px`, overflow: "hidden", backgroundColor: "#f0f0f5", cursor: "pointer", position: "relative" }}>
+        <div onClick={selectable ? onToggleSelection : onPlay} style={{ aspectRatio: "3 / 4", borderRadius: `${10 * scale}px`, overflow: "hidden", backgroundColor: "#f0f0f5", cursor: "pointer", position: "relative" }}>
           <img
             src={formatBiliImageUrl(bangumi.cover, "@308w_410h_1c.webp")}
             alt={bangumi.title}
@@ -1388,25 +1403,34 @@ function AggregateBangumiCard({
   );
 }
 
-function AvatarImage({ src, alt, size }: { src: string; alt: string; size: number }) {
+function AvatarImage({ src, alt, size, onClick }: { src: string; alt: string; size: number; onClick?: () => void }) {
   const normalizedSrc = formatBiliImageUrl(src, `@${size * 3}w_${size * 3}h_1c.webp`);
+  const baseStyle = {
+    width: size,
+    height: size,
+    borderRadius: "50%",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#eef2ff",
+    color: "#6366f1",
+    border: "1.5px solid #ececf2",
+    flexShrink: 0,
+    padding: 0,
+    cursor: onClick ? "pointer" : "default",
+  } as const;
   const fallback = (
-    <span
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "#eef2ff",
-        color: "#6366f1",
-        border: "1.5px solid #ececf2",
-        flexShrink: 0,
+    <button
+      type="button"
+      disabled={!onClick}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick?.();
       }}
+      style={baseStyle}
     >
       <UserRound style={{ width: size * 0.56, height: size * 0.56 }} />
-    </span>
+    </button>
   );
 
   if (!normalizedSrc) {
@@ -1414,20 +1438,17 @@ function AvatarImage({ src, alt, size }: { src: string; alt: string; size: numbe
   }
 
   return (
-    <span
+    <button
+      type="button"
+      disabled={!onClick}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick?.();
+      }}
       style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
+        ...baseStyle,
         overflow: "hidden",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: "#eef2ff",
-        border: "1.5px solid #ececf2",
-        flexShrink: 0,
         position: "relative",
-        color: "#6366f1",
       }}
     >
       <UserRound style={{ width: size * 0.56, height: size * 0.56, position: "absolute" }} />
@@ -1441,7 +1462,7 @@ function AvatarImage({ src, alt, size }: { src: string; alt: string; size: numbe
         }}
         style={{ width: "100%", height: "100%", objectFit: "cover", position: "relative" }}
       />
-    </span>
+    </button>
   );
 }
 

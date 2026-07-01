@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   Download,
@@ -22,6 +22,7 @@ import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
 import type { BangumiInfo } from "@/lib/types";
 import { useAppStore } from "@/stores/app-store";
 import { runPreservingMainScroll } from "@/lib/scroll-position";
+import { ClickableAvatar } from "@/components/video-card";
 
 type ViewMode = "list" | "grid";
 type TimeFilter = "all" | "today" | "yesterday" | "week";
@@ -41,6 +42,7 @@ interface HistoryItem {
   author: {
     mid: number;
     name: string;
+    face?: string;
   };
 }
 
@@ -154,6 +156,7 @@ function isBangumiHistoryItem(item: HistoryItem) {
 export function HistoryView() {
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
+  const openUpProfile = useAppStore((s) => s.openUpProfile);
   const viewMode = useAppStore((s) => s.cardViewModes.history ?? "list");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
   const { pageSize, cardScale, columns } = useCardLayout();
@@ -170,6 +173,9 @@ export function HistoryView() {
   const [total, setTotal] = useState(0);
   const [loadedPages, setLoadedPages] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [multiSelectEnabled, setMultiSelectEnabled] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [batchDownloading, setBatchDownloading] = useState(false);
   const [timeMenuOpen, setTimeMenuOpen] = useState(false);
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
   const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
@@ -255,29 +261,34 @@ export function HistoryView() {
     await fetchHistory(1, "replace", false, true);
   };
 
+  const resolveHistoryDownloadTarget = async (item: HistoryItem) => {
+    let target = {
+      bvid: item.bvid,
+      cid: item.cid,
+      title: item.title,
+      collectionTitle: undefined as string | undefined,
+      episodeTitle: undefined as string | undefined,
+    };
+    if (isBangumiHistoryItem(item)) {
+      const info = await invoke<BangumiInfo>("get_bangumi_info", { epId: item.ep_id });
+      const episode = info.episodes.find((current) => current.ep_id === item.ep_id) ?? info.episodes[0];
+      if (!episode) throw new Error("未找到可下载的番剧剧集");
+      const episodeTitle = episode.long_title || episode.title;
+      target = {
+        bvid: episode.bvid,
+        cid: episode.cid,
+        title: `${info.title} - ${episodeTitle}`.trim(),
+        collectionTitle: info.title,
+        episodeTitle,
+      };
+    }
+    if (!target.bvid || !target.cid) throw new Error("当前历史记录缺少可下载的视频标识");
+    return target;
+  };
+
   const handleDownload = async (item: HistoryItem) => {
     try {
-      let target = {
-        bvid: item.bvid,
-        cid: item.cid,
-        title: item.title,
-        collectionTitle: undefined as string | undefined,
-        episodeTitle: undefined as string | undefined,
-      };
-      if (isBangumiHistoryItem(item)) {
-        const info = await invoke<BangumiInfo>("get_bangumi_info", { epId: item.ep_id });
-        const episode = info.episodes.find((current) => current.ep_id === item.ep_id) ?? info.episodes[0];
-        if (!episode) throw new Error("未找到可下载的番剧剧集");
-        const episodeTitle = episode.long_title || episode.title;
-        target = {
-          bvid: episode.bvid,
-          cid: episode.cid,
-          title: `${info.title} - ${episodeTitle}`.trim(),
-          collectionTitle: info.title,
-          episodeTitle,
-        };
-      }
-      if (!target.bvid || !target.cid) throw new Error("当前历史记录缺少可下载的视频标识");
+      const target = await resolveHistoryDownloadTarget(item);
       const downloadQuality = await requestDownloadQuality({ bvid: target.bvid, cid: target.cid });
       if (!downloadQuality) return;
       const taskIds = await invoke<string[]>("create_download_task", {
@@ -343,6 +354,46 @@ export function HistoryView() {
     const start = (currentPage - 1) * pageSize;
     return items.slice(start, start + pageSize);
   }, [currentPage, items, pageSize]);
+  const itemKey = (item: HistoryItem) => item.bvid || `ep:${item.ep_id || 0}:${item.view_at}`;
+  const currentPageKeys = pagedItems.map(itemKey);
+  const allCurrentSelected = currentPageKeys.length > 0 && currentPageKeys.every((key) => selectedKeys.has(key));
+  const toggleSelectCurrent = () => {
+    setSelectedKeys(allCurrentSelected ? new Set() : new Set(currentPageKeys));
+  };
+  const handleBatchDownload = async () => {
+    const targets = items.filter((item) => selectedKeys.has(itemKey(item)));
+    if (!targets.length) return;
+    setBatchDownloading(true);
+    try {
+      const resolved = [];
+      for (const item of targets) {
+        resolved.push(await resolveHistoryDownloadTarget(item));
+      }
+      const downloadQuality = await requestDownloadQuality(resolved.map((target) => ({ bvid: target.bvid, cid: target.cid })));
+      if (!downloadQuality) return;
+      const taskGroups: string[][] = [];
+      for (const target of resolved) {
+        const taskIds = await invoke<string[]>("create_download_task", {
+          params: {
+            bvid: target.bvid,
+            cid: target.cid,
+            title: target.title,
+            cids: [target.cid],
+            collection_title: target.collectionTitle,
+            episode_title: target.episodeTitle,
+            download_quality: downloadQuality,
+          },
+        });
+        taskGroups.push(taskIds);
+      }
+      notifyDownloadQueued(taskGroups.flat(), `观看历史 ${resolved.length} 个视频`);
+      setSelectedKeys(new Set());
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBatchDownloading(false);
+    }
+  };
   const handlePageChange = (page: number) => {
     runPreservingMainScroll(() => setCurrentPage(page));
   };
@@ -420,6 +471,27 @@ export function HistoryView() {
           <ActionButton onClick={() => void handleRefresh()} icon={<RefreshCw className={refreshing ? "animate-spin" : ""} style={{ width: 15, height: 15 }} />}>
             刷新
           </ActionButton>
+          <ActionButton
+            onClick={() => {
+              setMultiSelectEnabled((enabled) => {
+                if (enabled) setSelectedKeys(new Set());
+                return !enabled;
+              });
+            }}
+            icon={<span aria-hidden="true">{multiSelectEnabled ? "✓" : "□"}</span>}
+          >
+            {multiSelectEnabled ? "关闭多选" : "开启多选"}
+          </ActionButton>
+          {multiSelectEnabled ? (
+            <>
+              <ActionButton onClick={toggleSelectCurrent} icon={<span aria-hidden="true">□</span>}>
+                {allCurrentSelected ? "取消当前全选" : "全选当前"}
+              </ActionButton>
+              <ActionButton onClick={() => void handleBatchDownload()} icon={batchDownloading ? <RefreshCw className="animate-spin" style={{ width: 15, height: 15 }} /> : <Download style={{ width: 15, height: 15 }} />}>
+                下载选中{selectedKeys.size ? `(${selectedKeys.size})` : ""}
+              </ActionButton>
+            </>
+          ) : null}
         </div>
       </motion.div>
 
@@ -516,9 +588,21 @@ export function HistoryView() {
                     key={`${item.business}-${item.ep_id ?? item.bvid}-${item.cid}-${item.view_at}`}
                     item={item}
                     scale={cardScale}
+                    selectable={multiSelectEnabled}
+                    selected={selectedKeys.has(itemKey(item))}
+                    onToggleSelection={() => {
+                      const key = itemKey(item);
+                      setSelectedKeys((previous) => {
+                        const next = new Set(previous);
+                        if (next.has(key)) next.delete(key);
+                        else next.add(key);
+                        return next;
+                      });
+                    }}
                     onDownload={handleDownload}
                     onPlay={() => handlePlay(item)}
                     onOpenBrowser={() => handleOpenBrowser(item)}
+                    onOpenAuthor={() => openUpProfile({ mid: item.author.mid, name: item.author.name, face: item.author.face })}
                   />
                 ))}
               </AnimatePresence>
@@ -662,15 +746,23 @@ function FilterMenu({
 function HistoryCard({
   item,
   scale,
+  selectable,
+  selected,
+  onToggleSelection,
   onDownload,
   onPlay,
   onOpenBrowser,
+  onOpenAuthor,
 }: {
   item: HistoryItem;
   scale: number;
+  selectable: boolean;
+  selected: boolean;
+  onToggleSelection: () => void;
   onDownload: (item: HistoryItem) => void;
   onPlay: () => void;
   onOpenBrowser: () => void;
+  onOpenAuthor: () => void;
 }) {
   return (
     <motion.div
@@ -699,8 +791,38 @@ function HistoryCard({
           cursor: "pointer",
           backgroundColor: "#f0f0f5",
         }}
-        onClick={onPlay}
+        onClick={selectable ? onToggleSelection : onPlay}
       >
+        {selectable ? (
+          <button
+            type="button"
+            aria-label={selected ? "取消选择" : "选择视频"}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleSelection();
+            }}
+            style={{
+              position: "absolute",
+              left: `${7 * scale}px`,
+              top: `${7 * scale}px`,
+              zIndex: 2,
+              width: `${24 * scale}px`,
+              height: `${24 * scale}px`,
+              borderRadius: `${7 * scale}px`,
+              border: selected ? "none" : "1.5px solid rgba(255,255,255,0.88)",
+              backgroundColor: selected ? "#6366f1" : "rgba(0,0,0,0.48)",
+              color: "#fff",
+              display: "grid",
+              placeItems: "center",
+              fontSize: `${14 * scale}px`,
+              fontWeight: 900,
+              cursor: "pointer",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
+            }}
+          >
+            {selected ? "✓" : ""}
+          </button>
+        ) : null}
         <img
           src={formatBiliImageUrl(item.cover, "@672w_378h_1c.webp")}
           alt={item.title}
@@ -741,7 +863,19 @@ function HistoryCard({
           {item.title}
         </p>
         <div style={{ marginTop: `${8 * scale}px`, fontSize: `${13 * scale}px`, color: "#7a7a8c", display: "flex", gap: `${12 * scale}px`, flexWrap: "wrap" }}>
-          <span>UP：{item.author.name}</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: `${7 * scale}px`, minWidth: 0 }}>
+            <ClickableAvatar src={item.author.face || ""} alt={item.author.name} size={22 * scale} onClick={onOpenAuthor} />
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenAuthor();
+              }}
+              style={{ border: "none", background: "transparent", padding: 0, color: "#7a7a8c", fontSize: `${13 * scale}px`, fontWeight: 600, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            >
+              {item.author.name || "未知 UP"}
+            </button>
+          </span>
           <span>{getProgressLabel(item.progress, item.duration)}</span>
           <span>{formatViewTime(item.view_at)}</span>
         </div>

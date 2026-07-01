@@ -1,6 +1,6 @@
-[package]
+﻿[package]
 name = "bilibili-box"
-version = "1.0.3"
+version = "1.0.4"
 description = "BiliBox - Bilibili 媒体工作站"
 authors = ["BiliBox"]
 license = "MIT"
@@ -72,6 +72,8 @@ bytes = "1"
 # MD5/哈希
 md-5 = "0.10"
 base64 = "0.22"
+hmac = "0.12"
+sha2 = "0.10"
 
 # 懒初始化
 once_cell = "1"

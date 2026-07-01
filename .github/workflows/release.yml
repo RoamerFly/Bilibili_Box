@@ -15,6 +15,10 @@ on:
         description: "Optional release title"
         required: false
         type: string
+      release_notes:
+        description: "新版本内容，会显示在应用内更新提示和 Release 正文顶部"
+        required: false
+        type: string
       prerelease:
         description: "Mark release as prerelease"
         required: false
@@ -32,6 +36,18 @@ permissions:
 env:
   APP_NAME: Bilibili_Box
   NODE_VERSION: "22"
+  DOWNLOAD_GUIDE: |
+    ## 下载建议
+
+    - Windows 安装版（推荐大多数用户）：下载 `Bilibili_Box-v*-windows-x64-installer.exe`
+    - Windows 便携版（免安装）：下载 `Bilibili_Box-v*-windows-x64-portable.zip`，解压后运行里面的 `Bilibili_Box.exe`
+    - macOS Apple Silicon / M 系列：下载 `Bilibili_Box-v*-macos-arm64-installer.dmg`
+    - macOS Intel：下载 `Bilibili_Box-v*-macos-x64-installer.dmg`
+    - Linux Debian/Ubuntu：下载 `Bilibili_Box-v*-linux-x64-installer.deb`
+    - Linux Fedora/openSUSE/RHEL：下载 `Bilibili_Box-v*-linux-x64-installer.rpm`
+    - Linux 通用便携：下载 `Bilibili_Box-v*-linux-x64-portable.tar.gz`
+
+    `.sig` 和 `latest.json` 主要用于自动更新与签名校验，普通安装通常不需要手动下载。
 
 jobs:
   linux:
@@ -398,6 +414,9 @@ jobs:
       - windows
       - macos
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download release assets
         uses: actions/download-artifact@v4
         with:
@@ -407,9 +426,16 @@ jobs:
       - name: List release assets
         run: ls -lh release-assets
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Resolve release metadata
         id: meta
         shell: bash
+        env:
+          INPUT_RELEASE_NOTES: ${{ github.event_name == 'workflow_dispatch' && inputs.release_notes || '' }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             tag_name="${{ inputs.tag_name }}"
@@ -429,6 +455,82 @@ jobs:
           echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
           echo "draft=$draft" >> "$GITHUB_OUTPUT"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          body_file="$RUNNER_TEMP/release-body.md"
+          if [ -n "$INPUT_RELEASE_NOTES" ]; then
+            printf '%s\n' "$INPUT_RELEASE_NOTES" > "$notes_file"
+          else
+            {
+              printf '%s\n' '## 新版本内容'
+              printf '\n%s\n' '### 新增与优化'
+              printf '\n%s\n' '- 新增播放器点赞、投币、收藏操作后的按钮原位浮动提示，交互反馈更清晰。'
+              printf '%s\n' '- 新增 GitHub Releases 自动更新清单 `latest.json`，支持按平台分发签名安装包。'
+              printf '%s\n' '- 优化 Release 工作流，自动生成安装包签名文件并上传到发布页。'
+              printf '\n%s\n' '### 修复'
+              printf '\n%s\n' '- 修复投币弹窗雪碧图分帧播放异常，选中后按 24 帧逐帧播放人物动作。'
+              printf '%s\n' '- 修复点赞、投币接口因 Cookie 合并异常导致的账号异常和非法访问问题。'
+              printf '%s\n' '- 修复收藏取消和收藏夹选择后的状态反馈不明确问题。'
+              printf '\n%s\n' '### 界面与体验'
+              printf '\n%s\n' '- 平衡播放器点赞、投币、收藏、分享图标尺寸和间距。'
+              printf '%s\n' '- 调整动作栏宽度，使其与视频区域左右边界对齐。'
+              printf '%s\n' '- 发布说明改为更适合应用内展示的中文分段结构。'
+            } > "$notes_file"
+          fi
+          {
+            cat "$notes_file"
+            printf '\n%s\n' "$DOWNLOAD_GUIDE"
+          } > "$body_file"
+          echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
+          echo "body_file=$body_file" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare updater signing key
+        shell: bash
+        env:
+          TAURI_UPDATER_PRIVATE_KEY_VALUE: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_VALUE: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD_VALUE: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          key="${TAURI_UPDATER_PRIVATE_KEY_VALUE:-$TAURI_SIGNING_PRIVATE_KEY_VALUE}"
+          if [ -z "$key" ]; then
+            echo "::error::Missing TAURI_UPDATER_PRIVATE_KEY or TAURI_SIGNING_PRIVATE_KEY repository secret."
+            exit 1
+          fi
+          key_path="$RUNNER_TEMP/tauri-updater-private.key"
+          decoded_key="$RUNNER_TEMP/tauri-updater-private.decoded"
+          if printf '%s' "$key" | base64 --decode > "$decoded_key" 2>/dev/null && grep -Eq '(^untrusted comment:|PRIVATE KEY)' "$decoded_key"; then
+            mv "$decoded_key" "$key_path"
+          else
+            rm -f "$decoded_key"
+            printf '%s' "$key" > "$key_path"
+          fi
+          chmod 600 "$key_path"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_VALUE" >> "$GITHUB_ENV"
+
+      - name: Sign updater assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for asset in release-assets/*; do
+            case "$asset" in
+              *.sig|*.json) continue ;;
+            esac
+            echo "Signing $(basename "$asset")"
+            npx --yes @tauri-apps/cli@2 signer sign \
+              --private-key-path "$TAURI_SIGNING_PRIVATE_KEY_PATH" \
+              --password "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
+              "$asset"
+          done
+
+      - name: Generate updater metadata
+        shell: bash
+        env:
+          RELEASE_ASSET_DIR: release-assets
+          RELEASE_TAG_NAME: ${{ steps.meta.outputs.tag_name }}
+          RELEASE_NOTES_FILE: ${{ steps.meta.outputs.notes_file }}
+        run: node scripts/finalize-updater-metadata.mjs
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -436,7 +538,7 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag_name }}
           name: ${{ steps.meta.outputs.release_name }}
           target_commitish: ${{ github.sha }}
-          generate_release_notes: true
+          body_path: ${{ steps.meta.outputs.body_file }}
           draft: ${{ steps.meta.outputs.draft == 'true' }}
           prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
           files: release-assets/*

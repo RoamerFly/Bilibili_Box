@@ -110,6 +110,24 @@ export interface VideoStat {
 }
 
 // 番剧信息
+export interface VideoInteractionState {
+  liked: boolean;
+  coined: number;
+  favorited: boolean;
+}
+
+export interface VideoFavoriteFolder {
+  id: number;
+  title: string;
+  media_count: number;
+  favorited: boolean;
+}
+
+export interface VideoActionResult {
+  success: boolean;
+  message: string;
+}
+
 export interface BangumiInfo {
   season_id: number;
   title: string;

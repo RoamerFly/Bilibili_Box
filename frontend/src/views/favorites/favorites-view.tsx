@@ -4,6 +4,7 @@ import {
   Download,
   ExternalLink,
   Folder,
+  Heart,
   Loader2,
   RefreshCw,
   Star,
@@ -19,6 +20,8 @@ import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { loadCachedPageData } from "@/lib/page-cache";
 import { useAppStore } from "@/stores/app-store";
 import { runPreservingMainScroll } from "@/lib/scroll-position";
+import { ClickableAvatar } from "@/components/video-card";
+import type { VideoInfo } from "@/lib/types";
 
 interface FavFolder {
   id: number;
@@ -42,6 +45,7 @@ interface FavMedia {
   upper: {
     mid: number;
     name: string;
+    face?: string;
   };
 }
 
@@ -49,6 +53,31 @@ interface FavInfo {
   info: FavFolder;
   medias: FavMedia[];
   has_more: boolean;
+}
+
+interface LikedVideoPage {
+  list: LikedVideoItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+}
+
+interface LikedVideoItem {
+  aid: number;
+  bvid: string;
+  cid: number;
+  title: string;
+  cover: string;
+  duration: number;
+  pubdate: number;
+  play: number;
+  like: number;
+  upper: {
+    mid: number;
+    name: string;
+    face?: string;
+  };
 }
 
 interface SavedUserInfo {
@@ -61,6 +90,7 @@ interface BackendConfig {
   sessdata: string;
 }
 const FAVORITES_PREFETCH_PAGES = 2;
+type LikedSource = "web" | "app";
 
 function isLoggedIn(user: SavedUserInfo | null | undefined) {
   return Boolean(user && (user.isLogin ?? user.is_login) && user.mid);
@@ -69,6 +99,9 @@ function isLoggedIn(user: SavedUserInfo | null | undefined) {
 export function FavoritesView() {
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
+  const openUpProfile = useAppStore((s) => s.openUpProfile);
+  const activeSection = useAppStore((s) => s.favoritesPageState.activeTab);
+  const setFavoritesPageState = useAppStore((s) => s.setFavoritesPageState);
   const { pageSize, cardScale, columns } = useCardLayout();
   const [folders, setFolders] = useState<FavFolder[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<FavFolder | null>(null);
@@ -81,7 +114,14 @@ export function FavoritesView() {
   const [hasMore, setHasMore] = useState(false);
   const [batchMode, setBatchMode] = useState(false);
   const [selectedMediaIds, setSelectedMediaIds] = useState<Set<number>>(new Set());
+  const [likedVideos, setLikedVideos] = useState<LikedVideoItem[]>([]);
+  const [likedTotal, setLikedTotal] = useState(0);
+  const [likedPage, setLikedPage] = useState(1);
+  const [likedHasMore, setLikedHasMore] = useState(false);
+  const [likedLoading, setLikedLoading] = useState(false);
+  const [likedSource, setLikedSource] = useState<LikedSource>("web");
   const selectedFolderIdRef = useRef<number | null>(null);
+  const likedInitialFetchKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     selectedFolderIdRef.current = selectedFolder?.id ?? null;
@@ -201,6 +241,42 @@ export function FavoritesView() {
     void fetchFolders();
   }, [fetchFolders]);
 
+  const fetchLikedVideos = useCallback(async (page: number, mode: "replace" | "append" = "replace", forceRefresh = false) => {
+    setLikedLoading(true);
+    setError("");
+    try {
+      const data = await loadCachedPageData(
+        `liked-videos:${likedSource}:page:${page}:size:${pageSize}`,
+        () => invoke<LikedVideoPage>("get_liked_videos", { page, pageSize, source: likedSource }),
+        forceRefresh
+      );
+      setLikedVideos((previous) => {
+        const merged = mode === "append" ? [...previous, ...data.list] : data.list;
+        return Array.from(new Map(merged.map((item) => [item.aid || item.bvid, item])).values());
+      });
+      setLikedTotal(data.total);
+      setLikedPage(data.page);
+      setLikedHasMore(data.has_more);
+    } catch (err) {
+      setError(String(err));
+      if (mode === "replace") {
+        setLikedVideos([]);
+        setLikedTotal(0);
+        setLikedHasMore(false);
+      }
+    } finally {
+      setLikedLoading(false);
+    }
+  }, [likedSource, pageSize]);
+
+  useEffect(() => {
+    if (activeSection !== "likes" || likedVideos.length > 0 || likedLoading) return;
+    const fetchKey = `${likedSource}:page-size:${pageSize}`;
+    if (likedInitialFetchKeyRef.current === fetchKey) return;
+    likedInitialFetchKeyRef.current = fetchKey;
+    void fetchLikedVideos(1, "replace");
+  }, [activeSection, fetchLikedVideos, likedLoading, likedSource, likedVideos.length, pageSize]);
+
   useEffect(() => {
     if (!selectedFolder) {
       return;
@@ -225,7 +301,10 @@ export function FavoritesView() {
     const start = (currentPage - 1) * pageSize;
     return medias.slice(start, start + pageSize);
   }, [currentPage, medias, pageSize]);
-  const currentPageAllSelected = pagedMedias.length > 0 && pagedMedias.every((media) => selectedMediaIds.has(media.id));
+  const likedMedias = useMemo(() => likedVideos.map(likedVideoToFavMedia), [likedVideos]);
+  const selectableMedias = activeSection === "likes" ? likedMedias : medias;
+  const visibleSelectableMedias = activeSection === "likes" ? likedMedias : pagedMedias;
+  const currentPageAllSelected = visibleSelectableMedias.length > 0 && visibleSelectableMedias.every((media) => selectedMediaIds.has(media.id));
   const handlePageChange = (page: number) => {
     runPreservingMainScroll(() => setCurrentPage(page));
   };
@@ -235,6 +314,12 @@ export function FavoritesView() {
   };
 
   const handleRefresh = async () => {
+    if (activeSection === "likes") {
+      likedInitialFetchKeyRef.current = null;
+      await fetchLikedVideos(1, "replace", true);
+      return;
+    }
+
     setRefreshing(true);
     try {
       const refreshedFolder = await fetchFolders(true);
@@ -244,14 +329,43 @@ export function FavoritesView() {
     }
   };
 
+  const handleLikedSourceChange = (source: LikedSource) => {
+    if (source === likedSource) return;
+    setLikedSource(source);
+    setLikedVideos([]);
+    setLikedTotal(0);
+    setLikedPage(1);
+    setLikedHasMore(false);
+    likedInitialFetchKeyRef.current = null;
+  };
+
+  const resolveMediaPlayback = async (media: FavMedia): Promise<FavMedia> => {
+    if (media.cid) return media;
+    const detail = await invoke<VideoInfo>("get_normal_info", { bvid: media.bvid });
+    return {
+      ...media,
+      bvid: detail.bvid || media.bvid,
+      cid: detail.cid,
+      title: detail.title || media.title,
+      cover: detail.pic || media.cover,
+      duration: detail.duration || media.duration,
+      upper: {
+        mid: detail.owner?.mid || media.upper.mid,
+        name: detail.owner?.name || media.upper.name,
+        face: detail.owner?.face || media.upper.face,
+      },
+    };
+  };
+
   const handleDownload = async (media: FavMedia) => {
     try {
-      const downloadQuality = await requestDownloadQuality({ bvid: media.bvid, cid: media.cid });
+      const target = media.cid ? media : await resolveMediaPlayback(media);
+      const downloadQuality = await requestDownloadQuality({ bvid: target.bvid, cid: target.cid });
       if (!downloadQuality) return;
       const taskIds = await invoke<string[]>("create_download_task", {
-        params: { bvid: media.bvid, cid: media.cid, title: media.title, cids: [media.cid], download_quality: downloadQuality },
+        params: { bvid: target.bvid, cid: target.cid, title: target.title, cids: [target.cid], download_quality: downloadQuality },
       });
-      notifyDownloadQueued(taskIds, media.title);
+      notifyDownloadQueued(taskIds, target.title);
     } catch (err) {
       setError(String(err));
     }
@@ -262,13 +376,19 @@ export function FavoritesView() {
   };
 
   const handleOpenPlayer = (media: FavMedia) => {
-    openPlayer({
-      kind: "video",
-      bvid: media.bvid,
-      cid: media.cid,
-      title: media.title,
-      cover: media.cover,
-    });
+    if (media.cid) {
+      openPlayer({
+        kind: "video",
+        bvid: media.bvid,
+        cid: media.cid,
+        title: media.title,
+        cover: media.cover,
+      });
+      return;
+    }
+    void resolveMediaPlayback(media)
+      .then((target) => openPlayer({ kind: "video", bvid: target.bvid, cid: target.cid, title: target.title, cover: target.cover }))
+      .catch((err) => setError(String(err)));
   };
 
   const handleToggleBatchMode = () => {
@@ -289,7 +409,7 @@ export function FavoritesView() {
   };
 
   const handleSelectAll = () => {
-    const pageIds = pagedMedias.map((media) => media.id);
+    const pageIds = visibleSelectableMedias.map((media) => media.id);
     const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedMediaIds.has(id));
     setSelectedMediaIds((previous) => {
       const next = new Set(previous);
@@ -301,35 +421,93 @@ export function FavoritesView() {
     });
   };
 
+  const downloadMedias = async (targets: FavMedia[], label: string) => {
+    const resolved = await Promise.all(targets.map((media) => resolveMediaPlayback(media)));
+    const downloadQuality = await requestDownloadQuality(
+      resolved.map((media) => ({ bvid: media.bvid, cid: media.cid }))
+    );
+    if (!downloadQuality) return;
+    const taskGroups = await Promise.all(
+      resolved.map((media) =>
+        invoke<string[]>("create_download_task", {
+          params: {
+            bvid: media.bvid,
+            cid: media.cid,
+            title: media.title,
+            cids: [media.cid],
+            download_quality: downloadQuality,
+          },
+        })
+      )
+    );
+    notifyDownloadQueued(taskGroups.flat(), label);
+  };
+
   const handleBatchDownload = async () => {
-    const selected = medias.filter((media) => selectedMediaIds.has(media.id));
+    const selected = selectableMedias.filter((media) => selectedMediaIds.has(media.id));
     if (!selected.length) {
       return;
     }
 
     try {
-      const downloadQuality = await requestDownloadQuality(
-        selected.map((media) => ({ bvid: media.bvid, cid: media.cid }))
-      );
-      if (!downloadQuality) return;
-      const taskGroups = await Promise.all(
-        selected.map((media) =>
-          invoke<string[]>("create_download_task", {
-            params: {
-              bvid: media.bvid,
-              cid: media.cid,
-              title: media.title,
-              cids: [media.cid],
-              download_quality: downloadQuality,
-            },
-          })
-        )
-      );
-      notifyDownloadQueued(taskGroups.flat(), `${selected.length} favorite items`);
+      await downloadMedias(selected, `${selected.length} 个视频`);
       setBatchMode(false);
       setSelectedMediaIds(new Set());
     } catch (err) {
       setError(String(err));
+    }
+  };
+
+  const handleDownloadAllLikes = async () => {
+    setRefreshing(true);
+    setError("");
+    try {
+      const collected: LikedVideoItem[] = [];
+      let page = 1;
+      let hasMoreLikes = true;
+      while (hasMoreLikes && page <= 100) {
+        const data = await invoke<LikedVideoPage>("get_liked_videos", { page, pageSize, source: likedSource });
+        collected.push(...(data.list || []));
+        hasMoreLikes = data.has_more;
+        page = data.page + 1;
+      }
+      const unique = Array.from(new Map(collected.map((item) => [item.aid || item.bvid, item])).values());
+      setLikedVideos(unique);
+      setLikedTotal(Math.max(likedTotal, unique.length));
+      setLikedPage(Math.max(1, page - 1));
+      setLikedHasMore(false);
+      await downloadMedias(unique.map(likedVideoToFavMedia), `${unique.length} 个点赞视频`);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleDownloadAllFavorites = async () => {
+    if (!selectedFolder) return;
+    setRefreshing(true);
+    setError("");
+    try {
+      const collected: FavMedia[] = [];
+      const totalPages = Math.max(1, Math.ceil((selectedFolder.media_count || 0) / pageSize));
+      let latestInfo = selectedFolder;
+      for (let page = 1; page <= totalPages; page += 1) {
+        const data = await invoke<FavInfo>("get_fav_info", { mediaId: selectedFolder.id, page, pageSize });
+        latestInfo = data.info;
+        collected.push(...(data.medias || []));
+        if (!data.has_more) break;
+      }
+      const unique = Array.from(new Map(collected.map((media) => [media.id || media.bvid, media])).values());
+      setSelectedFolder(latestInfo);
+      setMedias(unique);
+      setLoadedPages(Math.max(1, Math.ceil(unique.length / pageSize)));
+      setHasMore(false);
+      await downloadMedias(unique, `${latestInfo.title} 全部视频`);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -360,17 +538,34 @@ export function FavoritesView() {
       >
         <div>
           <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
+            我的点赞/收藏
+          </h1>
+          <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "4px" }}>
+            {activeSection === "likes" ? `已加载 ${likedVideos.length} 个点赞视频` : `共 ${folders.length} 个收藏夹`}
+          </p>
+          <div style={{ display: "none" }}>
+          <h1 style={{ display: "none", fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
             我的收藏
           </h1>
           <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "4px" }}>
             共 {folders.length} 个收藏夹
           </p>
+          </div>
         </div>
 
         <ActionButton onClick={() => void handleRefresh()} icon={<RefreshCw className={refreshing ? "animate-spin" : ""} style={{ width: 16, height: 16 }} />}>
           刷新
         </ActionButton>
       </motion.div>
+
+      <div style={{ display: "inline-flex", alignSelf: "flex-start", padding: "4px", borderRadius: "12px", backgroundColor: "#f3f4f8", marginBottom: "18px" }}>
+        <SectionTab active={activeSection === "likes"} icon={<Heart style={{ width: 16, height: 16 }} />} onClick={() => setFavoritesPageState({ activeTab: "likes" })}>
+          我的点赞
+        </SectionTab>
+        <SectionTab active={activeSection === "favorites"} icon={<Star style={{ width: 16, height: 16 }} />} onClick={() => setFavoritesPageState({ activeTab: "favorites" })}>
+          我的收藏
+        </SectionTab>
+      </div>
 
       {error ? (
         <div
@@ -387,7 +582,102 @@ export function FavoritesView() {
         </div>
       ) : null}
 
-      {loading && folders.length === 0 ? (
+      {activeSection === "likes" ? (
+        <section style={{ minHeight: 0, display: "flex", flexDirection: "column", flex: 1 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+              marginBottom: "16px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div>
+              <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#1a1a2e" }}>
+                {likedSource === "web" ? "最近点赞的视频" : "APP 点赞列表"}
+              </h2>
+              <p style={{ marginTop: "3px", fontSize: "13px", color: "#8b8b9a" }}>
+                已加载 {likedMedias.length} 个{likedTotal > 0 ? `，共 ${likedTotal} 个` : ""}
+              </p>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              <div style={{ display: "inline-flex", padding: "3px", borderRadius: "10px", backgroundColor: "#f3f4f8" }}>
+                <MiniSourceTab active={likedSource === "web"} onClick={() => handleLikedSourceChange("web")}>
+                  网页最近点赞
+                </MiniSourceTab>
+                <MiniSourceTab active={likedSource === "app"} onClick={() => handleLikedSourceChange("app")}>
+                  APP 点赞列表
+                </MiniSourceTab>
+              </div>
+              <GhostButton onClick={handleToggleBatchMode}>
+                {batchMode ? "退出批量" : "批量管理"}
+              </GhostButton>
+              {batchMode ? (
+                <>
+                  <GhostButton onClick={handleSelectAll}>
+                    {currentPageAllSelected ? "取消全选" : "全选当前"}
+                  </GhostButton>
+                  <GhostButton onClick={() => void handleBatchDownload()} disabled={selectedMediaIds.size === 0}>
+                    下载选中
+                  </GhostButton>
+                </>
+              ) : null}
+              <GhostButton disabled={likedLoading || refreshing || likedMedias.length === 0} onClick={() => void handleDownloadAllLikes()}>
+                下载全部
+              </GhostButton>
+              <GhostButton disabled={likedLoading || !likedHasMore} onClick={() => void fetchLikedVideos(likedPage + 1, "append")}>
+                {likedLoading ? "加载中" : likedHasMore ? "加载更多" : "没有更多"}
+              </GhostButton>
+            </div>
+          </div>
+
+          {likedLoading && likedMedias.length === 0 ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingTop: "120px" }}>
+              <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
+            </div>
+          ) : likedMedias.length === 0 ? (
+            <EmptyState message="暂时没有获取到点赞视频" />
+          ) : (
+            <>
+              <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: "4px" }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: fixedCardGridColumns(columns),
+                    gap: "14px",
+                  }}
+                >
+                  <AnimatePresence>
+                    {likedMedias.map((media) => (
+                      <FavoriteCard
+                        key={media.id || media.bvid}
+                        media={media}
+                        batchMode={batchMode}
+                        selected={selectedMediaIds.has(media.id)}
+                        scale={cardScale}
+                        compact={columns > 1}
+                        onDownload={handleDownload}
+                        onOpenBrowser={handleOpenBrowser}
+                        onOpenPlayer={handleOpenPlayer}
+                        onOpenAuthor={(target) => openUpProfile({ mid: target.upper.mid, name: target.upper.name, face: target.upper.face })}
+                        onToggleSelect={handleToggleMediaSelect}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "center", marginTop: "18px", paddingTop: "14px" }}>
+                <GhostButton disabled={likedLoading || !likedHasMore} onClick={() => void fetchLikedVideos(likedPage + 1, "append")}>
+                  {likedLoading ? "加载中" : likedHasMore ? "加载更多" : "没有更多"}
+                </GhostButton>
+              </div>
+            </>
+          )}
+        </section>
+      ) : loading && folders.length === 0 ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingTop: "120px" }}>
           <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
         </div>
@@ -505,6 +795,9 @@ export function FavoritesView() {
                     </GhostButton>
                   </>
                 ) : null}
+                <GhostButton onClick={() => void handleDownloadAllFavorites()} disabled={!selectedFolder || refreshing || medias.length === 0}>
+                  下载全部
+                </GhostButton>
               </div>
             </div>
 
@@ -538,6 +831,7 @@ export function FavoritesView() {
                           onDownload={handleDownload}
                           onOpenBrowser={handleOpenBrowser}
                           onOpenPlayer={handleOpenPlayer}
+                          onOpenAuthor={(target) => openUpProfile({ mid: target.upper.mid, name: target.upper.name, face: target.upper.face })}
                           onToggleSelect={handleToggleMediaSelect}
                         />
                       ))}
@@ -591,6 +885,18 @@ export function FavoritesView() {
   );
 }
 
+function likedVideoToFavMedia(item: LikedVideoItem): FavMedia {
+  return {
+    id: item.aid,
+    bvid: item.bvid,
+    cid: item.cid,
+    title: item.title,
+    cover: item.cover,
+    duration: item.duration,
+    upper: item.upper,
+  };
+}
+
 function FavoriteCard({
   media,
   batchMode,
@@ -600,6 +906,7 @@ function FavoriteCard({
   onDownload,
   onOpenBrowser,
   onOpenPlayer,
+  onOpenAuthor,
   onToggleSelect,
 }: {
   media: FavMedia;
@@ -610,6 +917,7 @@ function FavoriteCard({
   onDownload: (media: FavMedia) => void;
   onOpenBrowser: (bvid: string) => void;
   onOpenPlayer: (media: FavMedia) => void;
+  onOpenAuthor: (media: FavMedia) => void;
   onToggleSelect: (mediaId: number) => void;
 }) {
   const imageWidth = 176 * scale;
@@ -664,8 +972,18 @@ function FavoriteCard({
         >
           {media.title}
         </div>
-        <div style={{ marginTop: `${8 * scale}px`, fontSize: `${13 * scale}px`, color: "#7a7a8c" }}>
-          UP 主：{media.upper.name}
+        <div style={{ marginTop: `${8 * scale}px`, display: "flex", alignItems: "center", gap: `${8 * scale}px`, fontSize: `${13 * scale}px`, color: "#7a7a8c" }}>
+          <ClickableAvatar src={media.upper.face || ""} alt={media.upper.name} size={24 * scale} onClick={() => onOpenAuthor(media)} />
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenAuthor(media);
+            }}
+            style={{ border: "none", background: "transparent", padding: 0, color: "#7a7a8c", fontSize: `${13 * scale}px`, fontWeight: 600, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
+            {media.upper.name || "未知 UP"}
+          </button>
         </div>
 
         <div style={{ marginTop: "auto", paddingTop: `${12 * scale}px`, display: "flex", gap: `${8 * scale}px`, flexWrap: "wrap", justifyContent: "flex-end", gridColumn: "1 / -1" }}>
@@ -727,6 +1045,77 @@ function FavoriteCard({
       ) : null}
       {compact && batchMode ? <div style={{ minWidth: 0, display: "grid", gap: `${10 * scale}px` }}>{content}</div> : content}
     </motion.div>
+  );
+}
+
+function SectionTab({
+  children,
+  active,
+  icon,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active: boolean;
+  icon?: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "7px",
+        minWidth: "110px",
+        height: "34px",
+        padding: "0 16px",
+        borderRadius: "9px",
+        border: "none",
+        backgroundColor: active ? "#fff" : "transparent",
+        color: active ? "#1a1a2e" : "#777789",
+        boxShadow: active ? "0 6px 16px rgba(20, 20, 38, 0.08)" : "none",
+        fontSize: "13.5px",
+        fontWeight: 700,
+        cursor: "pointer",
+      }}
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+function MiniSourceTab({
+  children,
+  active,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        height: "30px",
+        padding: "0 12px",
+        borderRadius: "8px",
+        border: "none",
+        backgroundColor: active ? "#fff" : "transparent",
+        color: active ? "#4338ca" : "#777789",
+        boxShadow: active ? "0 4px 12px rgba(20, 20, 38, 0.08)" : "none",
+        fontSize: "12.5px",
+        fontWeight: 750,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

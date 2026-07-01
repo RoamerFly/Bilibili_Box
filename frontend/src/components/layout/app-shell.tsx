@@ -12,6 +12,8 @@ import { FavoritesView } from "@/views/favorites/favorites-view";
 import { WatchLaterView } from "@/views/watchlater/watchlater-view";
 import { HistoryView } from "@/views/history/history-view";
 import { BangumiView } from "@/views/bangumi/bangumi-view";
+import { UpProfileView } from "@/views/up/up-profile-view";
+import { ContentDetailView } from "@/views/content/content-detail-view";
 import { DownloadsView } from "@/views/downloads/downloads-view";
 import { SettingsView } from "@/views/settings/settings-view";
 import { AnimatePresence, motion } from "framer-motion";
@@ -23,7 +25,6 @@ interface Config {
   sessdata: string;
   [key: string]: unknown;
 }
-
 interface UserInfo {
   isLogin?: boolean;
   is_login?: boolean;
@@ -36,17 +37,37 @@ export function AppShell() {
   const currentView = useAppStore((s) => s.currentView);
   const setConfig = useAppStore((s) => s.setConfig);
   const setUserInfo = useAppStore((s) => s.setUserInfo);
+  const setRecommendPageState = useAppStore((s) => s.setRecommendPageState);
   const bottomBarExpanded = useAppStore((s) => s.bottomBarExpanded);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const previousViewRef = useRef(currentView);
   const [showComingSoon, setShowComingSoon] = useState(false);
+  const [noticeText, setNoticeText] = useState("正在实现中，敬请期待");
 
   // 启用 config watch - 监听 sessdata 变化自动获取/清除用户信息
   useConfigWatch();
   useDownloadEvents();
 
   useLayoutEffect(() => {
-    scrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
-  }, [currentView]);
+    const previousView = previousViewRef.current;
+    const scroller = scrollRef.current;
+    if (previousView === "recommend" && previousView !== currentView && scroller) {
+      setRecommendPageState({ scrollTop: scroller.scrollTop });
+    }
+
+    if (previousView !== currentView) {
+      if (currentView === "recommend") {
+        const scrollTop = useAppStore.getState().recommendPageState.scrollTop;
+        window.requestAnimationFrame(() => {
+          scrollRef.current?.scrollTo({ top: scrollTop, behavior: "auto" });
+        });
+      } else {
+        scroller?.scrollTo({ top: 0, behavior: "auto" });
+      }
+    }
+
+    previousViewRef.current = currentView;
+  }, [currentView, setRecommendPageState]);
 
   // 初始化配置 - watch hook 会在 sessdata 不为空时自动获取用户信息
   useEffect(() => {
@@ -74,7 +95,9 @@ export function AppShell() {
 
   useEffect(() => {
     let timer: number | undefined;
-    const handleComingSoon = () => {
+    const handleComingSoon = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      setNoticeText(detail || "正在实现中，敬请期待");
       setShowComingSoon(true);
       window.clearTimeout(timer);
       timer = window.setTimeout(() => setShowComingSoon(false), 2200);
@@ -118,7 +141,7 @@ export function AppShell() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 8, scale: 0.98 }}
             >
-              正在实现中，敬请期待
+              {noticeText}
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -255,6 +278,18 @@ function renderView(view: string) {
       return (
         <motion.div key="bangumi" {...variants} transition={transition}>
           <BangumiView />
+        </motion.div>
+      );
+    case "up":
+      return (
+        <motion.div key="up" {...variants} transition={transition}>
+          <UpProfileView />
+        </motion.div>
+      );
+    case "content":
+      return (
+        <motion.div key="content" {...variants} transition={transition}>
+          <ContentDetailView />
         </motion.div>
       );
     case "downloads":

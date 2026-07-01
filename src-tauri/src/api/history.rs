@@ -72,6 +72,8 @@ pub struct HistoryItem {
 pub struct HistoryAuthor {
     pub mid: i64,
     pub name: String,
+    #[serde(default)]
+    pub face: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +158,13 @@ impl super::BiliClient {
                             .as_i64()
                             .or_else(|| item["author"]["mid"].as_i64())
                             .unwrap_or(0);
+                        let author_face = item["author_face"]
+                            .as_str()
+                            .filter(|face| !face.is_empty())
+                            .or_else(|| item["author"]["face"].as_str())
+                            .or_else(|| item["face"].as_str())
+                            .unwrap_or("")
+                            .to_string();
 
                         Some(HistoryItem {
                             bvid: history["bvid"].as_str().unwrap_or("").to_string(),
@@ -172,6 +181,7 @@ impl super::BiliClient {
                             author: HistoryAuthor {
                                 mid: author_mid,
                                 name: author_name,
+                                face: author_face,
                             },
                         })
                     })

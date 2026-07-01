@@ -11,6 +11,8 @@ export type ViewType =
   | "watchlater"
   | "history"
   | "bangumi"
+  | "up"
+  | "content"
   | "downloads"
   | "settings";
 
@@ -26,6 +28,32 @@ export interface PlayerState {
   epId?: number;
   cover?: string;
   localTaskId?: string;
+}
+
+export interface UpProfileState {
+  mid: number;
+  name?: string;
+  face?: string;
+}
+
+export interface ContentDetailState {
+  id: string;
+  kind: "image" | "link" | "text" | "dynamic";
+  title: string;
+  text: string;
+  contentText?: string;
+  cover?: string;
+  url?: string;
+  images: string[];
+  commentOid?: number;
+  commentType?: number;
+  pubTs?: number;
+  typeLabel?: string;
+  author?: {
+    mid: number;
+    name: string;
+    face: string;
+  };
 }
 
 export type DownloadStatus =
@@ -104,11 +132,46 @@ export interface RecommendPageVideo {
   cover: string;
   duration: string;
   author: string;
+  authorMid: number;
+  authorFace: string;
   views: string;
   likes: string;
+  viewCount: number;
+  likeCount: number;
+  favoriteCount: number;
+  replyCount: number;
+}
+
+export interface RecommendPageDynamicItem {
+  id: string;
+  author_mid: number;
+  author_name: string;
+  author_face: string;
+  kind: "video" | "image" | "link" | "text";
+  type_label: string;
+  action_text: string;
+  text: string;
+  content_text: string;
+  topic_name: string;
+  pub_ts: number;
+  major_title: string;
+  major_cover: string;
+  major_url: string;
+  bvid: string;
+  aid: number;
+  images: string[];
+  comment_oid: number;
+  comment_type: number;
+  duration_text: string;
+  view_count: number;
+  danmaku_count: number;
+  repost_count: number;
+  comment_count: number;
+  like_count: number;
 }
 
 export interface RecommendPageState {
+  activeTab: "home" | "dynamic";
   activeCategory: string;
   searchQuery: string;
   videos: RecommendPageVideo[];
@@ -117,6 +180,14 @@ export interface RecommendPageState {
   loadedCategory: string | null;
   batchIndexes: Record<string, number>;
   hasMoreByCategory: Record<string, boolean>;
+  dynamicItems: RecommendPageDynamicItem[];
+  dynamicOffset: string;
+  dynamicHasMore: boolean;
+  scrollTop: number;
+}
+
+export interface FavoritesPageState {
+  activeTab: "likes" | "favorites";
 }
 
 const defaultSearchFilters: SearchFilters = {
@@ -137,6 +208,7 @@ const defaultSearchPageState: SearchPageState = {
 };
 
 const defaultRecommendPageState: RecommendPageState = {
+  activeTab: "home",
   activeCategory: "全部",
   searchQuery: "",
   videos: [],
@@ -145,16 +217,54 @@ const defaultRecommendPageState: RecommendPageState = {
   loadedCategory: null,
   batchIndexes: { 全部: 1 },
   hasMoreByCategory: {},
+  dynamicItems: [],
+  dynamicOffset: "",
+  dynamicHasMore: false,
+  scrollTop: 0,
 };
+
+const defaultFavoritesPageState: FavoritesPageState = {
+  activeTab: "favorites",
+};
+
+const TRANSIENT_VIEWS: ViewType[] = ["player", "up", "content"];
+
+function pushViewStack(stack: ViewType[], currentView: ViewType, targetView: ViewType) {
+  if (currentView === targetView) return stack;
+  return [...stack, currentView].slice(-12);
+}
+
+function popViewStack<T extends Partial<AppState>>(stack: ViewType[], patch: T) {
+  const nextStack = [...stack];
+  let nextView = nextStack.pop() ?? "home";
+  while (TRANSIENT_VIEWS.includes(nextView) && nextStack.length > 0) {
+    nextView = nextStack.pop() ?? "home";
+  }
+  return {
+    ...patch,
+    currentView: nextView,
+    previousView: nextStack[nextStack.length - 1] ?? null,
+    viewStack: nextStack,
+  };
+}
 
 interface AppState {
   currentView: ViewType;
   previousView: ViewType | null;
+  viewStack: ViewType[];
   setView: (view: ViewType) => void;
   playerState: PlayerState | null;
   openPlayer: (playerState: PlayerState) => void;
   closePlayer: () => void;
   clearPlayer: () => void;
+
+  upProfileState: UpProfileState | null;
+  openUpProfile: (upProfileState: UpProfileState) => void;
+  closeUpProfile: () => void;
+
+  contentDetailState: ContentDetailState | null;
+  openContentDetail: (contentDetailState: ContentDetailState) => void;
+  closeContentDetail: () => void;
 
   searchPageState: SearchPageState;
   setSearchPageState: (state: Partial<SearchPageState>) => void;
@@ -163,6 +273,9 @@ interface AppState {
   recommendPageState: RecommendPageState;
   setRecommendPageState: (state: Partial<RecommendPageState>) => void;
   resetRecommendPageState: () => void;
+
+  favoritesPageState: FavoritesPageState;
+  setFavoritesPageState: (state: Partial<FavoritesPageState>) => void;
 
   cardViewModes: Partial<Record<CardViewModeKey, CardViewMode>>;
   setCardViewMode: (key: CardViewModeKey, mode: CardViewMode) => void;
@@ -195,21 +308,41 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       currentView: "home",
       previousView: null,
-      setView: (view) => set({ currentView: view }),
+      viewStack: [],
+      setView: (view) => set({ currentView: view, previousView: null, viewStack: [] }),
       playerState: null,
       openPlayer: (playerState) =>
         set((state) => ({
-          previousView:
-            state.currentView === "player" ? state.previousView ?? "home" : state.currentView,
+          previousView: state.currentView === "player" ? state.previousView ?? "home" : state.currentView,
+          viewStack: pushViewStack(state.viewStack, state.currentView, "player"),
           playerState,
           currentView: "player",
         })),
       closePlayer: () =>
-        set((state) => ({
-          currentView: state.previousView ?? "home",
-          playerState: null,
-        })),
+        set((state) => popViewStack(state.viewStack, { playerState: null })),
       clearPlayer: () => set({ playerState: null }),
+
+      upProfileState: null,
+      openUpProfile: (upProfileState) =>
+        set((state) => ({
+          previousView: state.currentView === "up" ? state.previousView ?? "home" : state.currentView,
+          viewStack: pushViewStack(state.viewStack, state.currentView, "up"),
+          upProfileState,
+          currentView: "up",
+        })),
+      closeUpProfile: () =>
+        set((state) => popViewStack(state.viewStack, { upProfileState: null })),
+
+      contentDetailState: null,
+      openContentDetail: (contentDetailState) =>
+        set((state) => ({
+          previousView: state.currentView === "content" ? state.previousView ?? "home" : state.currentView,
+          viewStack: pushViewStack(state.viewStack, state.currentView, "content"),
+          contentDetailState,
+          currentView: "content",
+        })),
+      closeContentDetail: () =>
+        set((state) => popViewStack(state.viewStack, { contentDetailState: null })),
 
       searchPageState: defaultSearchPageState,
       setSearchPageState: (nextSearchState) =>
@@ -230,6 +363,15 @@ export const useAppStore = create<AppState>()(
           },
         })),
       resetRecommendPageState: () => set({ recommendPageState: defaultRecommendPageState }),
+
+      favoritesPageState: defaultFavoritesPageState,
+      setFavoritesPageState: (nextFavoritesState) =>
+        set((state) => ({
+          favoritesPageState: {
+            ...state.favoritesPageState,
+            ...nextFavoritesState,
+          },
+        })),
 
       cardViewModes: {
         favorites: "grid",
@@ -292,13 +434,32 @@ export const useAppStore = create<AppState>()(
     {
       name: "bilibili-box-app-storage",
       storage: createJSONStorage(() => localStorage),
+      version: 3,
+      migrate: (persisted) => {
+        const persistedState = (persisted ?? {}) as Partial<AppState>;
+        return {
+          ...persistedState,
+          currentView: "home",
+          previousView: null,
+          viewStack: [],
+          playerState: null,
+          contentDetailState: null,
+          recommendPageState: {
+            ...defaultRecommendPageState,
+            ...(persistedState.recommendPageState ?? {}),
+          },
+          favoritesPageState: {
+            ...defaultFavoritesPageState,
+            ...(persistedState.favoritesPageState ?? {}),
+          },
+        };
+      },
       partialize: (state) => ({
-        currentView: state.currentView,
-        previousView: state.previousView,
         sidebarCollapsed: state.sidebarCollapsed,
         config: state.config,
-        playerState: state.playerState,
         cardViewModes: state.cardViewModes,
+        recommendPageState: state.recommendPageState,
+        favoritesPageState: state.favoritesPageState,
       }),
     }
   )

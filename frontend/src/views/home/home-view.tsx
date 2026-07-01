@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+﻿import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import {
+  Bell,
   Captions,
   ChevronRight,
   Clock,
@@ -22,6 +23,7 @@ import { invoke } from "@/lib/api";
 import { loadCachedPageData } from "@/lib/page-cache";
 import { formatBiliImageUrl, formatFileSize, formatSpeed } from "@/lib/utils";
 import { useAppStore, useDownloadStore, type DownloadTask } from "@/stores/app-store";
+import { showComingSoon } from "@/lib/coming-soon";
 import appIcon from "@/assets/app-icon.png";
 
 const containerVariants = {
@@ -47,6 +49,7 @@ interface UserInfo {
 }
 
 interface HomeStats {
+  followingUpdates: string;
   downloads: string;
   favorites: string;
   watchLater: string;
@@ -55,16 +58,24 @@ interface HomeStats {
 
 type HomeRemoteStats = Omit<HomeStats, "downloads">;
 
+interface FollowingDynamicPage {
+  list: Array<{ pub_ts: number }>;
+  offset: string;
+  has_more: boolean;
+}
+
 function isLoggedIn(userInfo: UserInfo) {
   return Boolean(userInfo.isLogin ?? userInfo.is_login);
 }
 
 export function HomeView() {
   const setView = useAppStore((s) => s.setView);
+  const setRecommendPageState = useAppStore((s) => s.setRecommendPageState);
   const openPlayer = useAppStore((s) => s.openPlayer);
   const taskMap = useDownloadStore((s) => s.tasks);
   const activeCount = useDownloadStore((s) => s.activeCount);
   const [stats, setStats] = useState<HomeStats>({
+    followingUpdates: "--",
     downloads: "0",
     favorites: "--",
     watchLater: "--",
@@ -85,6 +96,7 @@ export function HomeView() {
           let favorites = "--";
           let watchLaterValue = "--";
           let historyValue = "--";
+          let followingUpdates = "--";
 
           try {
             const config = await invoke<{ sessdata: string }>("get_config");
@@ -109,6 +121,19 @@ export function HomeView() {
                 favorites = String(favFolders.count ?? 0);
                 watchLaterValue = String(watchLater.count ?? 0);
                 historyValue = String(history.page?.total ?? 0);
+                const todayStart = new Date();
+                todayStart.setHours(0, 0, 0, 0);
+                let todayUpdates = 0;
+                let offset: string | null = null;
+                for (let page = 0; page < 6; page += 1) {
+                  const dynamics: FollowingDynamicPage | null = await invoke<FollowingDynamicPage>("get_following_dynamics", { offset }).catch(() => null);
+                  if (!dynamics || dynamics.list.length === 0) break;
+                  todayUpdates += dynamics.list.filter((item) => item.pub_ts * 1000 >= todayStart.getTime()).length;
+                  const reachedOlderItems = dynamics.list.some((item) => item.pub_ts * 1000 < todayStart.getTime());
+                  if (!dynamics.has_more || reachedOlderItems || !dynamics.offset) break;
+                  offset = dynamics.offset;
+                }
+                followingUpdates = String(todayUpdates);
               }
             }
           } catch {
@@ -116,6 +141,7 @@ export function HomeView() {
           }
 
           return {
+            followingUpdates,
             favorites,
             watchLater: watchLaterValue,
             history: historyValue,
@@ -176,6 +202,14 @@ export function HomeView() {
     void invoke("pause_download_tasks", { taskIds: activeTaskIds });
   }, [activeCount, downloadTasks, setView]);
 
+  const openFollowingUpdates = useCallback(() => {
+    setRecommendPageState({ activeTab: "dynamic" });
+    setView("recommend");
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("bilibili-box:recommend-tab", { detail: "dynamic" }));
+    }, 0);
+  }, [setRecommendPageState, setView]);
+
   return (
     <motion.div className="bb-home" variants={containerVariants} initial="hidden" animate="show">
       <motion.section className="bb-hero" variants={itemVariants}>
@@ -218,12 +252,12 @@ export function HomeView() {
 
       <motion.section className="bb-stat-grid" variants={itemVariants}>
         <StatCard
-          icon={<Download />}
-          label="今日下载"
-          value={stats.downloads}
-          note="较昨日 0"
-          tone="violet"
-          onClick={() => setView("downloads")}
+          icon={<Bell />}
+          label="关注更新"
+          value={stats.followingUpdates}
+          note={`今日更新 ${stats.followingUpdates} 条`}
+          tone="rose"
+          onClick={openFollowingUpdates}
         />
         <StatCard
           icon={<Star />}
@@ -248,6 +282,14 @@ export function HomeView() {
           note={`总记录 ${stats.history} 条`}
           tone="green"
           onClick={() => setView("history")}
+        />
+        <StatCard
+          icon={<Download />}
+          label="今日下载"
+          value={stats.downloads}
+          note="较昨日 0"
+          tone="violet"
+          onClick={() => setView("downloads")}
         />
       </motion.section>
 
@@ -280,7 +322,7 @@ export function HomeView() {
             title="提取字幕"
             subtitle="提取视频字幕文件"
             tone="caption"
-            onClick={() => setView("search")}
+            onClick={showComingSoon}
           />
           <QuickAction
             icon={<Music />}
@@ -379,7 +421,7 @@ function StatCard({
   label: string;
   value: string;
   note: string;
-  tone: "violet" | "amber" | "blue" | "green";
+  tone: "violet" | "amber" | "blue" | "green" | "rose";
   onClick: () => void;
 }) {
   return (

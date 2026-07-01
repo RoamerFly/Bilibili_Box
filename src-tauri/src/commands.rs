@@ -2,6 +2,7 @@ use md5::{Digest, Md5};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -12,12 +13,15 @@ use url::Url;
 
 use crate::api::auth::{BrowserLoginResult, QrcodeData, QrcodeStatus, UserInfo};
 use crate::api::bangumi::{BangumiFollowInfo, BangumiInfo};
+use crate::api::comment::CommentPage;
 use crate::api::danmaku::DanmakuData;
-use crate::api::favorite::{FavFolders, FavInfo};
+use crate::api::favorite::{FavFolders, FavInfo, LikedVideoPage};
 use crate::api::history::{GetHistoryInfoParams, HistoryInfo};
 use crate::api::subtitle::{Subtitle, SubtitleInfo};
+use crate::api::up::{UpDynamicPage, UpProfile, UpVideoPage};
 use crate::api::video::{
-    PlayUrlInfo, PlayableUrlInfo, SearchResult, SearchVideoOptions, VideoInfo,
+    PlayUrlInfo, PlayableUrlInfo, SearchResult, SearchVideoOptions, VideoActionResult,
+    VideoFavoriteFolder, VideoInfo, VideoInteractionState,
 };
 use crate::api::watchlater::WatchLaterInfo;
 use crate::api::BiliClient;
@@ -29,6 +33,8 @@ use crate::plugin::{PluginInfo, PluginManager};
 const GITHUB_API_LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/RoamerFly/Bilibili_Box/releases/latest";
 const GITHUB_LATEST_RELEASE_URL: &str = "https://github.com/RoamerFly/Bilibili_Box/releases/latest";
+const GITHUB_LATEST_JSON_URL: &str =
+    "https://github.com/RoamerFly/Bilibili_Box/releases/latest/download/latest.json";
 const GITHUB_RELEASE_DOWNLOAD_BASE: &str =
     "https://github.com/RoamerFly/Bilibili_Box/releases/download";
 const GITCODE_LATEST_RELEASE_URL: &str =
@@ -54,6 +60,16 @@ pub struct UpdateCheckResult {
     pub asset: Option<UpdateAsset>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ApiHealthItem {
+    pub name: String,
+    pub endpoint: String,
+    pub ok: bool,
+    pub skipped: bool,
+    pub message: String,
+    pub elapsed_ms: u128,
+}
+
 #[derive(Debug, Deserialize)]
 struct GithubRelease {
     tag_name: String,
@@ -68,6 +84,20 @@ struct GithubReleaseAsset {
     name: String,
     browser_download_url: String,
     size: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdaterLatestJson {
+    version: String,
+    notes: Option<String>,
+    platforms: HashMap<String, UpdaterPlatform>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdaterPlatform {
+    url: String,
+    #[allow(dead_code)]
+    signature: String,
 }
 
 struct UpdateRelease {
@@ -348,6 +378,11 @@ fn update_http_client() -> Result<reqwest::Client, String> {
 async fn fetch_update_release(client: &reqwest::Client) -> Result<UpdateRelease, String> {
     let mut errors = Vec::new();
 
+    match fetch_github_updater_metadata(client).await {
+        Ok(release) => return Ok(release),
+        Err(error) => errors.push(error),
+    }
+
     match fetch_github_api_release(client).await {
         Ok(release) => return Ok(release),
         Err(error) => errors.push(error),
@@ -364,6 +399,43 @@ async fn fetch_update_release(client: &reqwest::Client) -> Result<UpdateRelease,
     }
 
     Err(format!("检查更新失败: {}", errors.join("；")))
+}
+
+async fn fetch_github_updater_metadata(client: &reqwest::Client) -> Result<UpdateRelease, String> {
+    let response = client
+        .get(GITHUB_LATEST_JSON_URL)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("GitHub 更新清单请求失败: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("GitHub 更新清单返回 HTTP {}", response.status()));
+    }
+
+    let latest = response
+        .json::<UpdaterLatestJson>()
+        .await
+        .map_err(|e| format!("解析 GitHub 更新清单失败: {e}"))?;
+    let tag_name = if latest.version.starts_with(['v', 'V']) {
+        latest.version.clone()
+    } else {
+        format!("v{}", latest.version)
+    };
+    let platform = updater_platform_key();
+    let asset = latest.platforms.get(platform).map(|item| UpdateAsset {
+        name: update_asset_name_from_url(&item.url),
+        url: item.url.clone(),
+        size: 0,
+    });
+
+    Ok(UpdateRelease {
+        release_name: Some(format!("Bilibili_Box {tag_name}")),
+        release_url: format!("https://github.com/RoamerFly/Bilibili_Box/releases/tag/{tag_name}"),
+        body: latest.notes.unwrap_or_default(),
+        tag_name,
+        asset,
+    })
 }
 
 async fn fetch_github_api_release(client: &reqwest::Client) -> Result<UpdateRelease, String> {
@@ -520,6 +592,28 @@ fn platform_update_assets(tag_name: &str, host: ReleaseHost) -> Vec<UpdateAsset>
             size: 0,
         })
         .collect()
+}
+
+fn updater_platform_key() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => "windows-x86_64",
+        ("macos", "aarch64") => "darwin-aarch64",
+        ("macos", _) => "darwin-x86_64",
+        ("linux", _) => "linux-x86_64",
+        _ => "unknown",
+    }
+}
+
+fn update_asset_name_from_url(url: &str) -> String {
+    Url::parse(url)
+        .ok()
+        .and_then(|parsed| {
+            parsed
+                .path_segments()
+                .and_then(|mut segments| segments.next_back().map(ToString::to_string))
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "Bilibili_Box-update".to_string())
 }
 
 async fn select_reachable_update_asset(
@@ -843,7 +937,7 @@ pub async fn browser_login(
                     let cookie_header = if bili_cookies.is_empty() {
                         None
                     } else {
-                        Some(bili_cookies.join("; "))
+                        Some(normalize_cookie_header(&bili_cookies.join("; ")))
                     };
 
                     let is_valid_login = if cookie_header.is_some() {
@@ -872,6 +966,27 @@ pub async fn browser_login(
 
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
+}
+
+fn normalize_cookie_header(cookie: &str) -> String {
+    let mut names: Vec<String> = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
+    for part in cookie.split(';') {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let name = trimmed
+            .split_once('=')
+            .map(|(name, _)| name.trim())
+            .unwrap_or(trimmed);
+        if name.is_empty() || names.iter().any(|existing| existing.eq_ignore_ascii_case(name)) {
+            continue;
+        }
+        names.push(name.to_string());
+        parts.push(trimmed.to_string());
+    }
+    parts.join("; ")
 }
 
 /// 搜索视频（通过 BV/AV 号或链接）
@@ -909,6 +1024,58 @@ pub async fn get_normal_info(
 }
 
 /// 获取普通视频播放地址
+#[tauri::command]
+pub async fn get_video_interaction_state(
+    bili_client: State<'_, Arc<BiliClient>>,
+    aid: i64,
+    bvid: String,
+) -> Result<VideoInteractionState, String> {
+    bili_client.get_video_interaction_state(aid, &bvid).await
+}
+
+#[tauri::command]
+pub async fn get_video_favorite_folders(
+    bili_client: State<'_, Arc<BiliClient>>,
+    aid: i64,
+) -> Result<Vec<VideoFavoriteFolder>, String> {
+    bili_client.get_video_favorite_folders(aid).await
+}
+
+#[tauri::command]
+pub async fn set_video_like(
+    bili_client: State<'_, Arc<BiliClient>>,
+    aid: i64,
+    bvid: String,
+    liked: bool,
+) -> Result<VideoActionResult, String> {
+    bili_client.set_video_like(aid, &bvid, liked).await
+}
+
+#[tauri::command]
+pub async fn add_video_coin(
+    bili_client: State<'_, Arc<BiliClient>>,
+    aid: i64,
+    bvid: String,
+    multiply: i64,
+    select_like: bool,
+) -> Result<VideoActionResult, String> {
+    bili_client
+        .add_video_coin(aid, &bvid, multiply, select_like)
+        .await
+}
+
+#[tauri::command]
+pub async fn set_video_favorite(
+    bili_client: State<'_, Arc<BiliClient>>,
+    aid: i64,
+    add_media_ids: Vec<i64>,
+    del_media_ids: Vec<i64>,
+) -> Result<VideoActionResult, String> {
+    bili_client
+        .set_video_favorite(aid, add_media_ids, del_media_ids)
+        .await
+}
+
 #[tauri::command]
 pub async fn get_normal_url(
     bili_client: State<'_, Arc<BiliClient>>,
@@ -971,6 +1138,188 @@ pub async fn get_region_videos(
     bili_client
         .get_region_videos(rid, page.unwrap_or(1), page_size.unwrap_or(60))
         .await
+}
+
+#[tauri::command]
+pub async fn get_up_profile(
+    bili_client: State<'_, Arc<BiliClient>>,
+    mid: i64,
+) -> Result<UpProfile, String> {
+    bili_client.get_up_profile(mid).await
+}
+
+#[tauri::command]
+pub async fn get_up_videos(
+    bili_client: State<'_, Arc<BiliClient>>,
+    mid: i64,
+    page: Option<i64>,
+    page_size: Option<i64>,
+) -> Result<UpVideoPage, String> {
+    bili_client
+        .get_up_videos(mid, page.unwrap_or(1), page_size.unwrap_or(30))
+        .await
+}
+
+#[tauri::command]
+pub async fn get_up_dynamics(
+    bili_client: State<'_, Arc<BiliClient>>,
+    mid: i64,
+    offset: Option<String>,
+) -> Result<UpDynamicPage, String> {
+    bili_client.get_up_dynamics(mid, offset).await
+}
+
+#[tauri::command]
+pub async fn get_following_dynamics(
+    bili_client: State<'_, Arc<BiliClient>>,
+    offset: Option<String>,
+) -> Result<UpDynamicPage, String> {
+    bili_client.get_following_dynamics(offset).await
+}
+
+#[tauri::command]
+pub async fn get_comments(
+    bili_client: State<'_, Arc<BiliClient>>,
+    oid: i64,
+    type_id: i64,
+    page: Option<i64>,
+    page_size: Option<i64>,
+) -> Result<CommentPage, String> {
+    bili_client
+        .get_comments(oid, type_id, page.unwrap_or(1), page_size.unwrap_or(10))
+        .await
+}
+
+#[tauri::command]
+pub async fn get_comment_replies(
+    bili_client: State<'_, Arc<BiliClient>>,
+    oid: i64,
+    type_id: i64,
+    root: i64,
+    page: Option<i64>,
+    page_size: Option<i64>,
+) -> Result<CommentPage, String> {
+    bili_client
+        .get_comment_replies(oid, type_id, root, page.unwrap_or(1), page_size.unwrap_or(10))
+        .await
+}
+
+#[tauri::command]
+pub async fn check_api_health(
+    bili_client: State<'_, Arc<BiliClient>>,
+) -> Result<Vec<ApiHealthItem>, String> {
+    let mut items = Vec::new();
+
+    items.push(
+        probe_api(
+            "首页推荐",
+            "GET /x/web-interface/wbi/index/top/feed/rcmd",
+            bili_client.get_recommended_videos(1, 10),
+        )
+        .await,
+    );
+    items.push(
+        probe_api(
+            "分区视频",
+            "GET /x/web-interface/dynamic/region -> newlist -> ranking/v2",
+            bili_client.get_region_videos(1, 1, 10),
+        )
+        .await,
+    );
+    items.push(
+        probe_api(
+            "热门视频",
+            "GET /x/web-interface/popular",
+            bili_client.get_popular_videos(1, 10),
+        )
+        .await,
+    );
+    items.push(
+        probe_api(
+            "搜索视频",
+            "GET /x/web-interface/wbi/search/type",
+            bili_client.search_video_with_options(
+                "bilibili",
+                SearchVideoOptions {
+                    page: Some(1),
+                    page_size: Some(5),
+                    ..Default::default()
+                },
+            ),
+        )
+        .await,
+    );
+    items.push(
+        probe_api(
+            "UP 资料",
+            "GET /x/web-interface/card",
+            bili_client.get_up_profile(2),
+        )
+        .await,
+    );
+    items.push(
+        probe_api(
+            "UP 投稿",
+            "GET /x/space/wbi/arc/search",
+            bili_client.get_up_videos(2, 1, 5),
+        )
+        .await,
+    );
+    items.push(
+        probe_api(
+            "UP 动态",
+            "GET /x/polymer/web-dynamic/v1/feed/space",
+            bili_client.get_up_dynamics(2, None),
+        )
+        .await,
+    );
+
+    if bili_client.get_cookie().trim().is_empty() {
+        items.push(ApiHealthItem {
+            name: "关注动态".to_string(),
+            endpoint: "GET /x/polymer/web-dynamic/v1/feed/all".to_string(),
+            ok: false,
+            skipped: true,
+            message: "未登录，跳过需要 SESSDATA 的接口".to_string(),
+            elapsed_ms: 0,
+        });
+    } else {
+        items.push(
+            probe_api(
+                "关注动态",
+                "GET /x/polymer/web-dynamic/v1/feed/all",
+                bili_client.get_following_dynamics(None),
+            )
+            .await,
+        );
+    }
+
+    Ok(items)
+}
+
+async fn probe_api<T, Fut>(name: &str, endpoint: &str, future: Fut) -> ApiHealthItem
+where
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    let started_at = Instant::now();
+    match future.await {
+        Ok(_) => ApiHealthItem {
+            name: name.to_string(),
+            endpoint: endpoint.to_string(),
+            ok: true,
+            skipped: false,
+            message: "OK".to_string(),
+            elapsed_ms: started_at.elapsed().as_millis(),
+        },
+        Err(error) => ApiHealthItem {
+            name: name.to_string(),
+            endpoint: endpoint.to_string(),
+            ok: false,
+            skipped: false,
+            message: error,
+            elapsed_ms: started_at.elapsed().as_millis(),
+        },
+    }
 }
 
 // ========== 下载相关命令 ==========
@@ -1064,6 +1413,18 @@ pub async fn get_fav_info(
 ) -> Result<FavInfo, String> {
     bili_client
         .get_fav_info(media_id, page, page_size.unwrap_or(20))
+        .await
+}
+
+#[tauri::command]
+pub async fn get_liked_videos(
+    bili_client: State<'_, Arc<BiliClient>>,
+    page: Option<i64>,
+    page_size: Option<i64>,
+    source: Option<String>,
+) -> Result<LikedVideoPage, String> {
+    bili_client
+        .get_liked_videos(page.unwrap_or(1), page_size.unwrap_or(20), source.as_deref())
         .await
 }
 

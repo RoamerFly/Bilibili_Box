@@ -187,10 +187,7 @@ impl super::BiliClient {
             }
 
             if !cookie_parts.is_empty() {
-                cookie_parts.sort();
-                cookie_parts.dedup();
-
-                let cookie_str = cookie_parts.join("; ");
+                let cookie_str = normalize_cookie_header(&cookie_parts.join("; "));
                 qrcode_status.cookie = Some(cookie_str.clone());
 
                 for part in cookie_str.split(';') {
@@ -249,4 +246,25 @@ impl super::BiliClient {
         let data = bili_resp.data.ok_or("响应中没有 data 字段")?;
         serde_json::from_value(data).map_err(|e| format!("解析用户信息失败: {e}"))
     }
+}
+
+fn normalize_cookie_header(cookie: &str) -> String {
+    let mut names: Vec<String> = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
+    for part in cookie.split(';') {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let name = trimmed
+            .split_once('=')
+            .map(|(name, _)| name.trim())
+            .unwrap_or(trimmed);
+        if name.is_empty() || names.iter().any(|existing| existing.eq_ignore_ascii_case(name)) {
+            continue;
+        }
+        names.push(name.to_string());
+        parts.push(trimmed.to_string());
+    }
+    parts.join("; ")
 }

@@ -1,5 +1,5 @@
 use chrono::{Duration as ChronoDuration, Local, TimeZone};
-use reqwest::StatusCode;
+use reqwest::{RequestBuilder as RawRequestBuilder, StatusCode};
 use reqwest_middleware::RequestBuilder;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -57,6 +57,27 @@ pub struct VideoStat {
     pub share: i64,
     #[serde(default)]
     pub like: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VideoInteractionState {
+    pub liked: bool,
+    pub coined: i64,
+    pub favorited: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VideoFavoriteFolder {
+    pub id: i64,
+    pub title: String,
+    pub media_count: i64,
+    pub favorited: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VideoActionResult {
+    pub success: bool,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -258,6 +279,241 @@ impl super::BiliClient {
             .await?;
 
         serde_json::from_value(data).map_err(|e| format!("解析视频信息失败: {}", e))
+    }
+
+    pub async fn get_video_interaction_state(
+        &self,
+        aid: i64,
+        bvid: &str,
+    ) -> Result<VideoInteractionState, String> {
+        self.ensure_logged_in()?;
+
+        let liked_data = self
+            .request_bili_value(
+                self.api_client()
+                    .get("https://api.bilibili.com/x/web-interface/archive/has/like")
+                    .query(&json!({ "aid": aid, "bvid": bvid }))
+                    .header(
+                        "cookie",
+                        self.get_cookie_for_url(
+                            "https://api.bilibili.com/x/web-interface/archive/has/like",
+                        ),
+                    ),
+            )
+            .await?;
+        let coin_data = self
+            .request_bili_value(
+                self.api_client()
+                    .get("https://api.bilibili.com/x/web-interface/archive/coins")
+                    .query(&json!({ "aid": aid, "bvid": bvid }))
+                    .header(
+                        "cookie",
+                        self.get_cookie_for_url(
+                            "https://api.bilibili.com/x/web-interface/archive/coins",
+                        ),
+                    ),
+            )
+            .await?;
+        let fav_data = self
+            .request_bili_value(
+                self.api_client()
+                    .get("https://api.bilibili.com/x/v2/fav/video/favoured")
+                    .query(&json!({ "aid": aid }))
+                    .header(
+                        "cookie",
+                        self.get_cookie_for_url("https://api.bilibili.com/x/v2/fav/video/favoured"),
+                    ),
+            )
+            .await?;
+
+        Ok(VideoInteractionState {
+            liked: parse_bool_like(&liked_data),
+            coined: coin_data
+                .get("multiply")
+                .and_then(parse_i64_value)
+                .unwrap_or(0),
+            favorited: fav_data
+                .get("favoured")
+                .map(parse_bool_like)
+                .unwrap_or(false),
+        })
+    }
+
+    pub async fn get_video_favorite_folders(
+        &self,
+        aid: i64,
+    ) -> Result<Vec<VideoFavoriteFolder>, String> {
+        self.ensure_logged_in()?;
+        let uid = self.get_current_mid().await?;
+        let endpoint = "https://api.bilibili.com/x/v3/fav/folder/created/list-all";
+        let data = self
+            .request_bili_value(
+                self.api_client()
+                    .get(endpoint)
+                    .query(&json!({ "up_mid": uid, "rid": aid, "type": 2 }))
+                    .header("cookie", self.get_cookie_for_url(endpoint)),
+            )
+            .await?;
+
+        Ok(data
+            .get("list")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| {
+                        Some(VideoFavoriteFolder {
+                            id: item.get("id")?.as_i64()?,
+                            title: item
+                                .get("title")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string(),
+                            media_count: item
+                                .get("media_count")
+                                .and_then(parse_i64_value)
+                                .unwrap_or(0),
+                            favorited: item
+                                .get("fav_state")
+                                .or_else(|| item.get("favoured"))
+                                .map(parse_bool_like)
+                                .unwrap_or(false),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    pub async fn set_video_like(
+        &self,
+        aid: i64,
+        bvid: &str,
+        liked: bool,
+    ) -> Result<VideoActionResult, String> {
+        self.prepare_video_action(bvid).await?;
+        let csrf = self.csrf_token()?;
+        let endpoint = "https://api.bilibili.com/x/web-interface/archive/like";
+        self.request_bili_action(
+            self.action_client()
+                .post(endpoint)
+                .header("cookie", self.get_cookie_for_url(endpoint))
+                .header("origin", "https://www.bilibili.com")
+                .header("referer", format!("https://www.bilibili.com/video/{bvid}/"))
+                .header("x-requested-with", "XMLHttpRequest")
+                .header("sec-fetch-site", "same-site")
+                .header("sec-fetch-mode", "cors")
+                .header("sec-fetch-dest", "empty")
+                .form(&[
+                    ("aid", aid.to_string()),
+                    ("bvid", bvid.to_string()),
+                    ("like", if liked { "1" } else { "2" }.to_string()),
+                    ("csrf", csrf.clone()),
+                    ("csrf_token", csrf),
+                    ("platform", "web".to_string()),
+                    ("eab_x", "1".to_string()),
+                    ("ramval", "1".to_string()),
+                    ("ga", "1".to_string()),
+                    ("gaia_source", "web_normal".to_string()),
+                ]),
+        )
+        .await?;
+
+        Ok(VideoActionResult {
+            success: true,
+            message: if liked { "点赞成功" } else { "已取消点赞" }.to_string(),
+        })
+    }
+
+    pub async fn add_video_coin(
+        &self,
+        aid: i64,
+        bvid: &str,
+        multiply: i64,
+        select_like: bool,
+    ) -> Result<VideoActionResult, String> {
+        self.prepare_video_action(bvid).await?;
+        let csrf = self.csrf_token()?;
+        let endpoint = "https://api.bilibili.com/x/web-interface/coin/add";
+        self.request_bili_action(
+            self.action_client()
+                .post(endpoint)
+                .header("cookie", self.get_cookie_for_url(endpoint))
+                .header("origin", "https://www.bilibili.com")
+                .header("referer", format!("https://www.bilibili.com/video/{bvid}/"))
+                .header("x-requested-with", "XMLHttpRequest")
+                .header("sec-fetch-site", "same-site")
+                .header("sec-fetch-mode", "cors")
+                .header("sec-fetch-dest", "empty")
+                .form(&[
+                    ("aid", aid.to_string()),
+                    ("bvid", bvid.to_string()),
+                    ("multiply", multiply.clamp(1, 2).to_string()),
+                    ("select_like", if select_like { "1" } else { "0" }.to_string()),
+                    ("csrf", csrf.clone()),
+                    ("csrf_token", csrf),
+                    ("platform", "web".to_string()),
+                    ("eab_x", "1".to_string()),
+                    ("ramval", "1".to_string()),
+                    ("ga", "1".to_string()),
+                    ("gaia_source", "web_normal".to_string()),
+                ]),
+        )
+        .await?;
+
+        Ok(VideoActionResult {
+            success: true,
+            message: "投币成功".to_string(),
+        })
+    }
+
+    pub async fn set_video_favorite(
+        &self,
+        aid: i64,
+        add_media_ids: Vec<i64>,
+        del_media_ids: Vec<i64>,
+    ) -> Result<VideoActionResult, String> {
+        self.ensure_logged_in()?;
+        self.ensure_buvid_cookie().await?;
+        if add_media_ids.is_empty() && del_media_ids.is_empty() {
+            return Ok(VideoActionResult {
+                success: true,
+                message: "收藏夹未变化".to_string(),
+            });
+        }
+
+        let csrf = self.csrf_token()?;
+        let endpoint = "https://api.bilibili.com/x/v3/fav/resource/deal";
+        self.request_bili_action(
+            self.action_client()
+                .post(endpoint)
+                .header("cookie", self.get_cookie_for_url(endpoint))
+                .header("origin", "https://www.bilibili.com")
+                .header("referer", "https://www.bilibili.com/")
+                .header("x-requested-with", "XMLHttpRequest")
+                .header("sec-fetch-site", "same-site")
+                .header("sec-fetch-mode", "cors")
+                .header("sec-fetch-dest", "empty")
+                .form(&[
+                    ("rid", aid.to_string()),
+                    ("type", "2".to_string()),
+                    ("add_media_ids", join_ids(&add_media_ids)),
+                    ("del_media_ids", join_ids(&del_media_ids)),
+                    ("csrf", csrf.clone()),
+                    ("csrf_token", csrf),
+                    ("platform", "web".to_string()),
+                    ("eab_x", "1".to_string()),
+                    ("ramval", "1".to_string()),
+                    ("ga", "1".to_string()),
+                    ("gaia_source", "web_normal".to_string()),
+                ]),
+        )
+        .await?;
+
+        Ok(VideoActionResult {
+            success: true,
+            message: "收藏已更新".to_string(),
+        })
     }
 
     pub async fn get_normal_url(&self, bvid: &str, cid: i64) -> Result<PlayUrlInfo, String> {
@@ -687,6 +943,12 @@ impl super::BiliClient {
             return Err("无效的视频分区编号".to_string());
         }
 
+        if rid > 0 {
+            return self
+                .get_region_videos_with_fallback(rid, page.max(1), page_size.clamp(1, 100))
+                .await;
+        }
+
         let endpoint = "https://api.bilibili.com/x/web-interface/dynamic/region";
         let data = self
             .request_bili_value(
@@ -704,6 +966,114 @@ impl super::BiliClient {
         parse_video_info_list(
             data.get("archives").ok_or("分区响应中没有 archives 字段")?,
             "分区视频",
+        )
+    }
+
+    async fn get_region_videos_with_fallback(
+        &self,
+        rid: i64,
+        page: i64,
+        page_size: i64,
+    ) -> Result<Vec<VideoInfo>, String> {
+        let mut errors = Vec::new();
+
+        match self
+            .get_region_videos_by_dynamic_region(rid, page, page_size)
+            .await
+        {
+            Ok(list) if !list.is_empty() => return Ok(list),
+            Ok(_) => errors.push("dynamic/region 返回空列表".to_string()),
+            Err(error) => errors.push(error),
+        }
+
+        match self
+            .get_region_videos_by_newlist(rid, page, page_size)
+            .await
+        {
+            Ok(list) if !list.is_empty() => return Ok(list),
+            Ok(_) => errors.push("newlist 返回空列表".to_string()),
+            Err(error) => errors.push(error),
+        }
+
+        match self.get_region_videos_by_ranking(rid).await {
+            Ok(list) if !list.is_empty() => {
+                return Ok(list.into_iter().take(page_size as usize).collect())
+            }
+            Ok(_) => errors.push("ranking/v2 返回空列表".to_string()),
+            Err(error) => errors.push(error),
+        }
+
+        Err(format!("分区视频接口均不可用: {}", errors.join("；")))
+    }
+
+    async fn get_region_videos_by_dynamic_region(
+        &self,
+        rid: i64,
+        page: i64,
+        page_size: i64,
+    ) -> Result<Vec<VideoInfo>, String> {
+        let endpoint = "https://api.bilibili.com/x/web-interface/dynamic/region";
+        let data = self
+            .request_bili_value(
+                self.api_client()
+                    .get(endpoint)
+                    .query(&[("rid", rid), ("pn", page), ("ps", page_size)])
+                    .header("cookie", self.get_cookie_for_url(endpoint)),
+            )
+            .await
+            .map_err(|error| format!("dynamic/region: {error}"))?;
+
+        parse_video_info_list(
+            data.get("archives")
+                .ok_or("dynamic/region 响应中没有 archives 字段")?,
+            "分区最新视频",
+        )
+    }
+
+    async fn get_region_videos_by_newlist(
+        &self,
+        rid: i64,
+        page: i64,
+        page_size: i64,
+    ) -> Result<Vec<VideoInfo>, String> {
+        let endpoint = "https://api.bilibili.com/x/web-interface/newlist";
+        let data = self
+            .request_bili_value(
+                self.api_client()
+                    .get(endpoint)
+                    .query(&[
+                        ("rid", rid.to_string()),
+                        ("pn", page.to_string()),
+                        ("ps", page_size.to_string()),
+                    ])
+                    .header("cookie", self.get_cookie_for_url(endpoint)),
+            )
+            .await
+            .map_err(|error| format!("newlist: {error}"))?;
+
+        parse_video_info_list(
+            data.get("archives")
+                .or_else(|| data.get("list"))
+                .ok_or("newlist 响应中没有 archives/list 字段")?,
+            "分区近期投稿",
+        )
+    }
+
+    async fn get_region_videos_by_ranking(&self, rid: i64) -> Result<Vec<VideoInfo>, String> {
+        let endpoint = "https://api.bilibili.com/x/web-interface/ranking/v2";
+        let data = self
+            .request_bili_value(
+                self.api_client()
+                    .get(endpoint)
+                    .query(&[("rid", rid.to_string()), ("type", "all".to_string())])
+                    .header("cookie", self.get_cookie_for_url(endpoint)),
+            )
+            .await
+            .map_err(|error| format!("ranking/v2: {error}"))?;
+
+        parse_video_info_list(
+            data.get("list").ok_or("ranking/v2 响应中没有 list 字段")?,
+            "分区排行榜",
         )
     }
 
@@ -805,6 +1175,137 @@ impl super::BiliClient {
             .data
             .ok_or_else(|| "响应中没有 data 字段".to_string())
     }
+    fn ensure_logged_in(&self) -> Result<(), String> {
+        if self.get_cookie().trim().is_empty() {
+            Err("需要登录后才能进行视频互动".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn csrf_token(&self) -> Result<String, String> {
+        let token = extract_cookie_value(&self.get_cookie(), "bili_jct")
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                self.get_jar_cookie("https://api.bilibili.com/", "bili_jct")
+            });
+        token.ok_or_else(|| "缺少 bili_jct，无法提交互动操作，请重新登录".to_string())
+    }
+
+    async fn prepare_video_action(&self, bvid: &str) -> Result<(), String> {
+        self.ensure_logged_in()?;
+        self.ensure_buvid_cookie().await?;
+        let url = format!("https://www.bilibili.com/video/{bvid}/");
+        self.api_client()
+            .get(&url)
+            .header("cookie", self.get_cookie_for_url(&url))
+            .header("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+            .header("cache-control", "no-cache")
+            .header("pragma", "no-cache")
+            .send()
+            .await
+            .map_err(|e| format!("预热视频页失败: {e}"))?;
+        Ok(())
+    }
+
+    async fn get_current_mid(&self) -> Result<i64, String> {
+        let endpoint = "https://api.bilibili.com/x/web-interface/nav";
+        let data = self
+            .request_bili_value(
+                self.api_client()
+                    .get(endpoint)
+                    .header("cookie", self.get_cookie_for_url(endpoint)),
+            )
+            .await?;
+        data.get("mid")
+            .and_then(parse_i64_value)
+            .filter(|mid| *mid > 0)
+            .ok_or_else(|| "无法读取当前登录用户 ID".to_string())
+    }
+
+    async fn request_bili_action(&self, request: RawRequestBuilder) -> Result<Option<Value>, String> {
+        let retry_request = request.try_clone();
+        match self.send_bili_action_once(request).await {
+            Ok(data) => Ok(data),
+            Err(BiliActionFailure::Api { message, data }) => {
+                let Some(gaia_vtoken) = extract_gaia_vtoken(data.as_ref()) else {
+                    return Err(format!("API 错误: {message}"));
+                };
+                let Some(retry_request) = retry_request else {
+                    return Err(format!("API 错误: {message}"));
+                };
+
+                let cookie = append_cookie_value(
+                    &self.get_cookie_for_url("https://api.bilibili.com/"),
+                    "x-bili-gaia-vtoken",
+                    &gaia_vtoken,
+                );
+                let retry_request = retry_request
+                    .query(&[("gaia_vtoken", gaia_vtoken.as_str())])
+                    .header("cookie", cookie);
+                self.send_bili_action_once(retry_request)
+                    .await
+                    .map_err(|err| err.into_user_message())
+            }
+            Err(err) => Err(err.into_user_message()),
+        }
+    }
+
+    async fn send_bili_action_once(
+        &self,
+        request: RawRequestBuilder,
+    ) -> Result<Option<Value>, BiliActionFailure> {
+        let response = request
+            .send()
+            .await
+            .map_err(|e| BiliActionFailure::Message(format!("提交操作失败: {e}")))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|e| BiliActionFailure::Message(format!("读取操作响应失败: {e}")))?;
+
+        if status != StatusCode::OK {
+            return Err(BiliActionFailure::Message(format!(
+                "提交操作失败: HTTP {status}: {}",
+                summarize_error_body(&body)
+            )));
+        }
+
+        let bili_resp: BiliResp = serde_json::from_str(&body)
+            .map_err(|e| BiliActionFailure::Message(format!("解析操作响应失败: {e}")))?;
+        if bili_resp.code != 0 {
+            return Err(BiliActionFailure::Api {
+                message: bili_resp.message,
+                data: bili_resp.data,
+            });
+        }
+
+        Ok(bili_resp.data)
+    }
+}
+
+enum BiliActionFailure {
+    Message(String),
+    Api {
+        message: String,
+        data: Option<Value>,
+    },
+}
+
+impl BiliActionFailure {
+    fn into_user_message(self) -> String {
+        match self {
+            Self::Message(message) => message,
+            Self::Api { message, data } => {
+                if has_captcha_decision(data.as_ref()) {
+                    format!("API 错误: {message}，B站要求完成人机验证后才能继续")
+                } else {
+                    format!("API 错误: {message}")
+                }
+            }
+        }
+    }
 }
 
 fn summarize_error_body(body: &str) -> String {
@@ -814,6 +1315,59 @@ fn summarize_error_body(body: &str) -> String {
         .chars()
         .take(240)
         .collect()
+}
+
+fn extract_gaia_vtoken(data: Option<&Value>) -> Option<String> {
+    let data = data?;
+    let ga_data = data
+        .get("ga_data")
+        .filter(|value| value.is_object())
+        .unwrap_or(data);
+    ga_data
+        .get("grisk_id")
+        .or_else(|| ga_data.get("gaia_vtoken"))
+        .or_else(|| ga_data.get("v_token"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn has_captcha_decision(data: Option<&Value>) -> bool {
+    let Some(data) = data else {
+        return false;
+    };
+    let ga_data = data
+        .get("ga_data")
+        .filter(|value| value.is_object())
+        .unwrap_or(data);
+    ga_data
+        .get("decisions")
+        .and_then(Value::as_array)
+        .map(|decisions| {
+            decisions.iter().any(|decision| {
+                decision
+                    .as_str()
+                    .map(|value| value.contains("captcha") || value.contains("verify"))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn append_cookie_value(cookie: &str, name: &str, value: &str) -> String {
+    let mut parts: Vec<String> = cookie
+        .split(';')
+        .filter_map(|part| {
+            let trimmed = part.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let key = trimmed.split_once('=').map(|(key, _)| key.trim()).unwrap_or(trimmed);
+            (!key.eq_ignore_ascii_case(name)).then(|| trimmed.to_string())
+        })
+        .collect();
+    parts.push(format!("{name}={value}"));
+    parts.join("; ")
 }
 
 fn summarize_url_host(url: &str) -> String {
@@ -1200,6 +1754,36 @@ fn parse_i64_value(value: &Value) -> Option<i64> {
     }
 
     raw.parse::<i64>().ok()
+}
+
+fn parse_bool_like(value: &Value) -> bool {
+    value
+        .as_bool()
+        .or_else(|| value.as_i64().map(|number| number != 0))
+        .or_else(|| {
+            value
+                .as_str()
+                .map(|text| matches!(text.trim(), "1" | "true" | "True"))
+        })
+        .unwrap_or(false)
+}
+
+pub(crate) fn extract_cookie_value(cookie: &str, name: &str) -> Option<String> {
+    cookie.split(';').find_map(|part| {
+        let (key, value) = part.trim().split_once('=')?;
+        if key == name {
+            Some(value.to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn join_ids(ids: &[i64]) -> String {
+    ids.iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn clean_search_text(value: &str) -> String {

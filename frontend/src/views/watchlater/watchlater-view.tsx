@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   Clock,
@@ -24,6 +24,7 @@ import { loadCachedPageData } from "@/lib/page-cache";
 import { useAppStore } from "@/stores/app-store";
 import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
 import { runPreservingMainScroll } from "@/lib/scroll-position";
+import { ClickableAvatar } from "@/components/video-card";
 
 interface WatchLaterItem {
   aid: number;
@@ -104,6 +105,7 @@ function formatAddTime(timestamp: number) {
 export function WatchLaterView() {
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
+  const openUpProfile = useAppStore((s) => s.openUpProfile);
   const viewMode = useAppStore((s) => s.cardViewModes.watchlater ?? "list");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
   const { pageSize, cardScale, columns } = useCardLayout();
@@ -120,6 +122,8 @@ export function WatchLaterView() {
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [multiSelectEnabled, setMultiSelectEnabled] = useState(false);
+  const [batchDownloading, setBatchDownloading] = useState(false);
   const fetchWatchLater = useCallback(
     async (showLoading = true, forceRefresh = false) => {
       if (showLoading) setLoading(true);
@@ -210,11 +214,35 @@ export function WatchLaterView() {
   };
 
   const handleToggleSelectAll = () => {
-    if (selectedIds.size === filteredItems.length) {
+    const currentIds = pagedItems.map((item) => item.aid);
+    const allCurrentSelected = currentIds.length > 0 && currentIds.every((id) => selectedIds.has(id));
+    if (allCurrentSelected) {
       setSelectedIds(new Set());
       return;
     }
-    setSelectedIds(new Set(filteredItems.map((item) => item.aid)));
+    setSelectedIds(new Set(currentIds));
+  };
+
+  const handleBatchDownload = async () => {
+    const targets = filteredItems.filter((item) => selectedIds.has(item.aid));
+    if (!targets.length) return;
+    setBatchDownloading(true);
+    setError("");
+    try {
+      const downloadQuality = await requestDownloadQuality(targets.map((item) => ({ bvid: item.bvid, cid: item.cid })));
+      if (!downloadQuality) return;
+      const groups = await Promise.all(targets.map((item) =>
+        invoke<string[]>("create_download_task", {
+          params: { bvid: item.bvid, cid: item.cid, title: item.title, cids: [item.cid], download_quality: downloadQuality },
+        })
+      ));
+      notifyDownloadQueued(groups.flat(), `稍后再看 ${targets.length} 个视频`);
+      setSelectedIds(new Set());
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBatchDownloading(false);
+    }
   };
 
   const handleClearAll = () => {
@@ -300,11 +328,27 @@ export function WatchLaterView() {
               flexWrap: "wrap",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "9px", cursor: "pointer", fontSize: "14px", fontWeight: 500, color: "#505065", userSelect: "none" }}>
-                <SelectionBox selected={selectedIds.size > 0 && selectedIds.size === filteredItems.length && filteredItems.length > 0} onClick={handleToggleSelectAll} />
-                全选
-              </label>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>              <ActionButton
+                onClick={() => {
+                  setMultiSelectEnabled((enabled) => {
+                    if (enabled) setSelectedIds(new Set());
+                    return !enabled;
+                  });
+                }}
+                icon={<span aria-hidden="true">{multiSelectEnabled ? "✓" : "□"}</span>}
+              >
+                {multiSelectEnabled ? "关闭多选" : "开启多选"}
+              </ActionButton>
+              {multiSelectEnabled ? (
+                <>
+                  <ActionButton onClick={handleToggleSelectAll} icon={<span aria-hidden="true">□</span>}>
+                    全选当前
+                  </ActionButton>
+                  <ActionButton onClick={() => void handleBatchDownload()} icon={batchDownloading ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Download style={{ width: 15, height: 15 }} />}>
+                    下载选中{selectedIds.size ? `(${selectedIds.size})` : ""}
+                  </ActionButton>
+                </>
+              ) : null}
               <div style={{ position: "relative", width: "220px" }}>
                 <Search
                   style={{
@@ -380,6 +424,7 @@ export function WatchLaterView() {
                       key={item.aid}
                       item={item}
                       scale={cardScale}
+                      selectable={multiSelectEnabled}
                       selected={selectedIds.has(item.aid)}
                       onSelect={() => handleToggleSelect(item.aid)}
                       onPlay={() =>
@@ -392,6 +437,7 @@ export function WatchLaterView() {
                         })
                       }
                       onDownload={handleDownload}
+                      onOpenAuthor={() => openUpProfile({ mid: item.owner.mid, name: item.owner.name, face: item.owner.face })}
                     />
                   ))}
                 </AnimatePresence>
@@ -435,16 +481,20 @@ function WatchLaterCard({
   item,
   scale,
   selected,
+  selectable,
   onSelect,
   onPlay,
   onDownload,
+  onOpenAuthor,
 }: {
   item: WatchLaterItem;
   scale: number;
   selected: boolean;
+  selectable: boolean;
   onSelect: () => void;
   onPlay: () => void;
   onDownload: (bvid: string, cid: number, title: string) => void;
+  onOpenAuthor: () => void;
 }) {
   return (
     <motion.div
@@ -461,7 +511,7 @@ function WatchLaterCard({
         border: selected ? "2px solid #c7c2ff" : "1px solid #ececf2",
       }}
     >
-      <SelectionBox scale={scale} selected={selected} onClick={onSelect} />
+      {selectable ? <SelectionBox scale={scale} selected={selected} onClick={onSelect} /> : <span />}
 
       <div
         style={{
@@ -474,7 +524,7 @@ function WatchLaterCard({
           backgroundColor: "#f0f0f5",
           cursor: "pointer",
         }}
-        onClick={onPlay}
+        onClick={selectable ? onSelect : onPlay}
       >
         <img
           src={formatBiliImageUrl(item.pic, "@672w_378h_1c.webp")}
@@ -516,7 +566,19 @@ function WatchLaterCard({
           {item.title}
         </p>
         <div style={{ display: "flex", alignItems: "center", gap: `${10 * scale}px`, fontSize: `${13 * scale}px`, color: "#7a7a8c", flexWrap: "wrap" }}>
-          <span style={{ fontWeight: 500 }}>UP：{item.owner.name}</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: `${7 * scale}px`, fontWeight: 500, minWidth: 0 }}>
+            <ClickableAvatar src={item.owner.face || ""} alt={item.owner.name} size={22 * scale} onClick={onOpenAuthor} />
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenAuthor();
+              }}
+              style={{ border: "none", background: "transparent", padding: 0, color: "#7a7a8c", fontSize: `${13 * scale}px`, fontWeight: 600, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            >
+              {item.owner.name || "未知 UP"}
+            </button>
+          </span>
           <span>{formatAddTime(item.add_at)}</span>
         </div>
       </div>

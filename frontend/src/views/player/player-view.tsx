@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  Check,
   Download,
   ExternalLink,
   Loader2,
@@ -11,19 +12,26 @@ import {
   PictureInPicture2,
   Play,
   RefreshCw,
+  Share2,
+  Star,
+  ThumbsUp,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import type { MediaPlayerClass } from "dashjs";
 import { motion } from "framer-motion";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
+import { CommentsSection } from "@/components/comments-section";
 import { invoke } from "@/lib/api";
+import { showNotice } from "@/lib/coming-soon";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { openExternalUrl } from "@/lib/open-external";
-import type { BangumiInfo, VideoInfo } from "@/lib/types";
-import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
+import type { BangumiInfo, VideoActionResult, VideoFavoriteFolder, VideoInfo, VideoInteractionState } from "@/lib/types";
+import { formatBiliImageUrl, formatDuration, formatNumber } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
-
+import coin22Img from "@/assets/22-coin-ani.png";
+import coin33Img from "@/assets/33-coin-ani.png";
 interface EpisodeOption {
   label: string;
   title: string;
@@ -62,6 +70,13 @@ interface DashStreamInfo {
   } | null;
 }
 
+interface ActionNoticeState {
+  id: number;
+  message: string;
+  left: number;
+  top: number;
+}
+
 const PLAYBACK_QUALITY_LABELS: Record<number, string> = {
   127: "8K",
   126: "杜比视界",
@@ -88,6 +103,15 @@ export function PlayerView() {
   const [playUrl, setPlayUrl] = useState("");
   const [dashPlayback, setDashPlayback] = useState<DashPlaybackInfo | null>(null);
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
+  const [interactionState, setInteractionState] = useState<VideoInteractionState | null>(null);
+  const [interactionLoading, setInteractionLoading] = useState(false);
+  const [favoriteDialogOpen, setFavoriteDialogOpen] = useState(false);
+  const [coinDialogOpen, setCoinDialogOpen] = useState(false);
+  const [favoriteFolders, setFavoriteFolders] = useState<VideoFavoriteFolder[]>([]);
+  const [favoriteSelection, setFavoriteSelection] = useState<Set<number>>(new Set());
+  const [favoriteInitialSelection, setFavoriteInitialSelection] = useState<Set<number>>(new Set());
+  const [favoriteFoldersLoading, setFavoriteFoldersLoading] = useState(false);
+  const [actionNotice, setActionNotice] = useState<ActionNoticeState | null>(null);
   const [bangumiInfo, setBangumiInfo] = useState<BangumiInfo | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeOption[]>([]);
   const [selectedEpisode, setSelectedEpisode] = useState<EpisodeOption | null>(null);
@@ -109,6 +133,9 @@ export function PlayerView() {
   const controlHideTimerRef = useRef<number | null>(null);
   const resumePlaybackRef = useRef<{ time: number; playing: boolean } | null>(null);
   const dashPlayerRef = useRef<MediaPlayerClass | null>(null);
+  const actionNoticeTimerRef = useRef<number | null>(null);
+  const coinActionRectRef = useRef<DOMRect | null>(null);
+  const favoriteActionRectRef = useRef<DOMRect | null>(null);
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
 
   const playbackHint =
@@ -344,7 +371,10 @@ export function PlayerView() {
     return videoInfo?.title || playerState?.title || "播放器";
   }, [bangumiInfo?.title, playerState, videoInfo?.title]);
 
+  const currentEpisodeTitle = selectedEpisode?.title || playerState?.title || currentTitle;
   const cover = bangumiInfo?.cover || videoInfo?.pic || playerState?.cover || "";
+  const commentOid = videoInfo?.aid ?? null;
+  const commentType = videoInfo ? 1 : null;
   const browserUrl = useMemo(() => {
     if (!playerState) return "";
     if (playerState.kind === "bangumi") {
@@ -360,6 +390,209 @@ export function PlayerView() {
     }
     return "";
   }, [playerState]);
+
+  useEffect(() => {
+    setInteractionState(null);
+    if (!videoInfo?.aid || !videoInfo.bvid) return;
+    let disposed = false;
+    void invoke<VideoInteractionState>("get_video_interaction_state", {
+      aid: videoInfo.aid,
+      bvid: videoInfo.bvid,
+    })
+      .then((state) => {
+        if (!disposed) setInteractionState(state);
+      })
+      .catch(() => {
+        if (!disposed) setInteractionState(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [videoInfo?.aid, videoInfo?.bvid]);
+
+  useEffect(() => {
+    return () => {
+      if (actionNoticeTimerRef.current !== null) {
+        window.clearTimeout(actionNoticeTimerRef.current);
+      }
+    };
+  }, []);
+
+  const showActionNotice = useCallback((message: string, rect?: DOMRect | null) => {
+    if (!rect) {
+      showNotice(message);
+      return;
+    }
+    if (actionNoticeTimerRef.current !== null) {
+      window.clearTimeout(actionNoticeTimerRef.current);
+    }
+    setActionNotice({
+      id: Date.now(),
+      message,
+      left: rect.left + rect.width / 2,
+      top: rect.top,
+    });
+    actionNoticeTimerRef.current = window.setTimeout(() => {
+      setActionNotice(null);
+      actionNoticeTimerRef.current = null;
+    }, 1500);
+  }, []);
+
+  const mutateVideoStats = (patch: Partial<VideoInfo["stat"]>) => {
+    setVideoInfo((info) => {
+      if (!info) return info;
+      return { ...info, stat: { ...info.stat, ...patch } };
+    });
+  };
+
+  const handleLikeVideo = async (target?: HTMLElement) => {
+    if (!videoInfo || interactionLoading) return;
+    const nextLiked = !interactionState?.liked;
+    const targetRect = target?.getBoundingClientRect() ?? null;
+    setInteractionLoading(true);
+    try {
+      const result = await invoke<VideoActionResult>("set_video_like", {
+        aid: videoInfo.aid,
+        bvid: videoInfo.bvid,
+        liked: nextLiked,
+      });
+      setInteractionState((state) => ({ ...(state ?? { coined: 0, favorited: false }), liked: nextLiked }));
+      mutateVideoStats({ like: Math.max(0, videoInfo.stat.like + (nextLiked ? 1 : -1)) });
+      showActionNotice(result.message || (nextLiked ? "点赞成功" : "已取消点赞"), targetRect);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setInteractionLoading(false);
+    }
+  };
+
+  const handleCoinVideo = (target?: HTMLElement) => {
+    if (!videoInfo || interactionLoading) return;
+    coinActionRectRef.current = target?.getBoundingClientRect() ?? null;
+    if ((interactionState?.coined ?? 0) >= 2) {
+      showNotice("该视频已投过2枚硬币");
+      return;
+    }
+    setCoinDialogOpen(true);
+  };
+
+  const handleConfirmCoin = async (multiply: number) => {
+    if (!videoInfo || interactionLoading) return;
+    setCoinDialogOpen(false);
+    setInteractionLoading(true);
+    try {
+      const result = await invoke<VideoActionResult>("add_video_coin", {
+        aid: videoInfo.aid,
+        bvid: videoInfo.bvid,
+        multiply,
+        selectLike: false,
+      });
+      setInteractionState((state) => ({
+        ...(state ?? { liked: false, favorited: false }),
+        coined: Math.min(2, (state?.coined ?? 0) + multiply),
+      }));
+      mutateVideoStats({ coin: videoInfo.stat.coin + multiply });
+      showActionNotice(result.message || "投币成功", coinActionRectRef.current);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setInteractionLoading(false);
+    }
+  };
+
+  const handleToggleFavorite = async (target?: HTMLElement) => {
+    if (!videoInfo || interactionLoading) return;
+    favoriteActionRectRef.current = target?.getBoundingClientRect() ?? null;
+    if (!interactionState?.favorited) {
+      await handleOpenFavoriteDialog();
+      return;
+    }
+
+    setInteractionLoading(true);
+    try {
+      const folders = await invoke<VideoFavoriteFolder[]>("get_video_favorite_folders", {
+        aid: videoInfo.aid,
+      });
+      const selectedIds = folders.filter((folder) => folder.favorited).map((folder) => folder.id);
+      if (selectedIds.length === 0) {
+        setInteractionState((state) => ({ ...(state ?? { liked: false, coined: 0 }), favorited: false }));
+        showActionNotice("已取消收藏", favoriteActionRectRef.current);
+        return;
+      }
+      const result = await invoke<VideoActionResult>("set_video_favorite", {
+        aid: videoInfo.aid,
+        addMediaIds: [],
+        delMediaIds: selectedIds,
+      });
+      setFavoriteSelection(new Set());
+      setFavoriteInitialSelection(new Set());
+      setInteractionState((state) => ({ ...(state ?? { liked: false, coined: 0 }), favorited: false }));
+      mutateVideoStats({ favorite: Math.max(0, videoInfo.stat.favorite - 1) });
+      showActionNotice(result.message || "已取消收藏", favoriteActionRectRef.current);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setInteractionLoading(false);
+    }
+  };
+
+  const handleOpenFavoriteDialog = async () => {
+    if (!videoInfo) return;
+    setFavoriteDialogOpen(true);
+    setFavoriteFoldersLoading(true);
+    try {
+      const folders = await invoke<VideoFavoriteFolder[]>("get_video_favorite_folders", {
+        aid: videoInfo.aid,
+      });
+      const selected = new Set(folders.filter((folder) => folder.favorited).map((folder) => folder.id));
+      setFavoriteFolders(folders);
+      setFavoriteSelection(selected);
+      setFavoriteInitialSelection(new Set(selected));
+    } catch (err) {
+      setError(String(err));
+      setFavoriteFolders([]);
+      setFavoriteSelection(new Set());
+      setFavoriteInitialSelection(new Set());
+    } finally {
+      setFavoriteFoldersLoading(false);
+    }
+  };
+
+  const handleConfirmFavorite = async () => {
+    if (!videoInfo || interactionLoading) return;
+    const addMediaIds = [...favoriteSelection].filter((id) => !favoriteInitialSelection.has(id));
+    const delMediaIds = [...favoriteInitialSelection].filter((id) => !favoriteSelection.has(id));
+    setInteractionLoading(true);
+    try {
+      await invoke<VideoActionResult>("set_video_favorite", {
+        aid: videoInfo.aid,
+        addMediaIds,
+        delMediaIds,
+      });
+      const nextFavorited = favoriteSelection.size > 0;
+      const wasFavorited = interactionState?.favorited ?? favoriteInitialSelection.size > 0;
+      setInteractionState((state) => ({ ...(state ?? { liked: false, coined: 0 }), favorited: nextFavorited }));
+      if (nextFavorited !== wasFavorited) {
+        mutateVideoStats({ favorite: Math.max(0, videoInfo.stat.favorite + (nextFavorited ? 1 : -1)) });
+      }
+      setFavoriteDialogOpen(false);
+      showActionNotice(nextFavorited ? "收藏成功" : "已取消收藏", favoriteActionRectRef.current);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setInteractionLoading(false);
+    }
+  };
+
+  const handleShareVideo = async () => {
+    if (!browserUrl) return;
+    try {
+      await copyText(browserUrl);
+      showNotice("复制链接成功");
+    } catch (err) {
+      setError(String(err));
+    }
+  };
 
   const handleEpisodeChange = async (episode: EpisodeOption) => {
     setSelectedEpisode(episode);
@@ -598,7 +831,7 @@ export function PlayerView() {
             <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
               通用播放页
             </h1>
-            <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "4px" }}>{currentTitle}</p>
+            <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "4px" }}>{currentEpisodeTitle}</p>
           </div>
         </div>
 
@@ -791,9 +1024,23 @@ export function PlayerView() {
             ) : null}
           </div>
 
+          {videoInfo ? (
+            <VideoActionBar
+              stat={videoInfo.stat}
+              liked={Boolean(interactionState?.liked)}
+              coined={Boolean(interactionState?.coined)}
+              favorited={Boolean(interactionState?.favorited)}
+              disabled={interactionLoading}
+              onLike={(target) => void handleLikeVideo(target)}
+              onCoin={(target) => void handleCoinVideo(target)}
+              onFavorite={(target) => void handleToggleFavorite(target)}
+              onShare={() => void handleShareVideo()}
+            />
+          ) : null}
+
           <div style={{ padding: "18px 20px" }}>
             <h2 style={{ fontSize: "17px", fontWeight: 700, color: "#1a1a2e", marginBottom: "8px" }}>
-              {selectedEpisode?.title || currentTitle}
+              {currentTitle}
             </h2>
             <p style={{ fontSize: "13.5px", color: "#6b7280", lineHeight: 1.7 }}>
               {videoInfo?.description || bangumiInfo?.evaluate || "暂无简介"}
@@ -889,6 +1136,49 @@ export function PlayerView() {
           </div>
         </aside>
       </div>
+      <CommentsSection oid={commentOid} typeId={commentType} />
+      {actionNotice ? (
+        <motion.div
+          key={actionNotice.id}
+          initial={{ opacity: 0, y: -8, scale: 0.96 }}
+          animate={{ opacity: 1, y: -42, scale: 1 }}
+          exit={{ opacity: 0, y: -56, scale: 0.98 }}
+          transition={{ duration: 0.24, ease: "easeOut" }}
+          style={{
+            ...actionNoticeStyle,
+            left: actionNotice.left,
+            top: actionNotice.top,
+          }}
+        >
+          {actionNotice.message}
+        </motion.div>
+      ) : null}
+      {favoriteDialogOpen ? (
+        <FavoriteDialog
+          folders={favoriteFolders}
+          selectedIds={favoriteSelection}
+          loading={favoriteFoldersLoading || interactionLoading}
+          onToggle={(id) =>
+            setFavoriteSelection((selected) => {
+              const next = new Set(selected);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            })
+          }
+          onCancel={() => setFavoriteDialogOpen(false)}
+          onConfirm={() => void handleConfirmFavorite()}
+        />
+      ) : null}
+      {coinDialogOpen ? (
+        <CoinDialog
+          open={coinDialogOpen}
+          currentCoined={interactionState?.coined ?? 0}
+          onSelect={(multiply) => void handleConfirmCoin(multiply)}
+          onCancel={() => setCoinDialogOpen(false)}
+          disabled={interactionLoading}
+        />
+      ) : null}
       {downloadQualityDialog}
     </div>
   );
@@ -967,6 +1257,344 @@ function PlayerIconButton({
   );
 }
 
+function VideoActionBar({
+  stat,
+  liked,
+  coined,
+  favorited,
+  disabled,
+  onLike,
+  onCoin,
+  onFavorite,
+  onShare,
+}: {
+  stat: VideoInfo["stat"];
+  liked: boolean;
+  coined: boolean;
+  favorited: boolean;
+  disabled: boolean;
+  onLike: (target: HTMLButtonElement) => void;
+  onCoin: (target: HTMLButtonElement) => void;
+  onFavorite: (target: HTMLButtonElement) => void;
+  onShare: (target: HTMLButtonElement) => void;
+}) {
+  return (
+    <div style={videoActionBarStyle}>
+      <VideoActionButton
+        title={liked ? "取消点赞" : "点赞"}
+        active={liked}
+        disabled={disabled}
+        icon={<ThumbsUp fill={liked ? "currentColor" : "none"} />}
+        count={stat.like}
+        onClick={onLike}
+      />
+      <VideoActionButton
+        title="投币"
+        active={coined}
+        disabled={disabled}
+        icon={<BiliCoinIcon />}
+        count={stat.coin}
+        onClick={onCoin}
+      />
+      <VideoActionButton
+        title="收藏"
+        active={favorited}
+        disabled={disabled}
+        icon={<Star fill={favorited ? "currentColor" : "none"} />}
+        count={stat.favorite}
+        onClick={onFavorite}
+      />
+      <VideoActionButton
+        title="复制链接"
+        active={false}
+        disabled={disabled}
+        icon={<Share2 fill="currentColor" />}
+        count={stat.share}
+        onClick={onShare}
+      />
+    </div>
+  );
+}
+
+function VideoActionButton({
+  title,
+  active,
+  disabled,
+  icon,
+  count,
+  onClick,
+}: {
+  title: string;
+  active: boolean;
+  disabled: boolean;
+  icon: React.ReactElement<{ style?: React.CSSProperties; size?: number }>;
+  count: number;
+  onClick: (target: HTMLButtonElement) => void;
+}) {
+  const color = active ? "#2ea9f7" : "#666a73";
+  const iconSize = 26;
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      disabled={disabled}
+      onClick={(event) => onClick(event.currentTarget)}
+      style={{
+        ...videoActionButtonStyle,
+        color,
+        cursor: disabled ? "wait" : "pointer",
+        opacity: disabled ? 0.62 : 1,
+      }}
+    >
+      {cloneElement(icon, { size: iconSize, style: { width: iconSize, height: iconSize, flexShrink: 0 } })}
+      <span>{formatNumber(count)}</span>
+    </button>
+  );
+}
+
+function BiliCoinIcon({ size = 26, style }: { size?: number; style?: React.CSSProperties }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" style={style}>
+      <circle cx="32" cy="32" r="24" fill="currentColor" />
+      <line x1="22.8" y1="20.2" x2="41.2" y2="20.2" stroke="#fff" strokeWidth="3.7" strokeLinecap="round" />
+      <line x1="32" y1="20.2" x2="32" y2="48.4" stroke="#fff" strokeWidth="3.7" strokeLinecap="round" />
+      <path
+        d="M19.4 40.8 C19.4 32.9 23.35 26.6 32 26.6 C40.65 26.6 44.6 32.9 44.6 40.8"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="3.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function FavoriteDialog({
+  folders,
+  selectedIds,
+  loading,
+  onToggle,
+  onCancel,
+  onConfirm,
+}: {
+  folders: VideoFavoriteFolder[];
+  selectedIds: Set<number>;
+  loading: boolean;
+  onToggle: (id: number) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div style={dialogBackdropStyle} onClick={onCancel}>
+      <div style={favoriteDialogStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "14px" }}>
+          <h3 style={{ fontSize: "17px", fontWeight: 850, color: "#1a1a2e" }}>选择收藏夹</h3>
+          <button type="button" title="关闭" onClick={onCancel} style={dialogIconButtonStyle}>
+            <X style={{ width: 18, height: 18 }} />
+          </button>
+        </div>
+
+        {loading && folders.length === 0 ? (
+          <div style={{ height: "130px", display: "grid", placeItems: "center", color: "#2ea9f7" }}>
+            <Loader2 className="animate-spin" style={{ width: 24, height: 24 }} />
+          </div>
+        ) : folders.length === 0 ? (
+          <div style={{ color: "#8b8b9a", fontSize: "14px", padding: "22px 0" }}>没有可用收藏夹</div>
+        ) : (
+          <div style={{ display: "grid", gap: "8px", maxHeight: "360px", overflowY: "auto", paddingRight: "4px" }}>
+            {folders.map((folder) => {
+              const selected = selectedIds.has(folder.id);
+              return (
+                <button
+                  key={folder.id}
+                  type="button"
+                  onClick={() => onToggle(folder.id)}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "22px minmax(0, 1fr) auto",
+                    alignItems: "center",
+                    gap: "10px",
+                    padding: "11px 12px",
+                    borderRadius: "10px",
+                    border: selected ? "1.5px solid #2ea9f7" : "1px solid #ececf2",
+                    backgroundColor: selected ? "#eff9ff" : "#fff",
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <span style={{ ...favoriteCheckboxStyle, backgroundColor: selected ? "#2ea9f7" : "#fff", borderColor: selected ? "#2ea9f7" : "#d7d7e2" }}>
+                    {selected ? <Check style={{ width: 14, height: 14, color: "#fff" }} /> : null}
+                  </span>
+                  <span style={{ minWidth: 0, color: "#242432", fontSize: "14px", fontWeight: 750, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {folder.title}
+                  </span>
+                  <span style={{ color: "#8b8b9a", fontSize: "12.5px", fontWeight: 700 }}>{formatNumber(folder.media_count)}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+          <button type="button" onClick={onCancel} style={dialogSecondaryButtonStyle}>取消</button>
+          <button type="button" disabled={loading} onClick={onConfirm} style={{ ...dialogPrimaryButtonStyle, opacity: loading ? 0.65 : 1 }}>
+            {loading ? "保存中..." : "确认"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const COIN_SPRITE_FRAME_COUNT = 24;
+const COIN_SPRITE_FRAME_WIDTH = 102;
+const COIN_SPRITE_FRAME_HEIGHT = 150;
+const COIN_SPRITE_DURATION_MS = 1440;
+
+function CoinSprite({
+  src,
+  active,
+  resetKey,
+}: {
+  src: string;
+  active: boolean;
+  resetKey: number;
+}) {
+  return (
+    <div
+      key={`${src}-${resetKey}`}
+      style={{
+        width: `${COIN_SPRITE_FRAME_WIDTH}px`,
+        height: `${COIN_SPRITE_FRAME_HEIGHT}px`,
+        backgroundImage: `url(${src})`,
+        backgroundSize: `${COIN_SPRITE_FRAME_WIDTH * COIN_SPRITE_FRAME_COUNT}px ${COIN_SPRITE_FRAME_HEIGHT}px`,
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "0 0",
+        animation: active
+          ? `coinGirlPlay ${COIN_SPRITE_DURATION_MS}ms steps(${COIN_SPRITE_FRAME_COUNT}) infinite`
+          : "none",
+      }}
+    />
+  );
+}
+
+function CoinDialog({
+  open,
+  currentCoined,
+  onSelect,
+  onCancel,
+  disabled,
+}: {
+  open: boolean;
+  currentCoined: number;
+  onSelect: (multiply: number) => void;
+  onCancel: () => void;
+  disabled: boolean;
+}) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [animVersion, setAnimVersion] = useState(0);
+
+  if (!open) return null;
+
+  const maxMultiply = 2 - currentCoined;
+
+  const handleClickOption = (multiply: number) => {
+    if (disabled || multiply > maxMultiply) return;
+    setAnimVersion((v) => v + 1);
+    setSelected(multiply);
+  };
+
+  const handleConfirm = () => {
+    if (selected === null || disabled) return;
+    onSelect(selected);
+  };
+
+  const isAnimating = (multiply: number) => selected === multiply;
+
+  return (
+    <div style={dialogBackdropStyle} onClick={onCancel}>
+      <div style={coinDialogStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "14px" }}>
+          <h3 style={{ fontSize: "17px", fontWeight: 850, color: "#1a1a2e" }}>投币</h3>
+          <button type="button" title="关闭" onClick={onCancel} style={dialogIconButtonStyle}>
+            <X style={{ width: 18, height: 18 }} />
+          </button>
+        </div>
+
+        <div style={{ display: "flex", gap: "16px", justifyContent: "center", padding: "10px 0 12px" }}>
+          {/* 投1个币 */}
+          <button
+            type="button"
+            disabled={disabled || maxMultiply < 1}
+            onMouseEnter={() => setHovered(1)}
+            onMouseLeave={() => setHovered(null)}
+            onClick={() => handleClickOption(1)}
+            style={{
+              ...coinOptionStyle,
+              opacity: maxMultiply < 1 ? 0.5 : 1,
+              cursor: maxMultiply < 1 || disabled ? "not-allowed" : "pointer",
+              border: selected === 1 ? "2px solid #2ea9f7" : hovered === 1 ? "2px solid #2ea9f7" : "1px solid #ececf2",
+              backgroundColor: selected === 1 ? "#eff9ff" : hovered === 1 ? "#f0f8ff" : "#fff",
+            }}
+          >
+            <CoinSprite src={coin22Img} active={isAnimating(1)} resetKey={animVersion} />
+            <span style={{ fontSize: "13px", fontWeight: 600, color: "#242432" }}>投1个币</span>
+          </button>
+
+          {/* 投2个币 */}
+          <button
+            type="button"
+            disabled={disabled || maxMultiply < 2}
+            onMouseEnter={() => setHovered(2)}
+            onMouseLeave={() => setHovered(null)}
+            onClick={() => handleClickOption(2)}
+            style={{
+              ...coinOptionStyle,
+              opacity: maxMultiply < 2 ? 0.5 : 1,
+              cursor: maxMultiply < 2 || disabled ? "not-allowed" : "pointer",
+              border: selected === 2 ? "2px solid #2ea9f7" : hovered === 2 ? "2px solid #2ea9f7" : "1px solid #ececf2",
+              backgroundColor: selected === 2 ? "#eff9ff" : hovered === 2 ? "#f0f8ff" : "#fff",
+            }}
+          >
+            <CoinSprite src={coin33Img} active={isAnimating(2)} resetKey={animVersion} />
+            <span style={{ fontSize: "13px", fontWeight: 600, color: "#242432" }}>投2个币</span>
+          </button>
+        </div>
+
+        {maxMultiply === 1 && (
+          <div style={{ textAlign: "center", color: "#8b8b9a", fontSize: "12px", marginBottom: "6px" }}>
+            已投1枚，最多再投1枚
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "center", marginTop: "8px" }}>
+          <button
+            type="button"
+            disabled={selected === null || disabled}
+            onClick={handleConfirm}
+            style={{
+              ...dialogPrimaryButtonStyle,
+              opacity: selected === null || disabled ? 0.5 : 1,
+              cursor: selected === null || disabled ? "not-allowed" : "pointer",
+            }}
+          >
+            {disabled ? "处理中..." : "确认投币"}
+          </button>
+        </div>
+      </div>
+      <style>{`
+        @keyframes coinGirlPlay {
+          from { background-position: 0 0; }
+          to { background-position: -${COIN_SPRITE_FRAME_WIDTH * COIN_SPRITE_FRAME_COUNT}px 0; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 function buildDashManifest(playback: DashPlaybackInfo) {
   const duration = Math.max(playback.duration_seconds || 0, 0.001);
   const minBufferTime = Math.max(playback.min_buffer_time || 1.5, 0.1);
@@ -1019,11 +1647,131 @@ function formatPlaybackTime(seconds: number) {
     : `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  document.body.removeChild(input);
+}
+
 const panelStyle: React.CSSProperties = {
   borderRadius: "16px",
   backgroundColor: "#fff",
   border: "1px solid #ececf2",
   padding: "16px",
+};
+
+const videoActionBarStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  alignItems: "center",
+  gap: 0,
+  padding: "12px 0 4px",
+};
+
+const videoActionButtonStyle: React.CSSProperties = {
+  width: "100%",
+  height: "38px",
+  border: "none",
+  backgroundColor: "transparent",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "8px",
+  fontSize: "16px",
+  fontWeight: 700,
+  padding: 0,
+};
+
+const actionNoticeStyle: React.CSSProperties = {
+  position: "fixed",
+  zIndex: 6200,
+  translate: "-50% 0",
+  pointerEvents: "none",
+  padding: "7px 12px",
+  borderRadius: "999px",
+  backgroundColor: "rgba(46, 169, 247, 0.96)",
+  color: "#fff",
+  fontSize: "13px",
+  fontWeight: 800,
+  boxShadow: "0 10px 26px rgba(46, 169, 247, 0.28)",
+  whiteSpace: "nowrap",
+};
+
+const dialogBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 5000,
+  backgroundColor: "rgba(15, 23, 42, 0.38)",
+  display: "grid",
+  placeItems: "center",
+  padding: "24px",
+};
+
+const favoriteDialogStyle: React.CSSProperties = {
+  width: "min(460px, 100%)",
+  maxHeight: "min(620px, calc(100vh - 64px))",
+  overflow: "hidden",
+  borderRadius: "16px",
+  border: "1px solid #ececf2",
+  backgroundColor: "#fff",
+  boxShadow: "0 24px 60px rgba(15, 23, 42, 0.22)",
+  padding: "18px",
+};
+
+const dialogIconButtonStyle: React.CSSProperties = {
+  width: "32px",
+  height: "32px",
+  border: "1px solid #ececf2",
+  borderRadius: "8px",
+  backgroundColor: "#fff",
+  color: "#666a73",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+};
+
+const favoriteCheckboxStyle: React.CSSProperties = {
+  width: "20px",
+  height: "20px",
+  borderRadius: "6px",
+  border: "1px solid #d7d7e2",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+const dialogSecondaryButtonStyle: React.CSSProperties = {
+  height: "36px",
+  padding: "0 16px",
+  borderRadius: "9px",
+  border: "1px solid #e2e2ea",
+  backgroundColor: "#fff",
+  color: "#505065",
+  fontSize: "13.5px",
+  fontWeight: 750,
+  cursor: "pointer",
+};
+
+const dialogPrimaryButtonStyle: React.CSSProperties = {
+  height: "36px",
+  padding: "0 18px",
+  borderRadius: "9px",
+  border: "1px solid #2ea9f7",
+  backgroundColor: "#2ea9f7",
+  color: "#fff",
+  fontSize: "13.5px",
+  fontWeight: 800,
+  cursor: "pointer",
 };
 
 const errorStyle: React.CSSProperties = {
@@ -1150,5 +1898,26 @@ const episodeActionButtonStyle: React.CSSProperties = {
   gap: "5px",
   fontSize: "12px",
   fontWeight: 600,
+  cursor: "pointer",
+};
+
+const coinDialogStyle: React.CSSProperties = {
+  width: "min(400px, 100%)",
+  borderRadius: "16px",
+  border: "1px solid #ececf2",
+  backgroundColor: "#fff",
+  boxShadow: "0 24px 60px rgba(15, 23, 42, 0.22)",
+  padding: "18px",
+};
+
+const coinOptionStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: "10px",
+  padding: "12px 14px",
+  borderRadius: "12px",
+  backgroundColor: "#fff",
+  border: "1px solid #ececf2",
   cursor: "pointer",
 };

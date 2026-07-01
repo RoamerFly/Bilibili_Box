@@ -84,13 +84,23 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 
 ![Search Preview](./docs/screenshots/search.png)
 
-### 推荐视频
+### 推荐/关注动态
 
 ![Recommend Preview](./docs/screenshots/recommend.png)
 
-### 我的收藏
+![Dynamic Preview](./docs/screenshots/dynamic.png))
+
+### 我的点赞/收藏
 
 ![Favorites Preview](./docs/screenshots/favorites.png)
+
+![Collects Preview](./docs/screenshots/collects.png)
+
+### 稍后再看
+
+![Toplay Preview](./docs/screenshots/toplay.png)
+
+
 
 ### 播放页面
 
