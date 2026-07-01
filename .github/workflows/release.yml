@@ -497,13 +497,7 @@ jobs:
             exit 1
           fi
           key_path="$RUNNER_TEMP/tauri-updater-private.key"
-          decoded_key="$RUNNER_TEMP/tauri-updater-private.decoded"
-          if printf '%s' "$key" | base64 --decode > "$decoded_key" 2>/dev/null && grep -Eq '(^untrusted comment:|PRIVATE KEY)' "$decoded_key"; then
-            mv "$decoded_key" "$key_path"
-          else
-            rm -f "$decoded_key"
-            printf '%s' "$key" > "$key_path"
-          fi
+          printf '%s' "$key" > "$key_path"
           chmod 600 "$key_path"
           echo "TAURI_SIGNING_PRIVATE_KEY_PATH=$key_path" >> "$GITHUB_ENV"
           echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_VALUE" >> "$GITHUB_ENV"
