@@ -13,6 +13,7 @@ import {
   UserCircle,
   RefreshCw,
   Globe2,
+  Users,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { QRCodeSVG } from "qrcode.react";
@@ -51,6 +52,19 @@ type BackendUserInfo = {
   uname: string;
   face: string;
   mid: number;
+};
+
+type SavedAccountProfile = {
+  profile: string;
+  username: string;
+  mid: number;
+  face: string;
+  active: boolean;
+};
+
+type AccountSwitchResult = {
+  config: BackendConfig;
+  user_info: BackendUserInfo | null;
 };
 
 function isBackendUserLoggedIn(userInfo: { isLogin?: boolean; is_login?: boolean }): boolean {
@@ -102,11 +116,16 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
   const [polling, setPolling] = useState(false);
   const [cookieInput, setCookieInput] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
+  const [accounts, setAccounts] = useState<SavedAccountProfile[]>([]);
+  const [accountListOpen, setAccountListOpen] = useState(false);
+  const [switchingProfile, setSwitchingProfile] = useState("");
 
   const config = useAppStore((s) => s.config);
   const userInfo = useAppStore((s) => s.userInfo);
   const setConfig = useAppStore((s) => s.setConfig);
   const setUserInfo = useAppStore((s) => s.setUserInfo);
+  const resetSearchPageState = useAppStore((s) => s.resetSearchPageState);
+  const resetRecommendPageState = useAppStore((s) => s.resetRecommendPageState);
   const isLoggedIn = userInfo !== null;
   const username = userInfo?.username || "";
 
@@ -289,6 +308,44 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
     }
   };
 
+  const handleToggleAccountList = async () => {
+    if (accountListOpen) {
+      setAccountListOpen(false);
+      return;
+    }
+    setError("");
+    try {
+      const savedAccounts = await invoke<SavedAccountProfile[]>("list_saved_accounts");
+      setAccounts(savedAccounts);
+      setAccountListOpen(true);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const handleSwitchAccount = async (profile: string) => {
+    setSwitchingProfile(profile);
+    setError("");
+    try {
+      const result = await invoke<AccountSwitchResult>("switch_account_profile", { profile });
+      setConfig(result.config);
+      setUserInfo(result.user_info ? {
+        username: result.user_info.uname,
+        avatar: result.user_info.face,
+        loginTime: "--",
+        deviceName: "Windows 桌面端",
+      } : null);
+      resetSearchPageState();
+      resetRecommendPageState();
+      setAccountListOpen(false);
+      window.dispatchEvent(new CustomEvent("bilibili-box:account-switched"));
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSwitchingProfile("");
+    }
+  };
+
   return (
     <AnimatePresence>
       {open && (
@@ -308,8 +365,13 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
               username={username}
               userInfo={userInfo}
               loggingOut={loggingOut}
+              accounts={accounts}
+              accountListOpen={accountListOpen}
+              switchingProfile={switchingProfile}
               onClose={onClose}
               onLogout={handleLogout}
+              onToggleAccountList={() => void handleToggleAccountList()}
+              onSwitchAccount={(profile) => void handleSwitchAccount(profile)}
             />
           ) : (
             <LoginForm
@@ -341,11 +403,27 @@ interface LoggedInPanelProps {
   username: string;
   userInfo: { username: string; loginTime?: string; deviceName?: string } | null;
   loggingOut: boolean;
+  accounts: SavedAccountProfile[];
+  accountListOpen: boolean;
+  switchingProfile: string;
   onClose: () => void;
   onLogout: () => void;
+  onToggleAccountList: () => void;
+  onSwitchAccount: (profile: string) => void;
 }
 
-function LoggedInPanel({ username, userInfo, loggingOut, onClose, onLogout }: LoggedInPanelProps) {
+function LoggedInPanel({
+  username,
+  userInfo,
+  loggingOut,
+  accounts,
+  accountListOpen,
+  switchingProfile,
+  onClose,
+  onLogout,
+  onToggleAccountList,
+  onSwitchAccount,
+}: LoggedInPanelProps) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.96, y: 16 }}
@@ -479,6 +557,69 @@ function LoggedInPanel({ username, userInfo, loggingOut, onClose, onLogout }: Lo
 
       {/* ═══ 退出登录按钮 ═══ */}
       <div style={{ padding: "4px 28px 18px" }}>
+        <motion.button
+          type="button"
+          onClick={onToggleAccountList}
+          disabled={loggingOut || Boolean(switchingProfile)}
+          whileHover={!loggingOut && !switchingProfile ? { backgroundColor: "#f7f7ff", borderColor: "#a5b4fc" } : {}}
+          whileTap={!loggingOut && !switchingProfile ? { scale: 0.985 } : {}}
+          className="cursor-pointer w-full"
+          style={{
+            height: "42px",
+            borderRadius: "11px",
+            border: "1.5px solid #d8d8e4",
+            background: "#ffffff",
+            color: "#505065",
+            fontSize: "14px",
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "8px",
+            transition: "all 0.15s",
+            marginBottom: "10px",
+          }}
+        >
+          <Users className="w-[15px] h-[15px]" />
+          切换账号
+        </motion.button>
+        {accountListOpen ? (
+          <div style={{ display: "grid", gap: "8px", marginBottom: "12px" }}>
+            {accounts.length ? accounts.map((account) => (
+              <button
+                key={account.profile}
+                type="button"
+                disabled={account.active || Boolean(switchingProfile)}
+                onClick={() => onSwitchAccount(account.profile)}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "32px minmax(0, 1fr) auto",
+                  alignItems: "center",
+                  gap: "9px",
+                  padding: "9px 10px",
+                  borderRadius: "10px",
+                  border: account.active ? "1.5px solid #6366f1" : "1px solid #ececf2",
+                  background: account.active ? "#f5f3ff" : "#fff",
+                  cursor: account.active || switchingProfile ? "default" : "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <img src={account.face} alt={account.username} referrerPolicy="no-referrer" style={{ width: 32, height: 32, borderRadius: "50%", objectFit: "cover", background: "#eef2ff" }} />
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: "block", color: "#1a1a2e", fontSize: "13px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</span>
+                  <span style={{ color: "#8b8b9a", fontSize: "11.5px" }}>UID {account.mid}</span>
+                </span>
+                <span style={{ color: account.active ? "#6366f1" : "#505065", fontSize: "12px", fontWeight: 800 }}>
+                  {account.active ? "当前" : switchingProfile === account.profile ? "切换中" : "切换"}
+                </span>
+              </button>
+            )) : (
+              <div style={{ color: "#8b8b9a", fontSize: "12.5px", textAlign: "center", padding: "4px 0 10px" }}>
+                暂无可切换的已保存账号
+              </div>
+            )}
+          </div>
+        ) : null}
         <motion.button
           type="button"
           onClick={onLogout}

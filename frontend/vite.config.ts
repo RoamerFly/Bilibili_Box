@@ -37,11 +37,15 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_DEBUG,
     cssCodeSplit: false,
     modulePreload: false,
+    chunkSizeWarningLimit: 1100,
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes("node_modules/dashjs") || id.includes("node_modules/@svta/")) {
+          if (id.includes("node_modules/dashjs")) {
             return "player-dash";
+          }
+          if (id.includes("node_modules/@svta/")) {
+            return "player-media-tooling";
           }
           return id.includes("node_modules") ? "vendor" : undefined;
         },

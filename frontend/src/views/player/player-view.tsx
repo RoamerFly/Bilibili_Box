@@ -30,6 +30,7 @@ import { openExternalUrl } from "@/lib/open-external";
 import type { BangumiInfo, VideoActionResult, VideoFavoriteFolder, VideoInfo, VideoInteractionState } from "@/lib/types";
 import { formatBiliImageUrl, formatDuration, formatNumber } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
+import { ClickableAvatar } from "@/components/video-card";
 import coin22Img from "@/assets/22-coin-ani.png";
 import coin33Img from "@/assets/33-coin-ani.png";
 interface EpisodeOption {
@@ -98,6 +99,8 @@ const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 export function PlayerView() {
   const playerState = useAppStore((s) => s.playerState);
   const closePlayer = useAppStore((s) => s.closePlayer);
+  const openUpProfile = useAppStore((s) => s.openUpProfile);
+  const showComments = useAppStore((s) => s.config?.show_comments !== false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [playUrl, setPlayUrl] = useState("");
@@ -869,6 +872,11 @@ export function PlayerView() {
         }}
       >
         <div style={panelStyle}>
+          <div style={{ padding: "0 0 14px" }}>
+            <h2 style={{ fontSize: "17px", fontWeight: 700, color: "#1a1a2e", lineHeight: 1.45 }}>
+              {currentTitle}
+            </h2>
+          </div>
           <div
             ref={playerContainerRef}
             onMouseMove={revealControls}
@@ -879,6 +887,8 @@ export function PlayerView() {
               aspectRatio: isFullscreen ? undefined : "16 / 9",
               backgroundColor: "#0f172a",
               position: "relative",
+              borderRadius: "12px",
+              overflow: "hidden",
             }}
           >
             {loading ? (
@@ -1039,9 +1049,6 @@ export function PlayerView() {
           ) : null}
 
           <div style={{ padding: "18px 20px" }}>
-            <h2 style={{ fontSize: "17px", fontWeight: 700, color: "#1a1a2e", marginBottom: "8px" }}>
-              {currentTitle}
-            </h2>
             <p style={{ fontSize: "13.5px", color: "#6b7280", lineHeight: 1.7 }}>
               {videoInfo?.description || bangumiInfo?.evaluate || "暂无简介"}
             </p>
@@ -1050,6 +1057,28 @@ export function PlayerView() {
 
         <aside style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div style={panelStyle}>
+            {videoInfo?.owner ? (
+              <div style={upHeaderButtonStyle}>
+                <ClickableAvatar
+                  src={videoInfo.owner.face}
+                  alt={videoInfo.owner.name}
+                  size={38}
+                  onClick={() => openUpProfile({ mid: videoInfo.owner.mid, name: videoInfo.owner.name, face: videoInfo.owner.face })}
+                />
+                <button
+                  type="button"
+                  onClick={() => openUpProfile({ mid: videoInfo.owner.mid, name: videoInfo.owner.name, face: videoInfo.owner.face })}
+                  style={upHeaderTextButtonStyle}
+                >
+                  <span style={{ display: "block", color: "#1a1a2e", fontSize: "14px", fontWeight: 850, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {videoInfo.owner.name}
+                  </span>
+                  <span style={{ display: "block", marginTop: "2px", color: "#8b8b9a", fontSize: "12px" }}>
+                    UP 主
+                  </span>
+                </button>
+              </div>
+            ) : null}
             <div
               style={{
                 width: "100%",
@@ -1136,7 +1165,7 @@ export function PlayerView() {
           </div>
         </aside>
       </div>
-      <CommentsSection oid={commentOid} typeId={commentType} />
+      {showComments ? <CommentsSection oid={commentOid} typeId={commentType} /> : null}
       {actionNotice ? (
         <motion.div
           key={actionNotice.id}
@@ -1667,6 +1696,26 @@ const panelStyle: React.CSSProperties = {
   backgroundColor: "#fff",
   border: "1px solid #ececf2",
   padding: "16px",
+};
+
+const upHeaderButtonStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "38px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: "10px",
+  padding: "0 0 14px",
+  marginBottom: "14px",
+  borderBottom: "1px solid #f1f1f5",
+};
+
+const upHeaderTextButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  border: "none",
+  background: "transparent",
+  padding: 0,
+  cursor: "pointer",
+  textAlign: "left",
+  fontFamily: "inherit",
 };
 
 const videoActionBarStyle: React.CSSProperties = {

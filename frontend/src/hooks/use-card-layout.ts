@@ -1,4 +1,4 @@
-import { useAppStore } from "@/stores/app-store";
+import { useAppStore, type CardLayoutKey, type CardViewMode } from "@/stores/app-store";
 
 export const DEFAULT_CARD_ROWS = 3;
 export const DEFAULT_CARD_COLUMNS = 2;
@@ -33,14 +33,20 @@ function inferLegacyGrid(pageSize: number) {
   return { rows, columns };
 }
 
-export function getCardLayout(config: CardLayoutSource | null | undefined) {
+export function getCardLayout(
+  config: CardLayoutSource | null | undefined,
+  pageLayout?: { rows?: number; columns?: number },
+  viewMode: CardViewMode = "grid",
+  pageScale?: number
+) {
   const legacyPageSize = readInt(config?.card_page_size, DEFAULT_CARD_ROWS * DEFAULT_CARD_COLUMNS, 1, 64);
   const inferred = inferLegacyGrid(legacyPageSize);
-  const rows = readInt(config?.card_page_rows, inferred.rows, 1, 8);
-  const columns = readInt(config?.card_page_columns, inferred.columns, 1, 8);
-  const userCardScale = readFloat(config?.card_scale, 1, 0.7, 1.6);
+  const rows = readInt(pageLayout?.rows ?? config?.card_page_rows, inferred.rows, 1, 8);
+  const columns = readInt(pageLayout?.columns ?? config?.card_page_columns, inferred.columns, 1, 8);
+  const effectiveColumns = viewMode === "list" ? 1 : columns;
+  const userCardScale = readFloat(pageScale ?? config?.card_scale, 1, 0.7, 1.6);
   const densityScale = clamp(
-    Math.sqrt((DEFAULT_CARD_ROWS * DEFAULT_CARD_COLUMNS) / Math.max(1, rows * columns)),
+    Math.sqrt((DEFAULT_CARD_ROWS * DEFAULT_CARD_COLUMNS) / Math.max(1, rows * effectiveColumns)),
     0.6,
     1.45
   );
@@ -48,16 +54,19 @@ export function getCardLayout(config: CardLayoutSource | null | undefined) {
   return {
     rows,
     columns,
-    pageSize: rows * columns,
+    effectiveColumns,
+    pageSize: rows * effectiveColumns,
     userCardScale,
     densityScale,
     cardScale: userCardScale * densityScale,
   };
 }
 
-export function useCardLayout() {
+export function useCardLayout(key?: CardLayoutKey, viewMode: CardViewMode = "grid") {
   const config = useAppStore((s) => s.config);
-  return getCardLayout(config);
+  const pageLayout = useAppStore((s) => key ? s.cardLayouts[key] : undefined);
+  const pageScale = useAppStore((s) => key ? s.cardScales[key] : undefined);
+  return getCardLayout(config, pageLayout, viewMode, pageScale);
 }
 
 export function fixedCardGridColumns(columns: number) {

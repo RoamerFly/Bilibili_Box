@@ -1,15 +1,94 @@
-﻿import { ArrowLeft, ExternalLink, Image as ImageIcon, Link2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowLeft, ExternalLink, Image as ImageIcon, Link2, Loader2, Play } from "lucide-react";
 import { motion } from "framer-motion";
 import { useAppStore } from "@/stores/app-store";
 import { ClickableAvatar } from "@/components/video-card";
 import { CommentsSection } from "@/components/comments-section";
+import { invoke } from "@/lib/api";
 import { openExternalUrl } from "@/lib/open-external";
 import { formatBiliImageUrl, formatDateTime } from "@/lib/utils";
+
+interface LivePlayInfo {
+  room_id: number;
+  title: string;
+  url?: string | null;
+  cover: string;
+}
+
+interface ArticleDetailInfo {
+  id: number;
+  title: string;
+  summary: string;
+  content_text: string;
+  images: string[];
+  banner_url: string;
+  author_mid: number;
+  author_name: string;
+  author_face: string;
+}
 
 export function ContentDetailView() {
   const content = useAppStore((s) => s.contentDetailState);
   const closeContentDetail = useAppStore((s) => s.closeContentDetail);
   const openUpProfile = useAppStore((s) => s.openUpProfile);
+  const openPlayer = useAppStore((s) => s.openPlayer);
+  const showComments = useAppStore((s) => s.config?.show_comments !== false);
+  const [liveInfo, setLiveInfo] = useState<LivePlayInfo | null>(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState("");
+  const [articleInfo, setArticleInfo] = useState<ArticleDetailInfo | null>(null);
+  const [articleLoading, setArticleLoading] = useState(false);
+  const [articleError, setArticleError] = useState("");
+
+  useEffect(() => {
+    if (content?.kind !== "live" || !content.liveRoomId) {
+      setLiveInfo(null);
+      setLiveError("");
+      return;
+    }
+
+    let cancelled = false;
+    setLiveLoading(true);
+    setLiveError("");
+    invoke<LivePlayInfo>("get_live_play_info", { roomId: content.liveRoomId })
+      .then((info) => {
+        if (!cancelled) setLiveInfo(info);
+      })
+      .catch((error) => {
+        if (!cancelled) setLiveError(String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setLiveLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [content?.kind, content?.liveRoomId]);
+
+  useEffect(() => {
+    if (content?.kind !== "article" || !content.articleId) {
+      setArticleInfo(null);
+      setArticleError("");
+      return;
+    }
+
+    let cancelled = false;
+    setArticleLoading(true);
+    setArticleError("");
+    invoke<ArticleDetailInfo>("get_article_detail", { articleId: content.articleId })
+      .then((info) => {
+        if (!cancelled) setArticleInfo(info);
+      })
+      .catch((error) => {
+        if (!cancelled) setArticleError(String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setArticleLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [content?.articleId, content?.kind]);
 
   if (!content) {
     return (
@@ -23,7 +102,18 @@ export function ContentDetailView() {
     );
   }
 
-  const images = Array.from(new Set([...(content.images || []), content.cover || ""])).filter(Boolean);
+  const displayTitle = articleInfo?.title || content.title || getContentTypeLabel(content.kind);
+  const displayText = content.text;
+  const displayContentText = articleInfo?.content_text || articleInfo?.summary || content.contentText;
+  const displayAuthor = articleInfo?.author_mid ? {
+    mid: articleInfo.author_mid,
+    name: articleInfo.author_name || content.author?.name || "专栏作者",
+    face: articleInfo.author_face || content.author?.face || "",
+  } : content.author;
+  const displayCover = articleInfo?.banner_url || content.cover;
+  const images = content.kind === "live"
+    ? []
+    : Array.from(new Set([...(articleInfo?.images || []), ...(content.images || []), displayCover || ""])).filter(Boolean);
 
   return (
     <div style={{ width: "100%", minHeight: "100%", padding: "36px 44px 56px", backgroundColor: "#f5f5f7" }}>
@@ -45,45 +135,68 @@ export function ContentDetailView() {
       >
         <div style={{ display: "flex", justifyContent: "space-between", gap: "16px", alignItems: "flex-start", flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
-            {content.author ? (
+            {displayAuthor ? (
               <ClickableAvatar
-                src={content.author.face}
-                alt={content.author.name}
+                src={displayAuthor.face}
+                alt={displayAuthor.name}
                 size={36}
-                onClick={() => openUpProfile(content.author!)}
+                onClick={() => openUpProfile(displayAuthor)}
               />
             ) : null}
             <div style={{ minWidth: 0 }}>
               <div style={{ color: "#1a1a2e", fontSize: "14px", fontWeight: 800 }}>
-                {content.author?.name || "动态内容"}
+                {displayAuthor?.name || getContentFallbackAuthor(content.kind)}
               </div>
               <div style={{ marginTop: "3px", display: "flex", alignItems: "center", gap: "8px", color: "#8b8b9a", fontSize: "12.5px", flexWrap: "wrap" }}>
-                <span>{content.typeLabel || (content.kind === "image" ? "图文动态" : "动态")}</span>
+                <span>{content.typeLabel || getContentTypeLabel(content.kind)}</span>
                 {content.pubTs ? <span>{formatDateTime(content.pubTs)}</span> : null}
               </div>
             </div>
           </div>
-          {content.url ? (
-            <button
-              type="button"
-              onClick={() => void openExternalUrl(normalizeBiliUrl(content.url!))}
-              style={iconButtonStyle}
-              title="在浏览器打开"
-            >
-              <ExternalLink style={{ width: 16, height: 16 }} />
-              浏览器
-            </button>
-          ) : null}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {content.url ? (
+              <button
+                type="button"
+                onClick={() => void openExternalUrl(normalizeBiliUrl(content.url!))}
+                style={iconButtonStyle}
+                title="在浏览器打开"
+              >
+                <ExternalLink style={{ width: 16, height: 16 }} />
+                浏览器
+              </button>
+            ) : null}
+            {content.kind === "film" && content.seasonId ? (
+              <button
+                type="button"
+                onClick={() => openPlayer({ kind: "bangumi", seasonId: content.seasonId, title: displayTitle, cover: displayCover })}
+                style={{ ...iconButtonStyle, color: "#fff", backgroundColor: "#6366f1", borderColor: "#6366f1" }}
+                title="播放影视内容"
+              >
+                <Play style={{ width: 16, height: 16 }} />
+                播放
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <h1 style={{ marginTop: "22px", color: "#1a1a2e", fontSize: "24px", lineHeight: 1.35, fontWeight: 850 }}>
-          {content.title || (content.kind === "image" ? "图片动态" : "动态详情")}
+          {displayTitle}
         </h1>
 
-        {content.text || content.contentText ? (
+        {articleLoading ? (
+          <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "8px", color: "#6366f1", fontSize: "14px", fontWeight: 800 }}>
+            <Loader2 className="animate-spin" style={{ width: 17, height: 17 }} />
+            正在加载专栏正文
+          </div>
+        ) : null}
+        {articleError ? (
+          <div style={{ marginTop: "12px", color: "#dc2626", fontSize: "13px", fontWeight: 700 }}>{articleError}</div>
+        ) : null}
+
+        {displayText || displayContentText ? (
           <div style={{ marginTop: "14px", display: "grid", gap: "8px", color: "#3f3f52", fontSize: "15px", lineHeight: 1.75 }}>
-            {content.text ? <p style={{ whiteSpace: "pre-wrap" }}>动态简介: {content.text}</p> : null}
-            {content.contentText ? <p style={{ whiteSpace: "pre-wrap" }}>{content.contentText}</p> : null}
+            {displayText ? <p style={{ whiteSpace: "pre-wrap" }}>动态简介: {displayText}</p> : null}
+            {displayContentText ? <p style={{ whiteSpace: "pre-wrap" }}>{displayContentText}</p> : null}
           </div>
         ) : (
           <div style={{ marginTop: "16px", color: "#8b8b9a", fontSize: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
@@ -91,6 +204,10 @@ export function ContentDetailView() {
             这条内容没有文字说明
           </div>
         )}
+
+        {content.kind === "live" ? (
+          <LivePlayerBlock contentCover={displayCover} liveInfo={liveInfo} loading={liveLoading} error={liveError} />
+        ) : null}
 
         {images.length ? (
           <div
@@ -114,9 +231,54 @@ export function ContentDetailView() {
           </div>
         ) : null}
       </motion.article>
-      <CommentsSection oid={content.commentOid} typeId={content.commentType} />
+      {showComments && content.commentOid && content.commentType ? <CommentsSection oid={content.commentOid} typeId={content.commentType} /> : null}
     </div>
   );
+}
+
+function LivePlayerBlock({ contentCover, liveInfo, loading, error }: { contentCover?: string; liveInfo: LivePlayInfo | null; loading: boolean; error: string }) {
+  return (
+    <div style={{ marginTop: "22px", borderRadius: "14px", overflow: "hidden", backgroundColor: "#0f172a", border: "1px solid #1f2937" }}>
+      {loading ? (
+        <div style={{ height: "360px", display: "grid", placeItems: "center", color: "#fff" }}>
+          <Loader2 className="animate-spin" style={{ width: 30, height: 30 }} />
+        </div>
+      ) : liveInfo?.url ? (
+        <video
+          key={liveInfo.url}
+          src={liveInfo.url}
+          poster={formatBiliImageUrl(liveInfo.cover || contentCover || "", "@960w_540h_1c.webp")}
+          controls
+          autoPlay
+          playsInline
+          style={{ display: "block", width: "100%", maxHeight: "520px", backgroundColor: "#000" }}
+        />
+      ) : (
+        <div style={{ minHeight: "260px", display: "grid", placeItems: "center", color: "#e5e7eb", textAlign: "center", padding: "24px" }}>
+          <div>
+            <Play style={{ width: 34, height: 34, margin: "0 auto 10px" }} />
+            <div style={{ fontSize: "14px", fontWeight: 800 }}>{error || "暂时无法获取直播播放地址"}</div>
+            <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#9ca3af" }}>可以使用右上角浏览器按钮作为备用入口</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function getContentTypeLabel(kind: string) {
+  if (kind === "film") return "影视详情";
+  if (kind === "article") return "专栏详情";
+  if (kind === "live") return "直播播放";
+  if (kind === "image") return "图片动态";
+  return "动态详情";
+}
+
+function getContentFallbackAuthor(kind: string) {
+  if (kind === "film") return "影视内容";
+  if (kind === "article") return "专栏内容";
+  if (kind === "live") return "直播间";
+  return "动态内容";
 }
 
 function normalizeBiliUrl(url: string) {

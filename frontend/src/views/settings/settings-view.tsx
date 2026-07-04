@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Cookie,
+  Database,
+  Eye,
   FolderOpen,
   Loader2,
   Maximize2,
@@ -10,14 +12,16 @@ import {
   Palette,
   RefreshCw,
   RotateCcw,
-  Rows3,
   Sun,
+  Trash2,
+  Users,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { DOWNLOAD_QUALITY_OPTIONS } from "@/components/download-quality-dialog";
+import { LoginDialog } from "@/components/login-dialog";
 import { invoke } from "@/lib/api";
 import { showComingSoon } from "@/lib/coming-soon";
-import { useAppStore } from "@/stores/app-store";
+import { CARD_LAYOUT_KEYS, DEFAULT_CARD_LAYOUT, DEFAULT_CARD_SCALE, useAppStore, type CardLayoutKey } from "@/stores/app-store";
 
 type ThemeMode = "light" | "dark" | "system";
 
@@ -33,6 +37,7 @@ interface BackendConfig {
   theme: string;
   download_quality: string;
   prompt_download_quality: boolean;
+  show_comments: boolean;
   task_concurrency: number;
   [key: string]: unknown;
 }
@@ -51,15 +56,98 @@ interface UpdateCheckResult {
   } | null;
 }
 
+interface CacheBucketInfo {
+  label: string;
+  path: string;
+  file_count: number;
+  total_bytes: number;
+}
+
+interface CacheOverview {
+  page_cache: CacheBucketInfo;
+  download_cache: CacheBucketInfo;
+}
+
+interface SavedAccountProfile {
+  profile: string;
+  username: string;
+  mid: number;
+  face: string;
+  active: boolean;
+}
+
+interface AccountSwitchResult {
+  config: BackendConfig;
+  user_info: {
+    uname: string;
+    face: string;
+    isLogin?: boolean;
+    is_login?: boolean;
+  } | null;
+}
+
+const PAGE_REFRESH_STEPS = [
+  "首页",
+  "搜索视频",
+  "推荐/关注动态",
+  "我的点赞/收藏",
+  "稍后再看",
+  "观看历史",
+  "追番追剧",
+  "下载列表",
+  "设置",
+];
+
+const CARD_PAGE_LABELS: Record<CardLayoutKey, string> = {
+  search: "搜索视频",
+  recommend: "首页推荐",
+  dynamic: "关注动态",
+  favorites: "我的点赞/收藏",
+  watchlater: "稍后再看",
+  history: "观看历史",
+  bangumi: "追番追剧",
+  up: "UP 主页",
+};
+
+const PREVIEW_ITEMS = [
+  { title: "测试视频标题 A", author: "示例 UP 主", note: "12.8万播放 · 2小时前" },
+  { title: "动态更新内容 B", author: "关注作者", note: "图片动态 · 评论 36" },
+  { title: "收藏夹作品 C", author: "收藏夹来源", note: "已收藏 · 08:24" },
+  { title: "观看历史 D", author: "历史记录", note: "看到 62%" },
+  { title: "番剧剧集 E", author: "追番追剧", note: "第 03 话" },
+  { title: "UP 投稿 F", author: "UP 主页", note: "昨日更新" },
+];
+
 export function SettingsView() {
   const userInfo = useAppStore((s) => s.userInfo);
   const setConfig = useAppStore((s) => s.setConfig);
   const setUserInfo = useAppStore((s) => s.setUserInfo);
+  const resetSearchPageState = useAppStore((s) => s.resetSearchPageState);
+  const resetRecommendPageState = useAppStore((s) => s.resetRecommendPageState);
+  const cardLayouts = useAppStore((s) => s.cardLayouts);
+  const cardScales = useAppStore((s) => s.cardScales);
+  const setCardLayout = useAppStore((s) => s.setCardLayout);
+  const setCardScale = useAppStore((s) => s.setCardScale);
+  const setAllCardLayouts = useAppStore((s) => s.setAllCardLayouts);
+  const setAllCardScales = useAppStore((s) => s.setAllCardScales);
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
+  const [cacheStepIndex, setCacheStepIndex] = useState(-1);
+  const [cacheOverview, setCacheOverview] = useState<CacheOverview | null>(null);
+  const [cacheDialogOpen, setCacheDialogOpen] = useState(false);
+  const [cardSettingsOpen, setCardSettingsOpen] = useState(false);
+  const [accounts, setAccounts] = useState<SavedAccountProfile[]>([]);
+  const [accountDialogOpen, setAccountDialogOpen] = useState(false);
+  const [addAccountDialogOpen, setAddAccountDialogOpen] = useState(false);
+  const [accountSwitching, setAccountSwitching] = useState("");
   const [feedback, setFeedback] = useState("");
   const [backendConfig, setBackendConfig] = useState<BackendConfig | null>(null);
+  const [unifiedCardLayoutDraft, setUnifiedCardLayoutDraft] = useState<{ rows: number; columns: number }>({
+    rows: DEFAULT_CARD_LAYOUT.rows,
+    columns: DEFAULT_CARD_LAYOUT.columns,
+  });
 
   const loadConfig = useCallback(async () => {
     setLoading(true);
@@ -88,20 +176,52 @@ export function SettingsView() {
   );
 
   const isLoggedIn = useMemo(() => userInfo !== null, [userInfo]);
-  const cardPageRows = Math.max(1, Math.min(8, Math.round(backendConfig?.card_page_rows ?? 3)));
-  const cardPageColumns = Math.max(1, Math.min(8, Math.round(backendConfig?.card_page_columns ?? 2)));
-  const saveCardGrid = useCallback(
-    async (rows: number, columns: number) => {
-      const nextRows = Math.max(1, Math.min(8, Math.round(rows)));
-      const nextColumns = Math.max(1, Math.min(8, Math.round(columns)));
-      await saveConfig({
-        card_page_rows: nextRows,
-        card_page_columns: nextColumns,
-        card_page_size: nextRows * nextColumns,
-      });
-    },
-    [saveConfig]
+  const normalizedCardLayouts = useMemo(
+    () =>
+      CARD_LAYOUT_KEYS.map((key) => {
+        const layout = cardLayouts[key] ?? DEFAULT_CARD_LAYOUT;
+        return {
+          key,
+          rows: Math.max(1, Math.min(8, Math.round(layout.rows || DEFAULT_CARD_LAYOUT.rows))),
+          columns: Math.max(1, Math.min(8, Math.round(layout.columns || DEFAULT_CARD_LAYOUT.columns))),
+        };
+      }),
+    [cardLayouts]
   );
+  const unifiedCardLayout = useMemo(() => {
+    const first = normalizedCardLayouts[0] ?? DEFAULT_CARD_LAYOUT;
+    const isUniform = normalizedCardLayouts.every((layout) => layout.rows === first.rows && layout.columns === first.columns);
+    return {
+      isUniform,
+      rows: first.rows,
+      columns: first.columns,
+      label: isUniform ? `${first.rows} 行 x ${first.columns} 列` : "自定义",
+    };
+  }, [normalizedCardLayouts]);
+  const normalizedCardScales = useMemo(
+    () =>
+      CARD_LAYOUT_KEYS.map((key) => ({
+        key,
+        scale: Math.max(0.7, Math.min(1.6, Number(cardScales[key] ?? backendConfig?.card_scale ?? DEFAULT_CARD_SCALE))),
+      })),
+    [backendConfig?.card_scale, cardScales]
+  );
+  const unifiedCardScale = useMemo(() => {
+    const first = normalizedCardScales[0]?.scale ?? DEFAULT_CARD_SCALE;
+    const isUniform = normalizedCardScales.every((item) => Math.abs(item.scale - first) < 0.001);
+    return {
+      isUniform,
+      scale: first,
+      label: isUniform ? `${Math.round(first * 100)}%` : "自定义",
+    };
+  }, [normalizedCardScales]);
+
+  useEffect(() => {
+    if (unifiedCardLayout.isUniform) {
+      setUnifiedCardLayoutDraft({ rows: unifiedCardLayout.rows, columns: unifiedCardLayout.columns });
+    }
+  }, [unifiedCardLayout.columns, unifiedCardLayout.isUniform, unifiedCardLayout.rows]);
+  const feedbackIsError = feedback.includes("失败") || feedback.includes("错误");
 
   const handleLogout = async () => {
     const currentConfig = await invoke<BackendConfig>("get_config");
@@ -166,6 +286,80 @@ export function SettingsView() {
     }
   };
 
+  const handleViewCache = async () => {
+    setFeedback("");
+    try {
+      const overview = await invoke<CacheOverview>("get_cache_overview");
+      setCacheOverview(overview);
+      setCacheDialogOpen(true);
+    } catch (err) {
+      setFeedback(`查看缓存失败：${String(err)}`);
+    }
+  };
+
+  const handleClearCacheAndRefreshPages = async () => {
+    setClearingCache(true);
+    setCacheStepIndex(0);
+    setFeedback("");
+    try {
+      const overview = await invoke<CacheOverview>("clear_page_cache");
+      setCacheOverview(overview);
+      resetSearchPageState();
+      resetRecommendPageState();
+      window.dispatchEvent(new CustomEvent("bilibili-box:page-cache-cleared"));
+      for (let index = 0; index < PAGE_REFRESH_STEPS.length; index += 1) {
+        setCacheStepIndex(index);
+        await new Promise((resolve) => window.setTimeout(resolve, 180));
+      }
+      setFeedback("已清空页面缓存，更新所有页面成功");
+    } catch (err) {
+      setFeedback(`清空页面缓存失败：${String(err)}`);
+    } finally {
+      setClearingCache(false);
+      setCacheStepIndex(-1);
+    }
+  };
+
+  const loadAccounts = useCallback(async () => {
+    const savedAccounts = await invoke<SavedAccountProfile[]>("list_saved_accounts");
+    setAccounts(savedAccounts);
+  }, []);
+
+  const handleOpenAccountSwitcher = async () => {
+    setFeedback("");
+    try {
+      await loadAccounts();
+      setAccountDialogOpen(true);
+    } catch (err) {
+      setFeedback(`读取账号列表失败：${String(err)}`);
+    }
+  };
+
+  const handleSwitchAccount = async (profile: string) => {
+    setAccountSwitching(profile);
+    setFeedback("");
+    try {
+      const result = await invoke<AccountSwitchResult>("switch_account_profile", { profile });
+      setBackendConfig(result.config);
+      setConfig(result.config);
+      setUserInfo(result.user_info ? {
+        username: result.user_info.uname,
+        avatar: result.user_info.face || "",
+        loginTime: "--",
+        deviceName: "Windows 桌面端",
+      } : null);
+      resetSearchPageState();
+      resetRecommendPageState();
+      setAccountDialogOpen(false);
+      window.dispatchEvent(new CustomEvent("bilibili-box:account-switched"));
+      setFeedback(`已切换到账号：${result.user_info?.uname || profile}`);
+    } catch (err) {
+      setFeedback(`切换账号失败：${String(err)}`);
+    } finally {
+      setAccountSwitching("");
+    }
+  };
+
   if (loading || !backendConfig) {
     return (
       <div
@@ -203,18 +397,36 @@ export function SettingsView() {
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
             <button
               type="button"
-              disabled={checkingUpdate || resetting}
+              disabled={clearingCache}
+              onClick={() => void handleViewCache()}
+              style={{ ...secondaryButtonStyle, opacity: clearingCache ? 0.65 : 1 }}
+            >
+              <Database style={{ width: 15, height: 15, marginRight: "6px" }} />
+              查看缓存
+            </button>
+            <button
+              type="button"
+              disabled={clearingCache || checkingUpdate || resetting}
+              onClick={() => void handleClearCacheAndRefreshPages()}
+              style={{ ...secondaryButtonStyle, opacity: clearingCache || checkingUpdate || resetting ? 0.65 : 1 }}
+            >
+              {clearingCache ? <Loader2 className="animate-spin" style={{ width: 15, height: 15, marginRight: "6px" }} /> : <Trash2 style={{ width: 15, height: 15, marginRight: "6px" }} />}
+              清空页面缓存并更新所有页面
+            </button>
+            <button
+              type="button"
+              disabled={checkingUpdate || resetting || clearingCache}
               onClick={() => void handleCheckUpdate()}
-              style={{ ...secondaryButtonStyle, opacity: checkingUpdate || resetting ? 0.65 : 1 }}
+              style={{ ...secondaryButtonStyle, opacity: checkingUpdate || resetting || clearingCache ? 0.65 : 1 }}
             >
               <RefreshCw className={checkingUpdate ? "animate-spin" : undefined} style={{ width: 15, height: 15, marginRight: "6px" }} />
               {checkingUpdate ? "检查中" : "检查更新"}
             </button>
             <button
               type="button"
-              disabled={resetting || checkingUpdate}
+              disabled={resetting || checkingUpdate || clearingCache}
               onClick={() => void handleResetConfig()}
-              style={{ ...secondaryButtonStyle, opacity: resetting || checkingUpdate ? 0.65 : 1 }}
+              style={{ ...secondaryButtonStyle, opacity: resetting || checkingUpdate || clearingCache ? 0.65 : 1 }}
             >
               <RotateCcw style={{ width: 15, height: 15, marginRight: "6px" }} />
               {resetting ? "恢复中" : "恢复默认"}
@@ -229,8 +441,8 @@ export function SettingsView() {
             marginBottom: "16px",
             padding: "11px 16px",
             borderRadius: "10px",
-            backgroundColor: feedback.includes("失败") ? "#fef2f2" : "#f0fdf4",
-            color: feedback.includes("失败") ? "#dc2626" : "#15803d",
+            backgroundColor: feedbackIsError ? "#fef2f2" : "#f0fdf4",
+            color: feedbackIsError ? "#dc2626" : "#15803d",
             fontSize: "13.5px",
           }}
         >
@@ -275,6 +487,12 @@ export function SettingsView() {
                 <span style={{ fontSize: "13px", color: "#8b8b9a" }}>未登录</span>
               )}
               {isLoggedIn ? (
+                <button onClick={() => void handleOpenAccountSwitcher()} style={secondaryButtonStyle}>
+                  <Users style={{ width: 15, height: 15, marginRight: "6px" }} />
+                  切换账号
+                </button>
+              ) : null}
+              {isLoggedIn ? (
                 <button onClick={() => void handleLogout()} style={secondaryButtonStyle}>
                   退出登录
                 </button>
@@ -292,6 +510,19 @@ export function SettingsView() {
             <ThemeSelector
               value={(backendConfig.theme as ThemeMode) || "system"}
               onChange={() => showComingSoon()}
+            />
+          }
+        />
+
+        <SettingRow
+          icon={<Eye style={{ width: 21, height: 21, color: "#2563eb" }} />}
+          iconBgColor="#eff6ff"
+          title="是否显示评论区"
+          description="控制视频播放页和动态详情页底部评论区容器的显示"
+          control={
+            <ToggleSwitch
+              checked={backendConfig.show_comments !== false}
+              onChange={(checked) => void saveConfig({ show_comments: checked })}
             />
           }
         />
@@ -375,85 +606,30 @@ export function SettingsView() {
         />
 
         <SettingRow
-          icon={<Rows3 style={{ width: 21, height: 21, color: "#0f766e" }} />}
+          icon={<Monitor style={{ width: 21, height: 21, color: "#0f766e" }} />}
           iconBgColor="#ecfeff"
-          title="数据卡片大小"
-          description="拖动滑块后，卡片的图片、间距和字体会一起缩放"
+          title="卡片设置"
+          description="统一或分别配置各页面的卡片行列数与卡片大小，并可实时预览效果。"
           control={
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: "300px" }}>
-              <span style={{ fontSize: "12px", color: "#8b8b9a", width: "28px", textAlign: "right" }}>
-                小
-              </span>
-              <input
-                type="range"
-                min={0.7}
-                max={1.6}
-                step={0.05}
-                value={backendConfig.card_scale ?? 1}
-                onChange={(e) => {
-                  const nextScale = Number(e.target.value);
-                  setBackendConfig((prev) => (prev ? { ...prev, card_scale: nextScale } : prev));
-                }}
-                onMouseUp={(e) => void saveConfig({ card_scale: Number((e.target as HTMLInputElement).value) })}
-                onTouchEnd={(e) => {
-                  const target = e.target as HTMLInputElement;
-                  void saveConfig({ card_scale: Number(target.value) });
-                }}
-                style={{ width: "180px" }}
-              />
-              <span style={{ fontSize: "12px", color: "#8b8b9a", width: "28px" }}>大</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
               <span
                 style={{
-                  minWidth: "52px",
-                  textAlign: "center",
+                  minWidth: "116px",
+                  padding: "8px 10px",
+                  borderRadius: "9px",
+                  backgroundColor: unifiedCardLayout.isUniform && unifiedCardScale.isUniform ? "#f0fdf4" : "#fff7ed",
+                  color: unifiedCardLayout.isUniform && unifiedCardScale.isUniform ? "#15803d" : "#c2410c",
                   fontSize: "13px",
-                  fontWeight: 700,
-                  color: "#1a1a2e",
-                  fontVariantNumeric: "tabular-nums",
-                }}
-              >
-                {Math.round((backendConfig.card_scale ?? 1) * 100)}%
-              </span>
-            </div>
-          }
-        />
-
-        <SettingRow
-          icon={<Rows3 style={{ width: 21, height: 21, color: "#0891b2" }} />}
-          iconBgColor="#ecfeff"
-          title="每页卡片行列数"
-          description="设置每页卡片的行数和列数，卡片会随网格密度自动缩放"
-          control={
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-              <StepperField
-                label="行"
-                value={cardPageRows}
-                min={1}
-                max={8}
-                onChange={(value) => void saveCardGrid(value, cardPageColumns)}
-              />
-              <StepperField
-                label="列"
-                value={cardPageColumns}
-                min={1}
-                max={8}
-                onChange={(value) => void saveCardGrid(cardPageRows, value)}
-              />
-              <span
-                style={{
-                  minWidth: "76px",
+                  fontWeight: 800,
                   textAlign: "center",
-                  padding: "9px 12px",
-                  borderRadius: "10px",
-                  backgroundColor: "#f7f7fb",
-                  color: "#505065",
-                  fontSize: "13px",
-                  fontWeight: 700,
                   whiteSpace: "nowrap",
                 }}
               >
-                {cardPageRows * cardPageColumns} 张/页
+                {unifiedCardLayout.label} · {unifiedCardScale.label}
               </span>
+              <button type="button" onClick={() => setCardSettingsOpen(true)} style={secondaryButtonStyle}>
+                打开设置
+              </button>
             </div>
           }
         />
@@ -474,6 +650,57 @@ export function SettingsView() {
           isLast
         />
       </motion.div>
+      {cacheDialogOpen ? (
+        <CacheDialog
+          overview={cacheOverview}
+          onClose={() => setCacheDialogOpen(false)}
+        />
+      ) : null}
+      {cardSettingsOpen ? (
+        <CardSettingsDialog
+          backendConfig={backendConfig}
+          cardLayouts={cardLayouts}
+          cardScales={cardScales}
+          unifiedLayout={unifiedCardLayout}
+          unifiedScale={unifiedCardScale}
+          unifiedLayoutDraft={unifiedCardLayoutDraft}
+          onUnifiedLayoutDraftChange={setUnifiedCardLayoutDraft}
+          onSetCardLayout={setCardLayout}
+          onSetCardScale={setCardScale}
+          onSetAllCardLayouts={async (layout) => {
+            setAllCardLayouts(layout);
+            await saveConfig({
+              card_page_rows: layout.rows,
+              card_page_columns: layout.columns,
+              card_page_size: layout.rows * layout.columns,
+            });
+            setFeedback(`已统一卡片行列数为 ${layout.rows} 行 x ${layout.columns} 列`);
+          }}
+          onSetAllCardScales={async (scale) => {
+            setAllCardScales(scale);
+            await saveConfig({ card_scale: scale });
+            setFeedback(`已统一卡片大小为 ${Math.round(scale * 100)}%`);
+          }}
+          onClose={() => setCardSettingsOpen(false)}
+        />
+      ) : null}
+      {accountDialogOpen ? (
+        <AccountSwitcherDialog
+          accounts={accounts}
+          switchingProfile={accountSwitching}
+          onAddAccount={() => setAddAccountDialogOpen(true)}
+          onSwitch={(profile) => void handleSwitchAccount(profile)}
+          onClose={() => setAccountDialogOpen(false)}
+        />
+      ) : null}
+      <LoginDialog
+        open={addAccountDialogOpen}
+        onClose={() => {
+          setAddAccountDialogOpen(false);
+          void loadAccounts();
+        }}
+      />
+      {clearingCache ? <CacheRefreshOverlay activeIndex={cacheStepIndex} /> : null}
     </div>
   );
 }
@@ -528,6 +755,383 @@ function SettingRow({
       <div style={{ flexShrink: 0 }}>{control}</div>
     </div>
   );
+}
+
+function CardSettingsDialog({
+  backendConfig,
+  cardLayouts,
+  cardScales,
+  unifiedLayout,
+  unifiedScale,
+  unifiedLayoutDraft,
+  onUnifiedLayoutDraftChange,
+  onSetCardLayout,
+  onSetCardScale,
+  onSetAllCardLayouts,
+  onSetAllCardScales,
+  onClose,
+}: {
+  backendConfig: BackendConfig | null;
+  cardLayouts: Partial<Record<CardLayoutKey, { rows: number; columns: number }>>;
+  cardScales: Partial<Record<CardLayoutKey, number>>;
+  unifiedLayout: { isUniform: boolean; rows: number; columns: number; label: string };
+  unifiedScale: { isUniform: boolean; scale: number; label: string };
+  unifiedLayoutDraft: { rows: number; columns: number };
+  onUnifiedLayoutDraftChange: React.Dispatch<React.SetStateAction<{ rows: number; columns: number }>>;
+  onSetCardLayout: (key: CardLayoutKey, layout: Partial<{ rows: number; columns: number }>) => void;
+  onSetCardScale: (key: CardLayoutKey, scale: number) => void;
+  onSetAllCardLayouts: (layout: { rows: number; columns: number }) => Promise<void>;
+  onSetAllCardScales: (scale: number) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [activeKey, setActiveKey] = useState<CardLayoutKey>("search");
+  const [unifiedScaleDraft, setUnifiedScaleDraft] = useState(unifiedScale.scale || DEFAULT_CARD_SCALE);
+  const activeLayout = cardLayouts[activeKey] ?? DEFAULT_CARD_LAYOUT;
+  const activeScale = Math.max(0.7, Math.min(1.6, Number(cardScales[activeKey] ?? backendConfig?.card_scale ?? DEFAULT_CARD_SCALE)));
+  const rows = Math.max(1, Math.min(8, Math.round(activeLayout.rows || DEFAULT_CARD_LAYOUT.rows)));
+  const columns = Math.max(1, Math.min(8, Math.round(activeLayout.columns || DEFAULT_CARD_LAYOUT.columns)));
+  const pageSize = rows * columns;
+  const previewItems = PREVIEW_ITEMS.slice(0, Math.min(pageSize, PREVIEW_ITEMS.length));
+
+  useEffect(() => {
+    if (unifiedScale.isUniform) {
+      setUnifiedScaleDraft(unifiedScale.scale);
+    }
+  }, [unifiedScale.isUniform, unifiedScale.scale]);
+
+  const applyUnifiedLayout = async () => {
+    const nextLayout = {
+      rows: Math.max(1, Math.min(8, Math.round(unifiedLayoutDraft.rows || DEFAULT_CARD_LAYOUT.rows))),
+      columns: Math.max(1, Math.min(8, Math.round(unifiedLayoutDraft.columns || DEFAULT_CARD_LAYOUT.columns))),
+    };
+    await onSetAllCardLayouts(nextLayout);
+  };
+
+  const applyUnifiedScale = async () => {
+    const nextScale = Math.max(0.7, Math.min(1.6, Number(unifiedScaleDraft) || DEFAULT_CARD_SCALE));
+    await onSetAllCardScales(nextScale);
+  };
+
+  return (
+    <div style={dialogBackdropStyle} onClick={onClose}>
+      <div style={{ ...dialogPanelStyle, width: "min(980px, 100%)" }} onClick={(event) => event.stopPropagation()}>
+        <div style={dialogHeaderStyle}>
+          <div>
+            <h2 style={dialogTitleStyle}>卡片设置</h2>
+            <p style={{ marginTop: "4px", color: "#8b8b9a", fontSize: "13px" }}>
+              分页面调整行列数和卡片大小，也可以一键统一所有页面。
+            </p>
+          </div>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>关闭</button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.1fr) minmax(280px, 0.9fr)", gap: "16px", alignItems: "start" }}>
+          <div style={{ display: "grid", gap: "12px" }}>
+            <div style={{ padding: "14px", borderRadius: "13px", border: "1px solid #ececf2", backgroundColor: "#fafafe" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+                <div>
+                  <strong style={{ color: "#1a1a2e", fontSize: "14px" }}>统一行列数</strong>
+                  <div style={{ color: unifiedLayout.isUniform ? "#15803d" : "#c2410c", fontSize: "12.5px", marginTop: "3px", fontWeight: 700 }}>
+                    当前：{unifiedLayout.label}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                  <StepperField
+                    label="行"
+                    value={unifiedLayoutDraft.rows}
+                    min={1}
+                    max={8}
+                    onChange={(rows) => onUnifiedLayoutDraftChange((previous) => ({ ...previous, rows }))}
+                  />
+                  <StepperField
+                    label="列"
+                    value={unifiedLayoutDraft.columns}
+                    min={1}
+                    max={8}
+                    onChange={(columns) => onUnifiedLayoutDraftChange((previous) => ({ ...previous, columns }))}
+                  />
+                  <button type="button" onClick={() => void applyUnifiedLayout()} style={secondaryButtonStyle}>一键统一</button>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ padding: "14px", borderRadius: "13px", border: "1px solid #ececf2", backgroundColor: "#fafafe" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+                <div>
+                  <strong style={{ color: "#1a1a2e", fontSize: "14px" }}>统一卡片大小</strong>
+                  <div style={{ color: unifiedScale.isUniform ? "#15803d" : "#c2410c", fontSize: "12.5px", marginTop: "3px", fontWeight: 700 }}>
+                    当前：{unifiedScale.label}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                  <ScaleSlider value={unifiedScaleDraft} onChange={setUnifiedScaleDraft} />
+                  <button type="button" onClick={() => void applyUnifiedScale()} style={secondaryButtonStyle}>一键统一</button>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gap: "10px" }}>
+              {CARD_LAYOUT_KEYS.map((key) => {
+                const layout = cardLayouts[key] ?? DEFAULT_CARD_LAYOUT;
+                const safeRows = Math.max(1, Math.min(8, Math.round(layout.rows || DEFAULT_CARD_LAYOUT.rows)));
+                const safeColumns = Math.max(1, Math.min(8, Math.round(layout.columns || DEFAULT_CARD_LAYOUT.columns)));
+                const safeScale = Math.max(0.7, Math.min(1.6, Number(cardScales[key] ?? backendConfig?.card_scale ?? DEFAULT_CARD_SCALE)));
+                const active = key === activeKey;
+                return (
+                  <div
+                    key={key}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setActiveKey(key)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setActiveKey(key);
+                      }
+                    }}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "118px minmax(0, 1fr)",
+                      gap: "12px",
+                      alignItems: "center",
+                      padding: "12px",
+                      borderRadius: "13px",
+                      border: active ? "1.5px solid #6366f1" : "1px solid #ececf2",
+                      backgroundColor: active ? "#f5f3ff" : "#fff",
+                      textAlign: "left",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span>
+                      <strong style={{ display: "block", color: "#1a1a2e", fontSize: "13.5px" }}>{CARD_PAGE_LABELS[key]}</strong>
+                      <span style={{ color: "#8b8b9a", fontSize: "12px" }}>{safeRows} 行 x {safeColumns} 列 · {Math.round(safeScale * 100)}%</span>
+                    </span>
+                    <span style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      <StepperField label="行" value={safeRows} min={1} max={8} onChange={(rows) => onSetCardLayout(key, { rows })} />
+                      <StepperField label="列" value={safeColumns} min={1} max={8} onChange={(columns) => onSetCardLayout(key, { columns })} />
+                      <ScaleSlider value={safeScale} onChange={(scale) => onSetCardScale(key, scale)} compact />
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ position: "sticky", top: 0, padding: "14px", borderRadius: "14px", border: "1px solid #ececf2", backgroundColor: "#fff", boxShadow: "0 10px 28px rgba(15,23,42,0.06)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "12px" }}>
+              <div>
+                <strong style={{ color: "#1a1a2e", fontSize: "14px" }}>{CARD_PAGE_LABELS[activeKey]}预览</strong>
+                <div style={{ color: "#8b8b9a", fontSize: "12.5px", marginTop: "3px" }}>
+                  {rows} 行 x {columns} 列，每页 {pageSize} 张，大小 {Math.round(activeScale * 100)}%
+                </div>
+              </div>
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                gap: `${10 * activeScale}px`,
+                padding: "12px",
+                borderRadius: "13px",
+                backgroundColor: "#f5f5f7",
+              }}
+            >
+              {previewItems.map((item, index) => (
+                <div
+                  key={`${item.title}-${index}`}
+                  style={{
+                    borderRadius: `${10 * activeScale}px`,
+                    overflow: "hidden",
+                    border: "1px solid #e8e8ef",
+                    backgroundColor: "#fff",
+                    minWidth: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      height: `${72 * activeScale}px`,
+                      background: `linear-gradient(135deg, ${index % 2 ? "#dbeafe" : "#fce7f3"}, ${index % 2 ? "#f5f3ff" : "#e0f2fe"})`,
+                    }}
+                  />
+                  <div style={{ padding: `${8 * activeScale}px`, display: "grid", gap: `${5 * activeScale}px` }}>
+                    <strong style={{ color: "#1a1a2e", fontSize: `${12.5 * activeScale}px`, lineHeight: 1.35, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {item.title}
+                    </strong>
+                    <span style={{ color: "#6366f1", fontSize: `${11.5 * activeScale}px`, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.author}</span>
+                    <span style={{ color: "#8b8b9a", fontSize: `${11 * activeScale}px`, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.note}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CacheDialog({ overview, onClose }: { overview: CacheOverview | null; onClose: () => void }) {
+  return (
+    <div style={dialogBackdropStyle} onClick={onClose}>
+      <div style={dialogPanelStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={dialogHeaderStyle}>
+          <h2 style={dialogTitleStyle}>缓存情况</h2>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>关闭</button>
+        </div>
+        {overview ? (
+          <div style={{ display: "grid", gap: "12px" }}>
+            <CacheBucketCard bucket={overview.page_cache} />
+            <CacheBucketCard bucket={overview.download_cache} />
+          </div>
+        ) : (
+          <div style={{ color: "#8b8b9a", fontSize: "14px" }}>暂无缓存数据</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CacheBucketCard({ bucket }: { bucket: CacheBucketInfo }) {
+  return (
+    <div style={{ padding: "14px 16px", borderRadius: "12px", border: "1px solid #ececf2", backgroundColor: "#fafafe" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
+        <strong style={{ color: "#1a1a2e", fontSize: "15px" }}>{bucket.label}</strong>
+        <span style={{ color: "#6366f1", fontWeight: 800, fontSize: "13px" }}>{formatBytes(bucket.total_bytes)}</span>
+      </div>
+      <div style={{ marginTop: "8px", color: "#6b7280", fontSize: "13px", lineHeight: 1.65 }}>
+        <div>文件数：{bucket.file_count}</div>
+        <div style={{ wordBreak: "break-all" }}>目录：{bucket.path}</div>
+      </div>
+    </div>
+  );
+}
+
+function AccountSwitcherDialog({
+  accounts,
+  switchingProfile,
+  onAddAccount,
+  onSwitch,
+  onClose,
+}: {
+  accounts: SavedAccountProfile[];
+  switchingProfile: string;
+  onAddAccount: () => void;
+  onSwitch: (profile: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div style={dialogBackdropStyle} onClick={onClose}>
+      <div style={dialogPanelStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={dialogHeaderStyle}>
+          <h2 style={dialogTitleStyle}>切换账号</h2>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>关闭</button>
+        </div>
+        <button
+          type="button"
+          onClick={onAddAccount}
+          style={{
+            ...secondaryButtonStyle,
+            width: "100%",
+            marginBottom: "12px",
+            borderStyle: "dashed",
+            color: "#6366f1",
+            fontWeight: 800,
+          }}
+        >
+          添加账号
+        </button>
+        {accounts.length ? (
+          <div style={{ display: "grid", gap: "10px" }}>
+            {accounts.map((account) => (
+              <button
+                key={account.profile}
+                type="button"
+                disabled={account.active || Boolean(switchingProfile)}
+                onClick={() => onSwitch(account.profile)}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "42px minmax(0, 1fr) auto",
+                  alignItems: "center",
+                  gap: "12px",
+                  padding: "12px",
+                  borderRadius: "12px",
+                  border: account.active ? "1.5px solid #6366f1" : "1px solid #ececf2",
+                  backgroundColor: account.active ? "#f5f3ff" : "#fff",
+                  cursor: account.active || switchingProfile ? "default" : "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <img
+                  src={account.face}
+                  alt={account.username}
+                  referrerPolicy="no-referrer"
+                  style={{ width: 42, height: 42, borderRadius: "50%", objectFit: "cover", backgroundColor: "#eef2ff" }}
+                />
+                <span style={{ minWidth: 0 }}>
+                  <strong style={{ display: "block", color: "#1a1a2e", fontSize: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</strong>
+                  <span style={{ color: "#8b8b9a", fontSize: "12.5px" }}>UID {account.mid}</span>
+                </span>
+                <span style={{ color: account.active ? "#6366f1" : "#505065", fontSize: "13px", fontWeight: 800 }}>
+                  {account.active ? "当前账号" : switchingProfile === account.profile ? "切换中" : "切换"}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div style={{ color: "#8b8b9a", fontSize: "14px", padding: "10px 0" }}>暂无可切换的已保存账号</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CacheRefreshOverlay({ activeIndex }: { activeIndex: number }) {
+  return (
+    <div style={{ ...dialogBackdropStyle, cursor: "wait" }}>
+      <div style={{ ...dialogPanelStyle, maxWidth: "460px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
+          <Loader2 className="animate-spin" style={{ width: 24, height: 24, color: "#6366f1" }} />
+          <div>
+            <h2 style={dialogTitleStyle}>正在更新所有页面</h2>
+            <p style={{ color: "#8b8b9a", fontSize: "13px", marginTop: "3px" }}>请等待当前操作完成</p>
+          </div>
+        </div>
+        <div style={{ display: "grid", gap: "8px" }}>
+          {PAGE_REFRESH_STEPS.map((step, index) => (
+            <div
+              key={step}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "9px 12px",
+                borderRadius: "10px",
+                backgroundColor: index === activeIndex ? "#f0efff" : index < activeIndex ? "#f0fdf4" : "#f7f7fb",
+                color: index === activeIndex ? "#6366f1" : index < activeIndex ? "#15803d" : "#6b7280",
+                fontSize: "13.5px",
+                fontWeight: 700,
+              }}
+            >
+              <span>{step}</span>
+              {index === activeIndex ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : index < activeIndex ? "已更新" : "等待中"}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 function ThemeSelector({
@@ -727,6 +1331,54 @@ function StepperField({
   );
 }
 
+function ScaleSlider({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  compact?: boolean;
+}) {
+  const safeValue = Math.max(0.7, Math.min(1.6, Number(value) || DEFAULT_CARD_SCALE));
+  const progress = ((safeValue - 0.7) / 0.9) * 100;
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", minWidth: compact ? "170px" : "230px" }}>
+      <span style={{ fontSize: "13px", fontWeight: 700, color: "#6f6f82", whiteSpace: "nowrap" }}>大小</span>
+      <input
+        aria-label="卡片大小"
+        type="range"
+        min={0.7}
+        max={1.6}
+        step={0.05}
+        value={safeValue}
+        onChange={(event) => onChange(Number(event.target.value))}
+        style={{
+          width: compact ? "92px" : "140px",
+          height: 5,
+          borderRadius: 999,
+          accentColor: "#6366f1",
+          outline: "none",
+          cursor: "pointer",
+          background: `linear-gradient(90deg, #6366f1 ${progress}%, #e5e7eb ${progress}%)`,
+        }}
+      />
+      <span
+        style={{
+          minWidth: "42px",
+          textAlign: "right",
+          fontSize: "13px",
+          fontWeight: 800,
+          color: "#1a1a2e",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {Math.round(safeValue * 100)}%
+      </span>
+    </div>
+  );
+}
+
 const selectStyle: React.CSSProperties = {
   minWidth: "180px",
   padding: "9px 12px",
@@ -750,6 +1402,44 @@ const secondaryButtonStyle: React.CSSProperties = {
   border: "1.5px solid #e2e2ea",
   cursor: "pointer",
   whiteSpace: "nowrap",
+};
+
+const dialogBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 1000,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "24px",
+  backgroundColor: "rgba(15,23,42,0.28)",
+  backdropFilter: "blur(3px)",
+};
+
+const dialogPanelStyle: React.CSSProperties = {
+  width: "min(560px, 100%)",
+  maxHeight: "82vh",
+  overflowY: "auto",
+  borderRadius: "16px",
+  border: "1px solid #ececf2",
+  backgroundColor: "#fff",
+  boxShadow: "0 24px 70px rgba(15,23,42,0.22)",
+  padding: "20px",
+};
+
+const dialogHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "12px",
+  marginBottom: "16px",
+};
+
+const dialogTitleStyle: React.CSSProperties = {
+  color: "#1a1a2e",
+  fontSize: "18px",
+  fontWeight: 850,
+  lineHeight: 1.25,
 };
 
 function stepperButtonStyle(disabled: boolean): React.CSSProperties {

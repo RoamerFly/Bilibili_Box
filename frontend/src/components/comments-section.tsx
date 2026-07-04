@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Loader2, MessageCircle, ThumbsDown, ThumbsUp } 
 import { invoke } from "@/lib/api";
 import { ClickableAvatar } from "@/components/video-card";
 import { formatDateTime, formatNumber } from "@/lib/utils";
+import { useAppStore } from "@/stores/app-store";
 
 interface CommentMember {
   mid: number;
@@ -41,6 +42,7 @@ const PAGE_SIZE = 10;
 const REPLY_PAGE_SIZE = 10;
 
 export function CommentsSection({ oid, typeId, title = "评论区" }: CommentsSectionProps) {
+  const openUpProfile = useAppStore((s) => s.openUpProfile);
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -122,7 +124,12 @@ export function CommentsSection({ oid, typeId, title = "评论区" }: CommentsSe
         <div style={{ display: "grid", gap: "18px" }}>
           {comments.map((comment) => (
             <article key={comment.rpid} style={{ display: "grid", gridTemplateColumns: "40px minmax(0, 1fr)", gap: "13px" }}>
-              <ClickableAvatar src={comment.member.avatar} alt={comment.member.name} size={40} />
+              <ClickableAvatar
+                src={comment.member.avatar}
+                alt={comment.member.name}
+                size={40}
+                onClick={() => openUpProfile({ mid: comment.member.mid, name: comment.member.name, face: comment.member.avatar })}
+              />
               <div style={{ minWidth: 0, paddingBottom: "16px", borderBottom: "1px solid #f0f0f4" }}>
                 <CommentBody comment={comment} />
                 <ReplyThread oid={oid!} typeId={typeId!} rootComment={comment} />
@@ -149,6 +156,7 @@ export function CommentsSection({ oid, typeId, title = "评论区" }: CommentsSe
 }
 
 function ReplyThread({ oid, typeId, rootComment }: { oid: number; typeId: number; rootComment: CommentItem }) {
+  const openUpProfile = useAppStore((s) => s.openUpProfile);
   const [expanded, setExpanded] = useState(false);
   const [replies, setReplies] = useState<CommentItem[]>([]);
   const [page, setPage] = useState(1);
@@ -232,7 +240,12 @@ function ReplyThread({ oid, typeId, rootComment }: { oid: number; typeId: number
           {error ? <div style={{ color: "#dc2626", fontSize: "13px" }}>{error}</div> : null}
           {replies.map((reply) => (
             <article key={reply.rpid} style={{ display: "grid", gridTemplateColumns: "30px minmax(0, 1fr)", gap: "10px" }}>
-              <ClickableAvatar src={reply.member.avatar} alt={reply.member.name} size={30} />
+              <ClickableAvatar
+                src={reply.member.avatar}
+                alt={reply.member.name}
+                size={30}
+                onClick={() => openUpProfile({ mid: reply.member.mid, name: reply.member.name, face: reply.member.avatar })}
+              />
               <div style={{ minWidth: 0 }}>
                 <CommentBody comment={reply} compact relationText={getReplyRelationText(reply, rootComment, memberByRpid)} />
               </div>

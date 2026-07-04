@@ -4,11 +4,8 @@ import {
   CheckCircle2,
   Clock,
   Download,
-  LayoutGrid,
-  List,
   Loader2,
   PauseCircle,
-  RefreshCw,
   Search,
   Tv,
 } from "lucide-react";
@@ -22,6 +19,8 @@ import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { CardViewMode, useAppStore } from "@/stores/app-store";
 import { runPreservingMainScroll } from "@/lib/scroll-position";
+import { PageCardControls } from "@/components/page-card-controls";
+import { PurpleRefreshButton } from "@/components/toolbar-controls";
 
 type FollowStatus = "following" | "finished" | "paused";
 
@@ -83,7 +82,7 @@ export function BangumiView() {
   const openPlayer = useAppStore((s) => s.openPlayer);
   const viewMode = useAppStore((s) => s.cardViewModes.bangumi ?? "grid");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
-  const { pageSize, cardScale, columns } = useCardLayout();
+  const { pageSize, cardScale, columns } = useCardLayout("bangumi", viewMode);
   const [items, setItems] = useState<BangumiFollowItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -295,14 +294,11 @@ export function BangumiView() {
           <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
             追番追剧
           </h1>
-          <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "4px" }}>
-            共 {stats.all} 部内容
-          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "14px", color: "#8b8b9a" }}>共 {stats.all} 部内容</span>
+            <PurpleRefreshButton loading={refreshing} onClick={handleRefresh} />
+          </div>
         </div>
-
-        <ActionButton onClick={() => void handleRefresh()} icon={<RefreshCw className={refreshing ? "animate-spin" : ""} style={{ width: 16, height: 16 }} />}>
-          刷新
-        </ActionButton>
       </motion.div>
 
       <div
@@ -357,18 +353,12 @@ export function BangumiView() {
             />
           </div>
 
-          <div style={{ display: "flex", gap: "2px", padding: "3px", borderRadius: "9px", backgroundColor: "#f3f3f8" }}>
-            <ViewModeButton
-              active={viewMode === "grid"}
-              onClick={() => setCardViewMode("bangumi", "grid")}
-              icon={<LayoutGrid style={{ width: 16, height: 16 }} />}
-            />
-            <ViewModeButton
-              active={viewMode === "list"}
-              onClick={() => setCardViewMode("bangumi", "list")}
-              icon={<List style={{ width: 16, height: 16 }} />}
-            />
-          </div>
+          <PageCardControls
+            layoutKey="bangumi"
+            viewMode={viewMode}
+            onViewModeChange={(mode) => setCardViewMode("bangumi", mode)}
+            showLayoutControls={false}
+          />
         </div>
       </div>
 
@@ -726,36 +716,6 @@ function StatRow({
         {value} <span style={{ fontSize: "12px", fontWeight: 500, color: "#9a9aa5" }}>{unit}</span>
       </span>
     </div>
-  );
-}
-
-function ViewModeButton({
-  active,
-  icon,
-  onClick,
-}: {
-  active: boolean;
-  icon: React.ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: "34px",
-        height: "30px",
-        borderRadius: "8px",
-        border: "none",
-        backgroundColor: active ? "#6366f1" : "transparent",
-        color: active ? "#fff" : "#8b8b9a",
-        cursor: "pointer",
-      }}
-    >
-      {icon}
-    </button>
   );
 }
 

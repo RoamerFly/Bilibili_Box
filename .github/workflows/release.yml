@@ -459,6 +459,8 @@ jobs:
           body_file="$RUNNER_TEMP/release-body.md"
           if [ -n "$INPUT_RELEASE_NOTES" ]; then
             printf '%s\n' "$INPUT_RELEASE_NOTES" > "$notes_file"
+          elif [ -f "docs/version-updates.md" ]; then
+            cat "docs/version-updates.md" > "$notes_file"
           else
             {
               printf '%s\n' '## 新版本内容'

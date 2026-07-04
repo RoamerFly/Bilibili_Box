@@ -119,6 +119,7 @@ pub struct Config {
     pub theme: String,
     pub download_quality: String,
     pub prompt_download_quality: bool,
+    pub show_comments: bool,
     pub video_quality_priority: Vec<VideoQuality>,
     pub codec_type_priority: Vec<CodecType>,
     pub audio_quality_priority: Vec<AudioQuality>,
@@ -360,7 +361,7 @@ impl Config {
             == Some(mid)
     }
 
-    fn sanitize_path_component(input: &str) -> String {
+    pub fn sanitize_path_component(input: &str) -> String {
         let sanitized: String = input
             .trim()
             .chars()
@@ -469,6 +470,7 @@ impl Config {
             theme: "system".to_string(),
             download_quality: "1080p".to_string(),
             prompt_download_quality: true,
+            show_comments: true,
             video_quality_priority: vec![
                 VideoQuality::Video8K,
                 VideoQuality::VideoDolby,

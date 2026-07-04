@@ -24,15 +24,17 @@ import type {
   SearchDuration,
   SearchFilters,
   SearchOrder,
+  SearchPageInfo,
   SearchResponse,
   BangumiInfo,
   VideoInfo,
 } from "@/lib/types";
-import { useAppStore } from "@/stores/app-store";
+import { useAppStore, type ContentDetailState } from "@/stores/app-store";
 import { formatBiliImageUrl, formatDateTime, formatDuration, formatNumber } from "@/lib/utils";
 import { buildVisiblePages } from "@/hooks/use-responsive-page-size";
 import { fixedCardGridColumns, useCardLayout } from "@/hooks/use-card-layout";
 import { runPreservingMainScroll } from "@/lib/scroll-position";
+import { PageCardControls } from "@/components/page-card-controls";
 
 const orderOptions: Array<{ value: SearchOrder; label: string }> = [
   { value: "totalrank", label: "综合排序" },
@@ -58,8 +60,15 @@ const durationOptions: Array<{ value: SearchDuration; label: string }> = [
   { value: "4", label: "60 分钟以上" },
 ];
 
-type SearchResultType = "all" | "video" | "bangumi";
+type SearchResultType = "all" | "video" | "bangumi" | "film" | "live" | "article" | "user";
 const SEARCH_PREFETCH_PAGES = 2;
+const EMPTY_SEARCH_PAGE_INFO: SearchPageInfo = {
+  page: 1,
+  page_size: 20,
+  total: 0,
+  page_count: 1,
+  has_more: false,
+};
 
 function mergeAggregateSearchResult(
   base: AggregateSearchResult | null,
@@ -71,30 +80,46 @@ function mergeAggregateSearchResult(
   const bangumi = Array.from(
     new Map([...(base?.bangumi ?? []), ...incoming.bangumi].map((item) => [item.season_id, item])).values()
   );
+  const films = Array.from(new Map([...(base?.films ?? []), ...(incoming.films ?? [])].map((item) => [item.id, item])).values());
+  const lives = Array.from(new Map([...(base?.lives ?? []), ...(incoming.lives ?? [])].map((item) => [item.id, item])).values());
+  const articles = Array.from(new Map([...(base?.articles ?? []), ...(incoming.articles ?? [])].map((item) => [item.id, item])).values());
+  const users = Array.from(new Map([...(base?.users ?? []), ...(incoming.users ?? [])].map((item) => [item.id, item])).values());
 
   return {
     ...incoming,
     videos,
     bangumi,
+    films,
+    lives,
+    articles,
+    users,
     video_page: incoming.video_page,
     bangumi_page: incoming.bangumi_page,
+    film_page: incoming.film_page,
+    live_page: incoming.live_page,
+    article_page: incoming.article_page,
+    user_page: incoming.user_page,
   };
 }
 
 export function SearchView() {
   const openPlayer = useAppStore((s) => s.openPlayer);
   const openUpProfile = useAppStore((s) => s.openUpProfile);
+  const openContentDetail = useAppStore((s) => s.openContentDetail);
   const searchPageState = useAppStore((s) => s.searchPageState);
   const setSearchPageState = useAppStore((s) => s.setSearchPageState);
+  const viewMode = useAppStore((s) => s.cardViewModes.search ?? "grid");
+  const setCardViewMode = useAppStore((s) => s.setCardViewMode);
   const searchRequestIdRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [activeResultType, setActiveResultType] = useState<SearchResultType>("all");
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
-  const cardLayout = useCardLayout();
+  const cardLayout = useCardLayout("search", viewMode);
   const {
     input: searchInput,
     filters: currentFilters,
+    activeResultType = "all",
+    activeLiveType = "room",
     lastAggregateInput,
     result,
     currentPage,
@@ -163,7 +188,7 @@ export function SearchView() {
 
         mergedAggregate = mergeAggregateSearchResult(mergedAggregate, data);
         lastAggregatePage = page;
-        lastHasMore = data.video_page.has_more || data.bangumi_page.has_more;
+        lastHasMore = data.video_page.has_more || data.bangumi_page.has_more || data.film_page.has_more || data.live_page.has_more || data.article_page.has_more || data.user_page.has_more;
         if (!lastHasMore) break;
       }
 
@@ -184,7 +209,14 @@ export function SearchView() {
       if (mergedAggregate) {
         const loadedPageCount = Math.max(
           1,
-          Math.ceil(Math.max(mergedAggregate.videos.length, mergedAggregate.bangumi.length) / pageSize),
+          Math.ceil(Math.max(
+            mergedAggregate.videos.length,
+            mergedAggregate.bangumi.length,
+            (mergedAggregate.films ?? []).length,
+            (mergedAggregate.lives ?? []).length,
+            (mergedAggregate.articles ?? []).length,
+            (mergedAggregate.users ?? []).length
+          ) / pageSize),
           lastAggregatePage
         );
         setSearchPageState({
@@ -245,16 +277,9 @@ export function SearchView() {
 
   useEffect(() => {
     if (searchPageState.pageSize === pageSize) return;
-    setSearchPageState({ pageSize, currentPage: 1, loadedPages: 0, hasMore: false });
-    if (result?.type === "Aggregate" && lastAggregateInput) {
-      void runSearch(lastAggregateInput, currentFilters, { mode: "replace" });
-    }
+    setSearchPageState({ pageSize, currentPage: 1 });
   }, [
-    currentFilters,
-    lastAggregateInput,
     pageSize,
-    result?.type,
-    runSearch,
     searchPageState.pageSize,
     setSearchPageState,
   ]);
@@ -262,6 +287,10 @@ export function SearchView() {
   const aggregatePageInfo = useMemo(() => {
     if (result?.type !== "Aggregate") return null;
     if (activeResultType === "bangumi") return result.bangumi_page;
+    if (activeResultType === "film") return result.film_page ?? EMPTY_SEARCH_PAGE_INFO;
+    if (activeResultType === "live") return result.live_page ?? EMPTY_SEARCH_PAGE_INFO;
+    if (activeResultType === "article") return result.article_page ?? EMPTY_SEARCH_PAGE_INFO;
+    if (activeResultType === "user") return result.user_page ?? EMPTY_SEARCH_PAGE_INFO;
     if (activeResultType === "video") return result.video_page;
     return result.video_page.total > 0 || result.bangumi_page.total === 0
       ? result.video_page
@@ -272,16 +301,28 @@ export function SearchView() {
     if (result?.type !== "Aggregate") return 0;
     const videoPages = Math.ceil(result.videos.length / pageSize);
     const bangumiPages = Math.ceil(result.bangumi.length / pageSize);
+    const filmPages = Math.ceil((result.films ?? []).length / pageSize);
+    const livePages = Math.ceil((result.lives ?? []).length / pageSize);
+    const articlePages = Math.ceil((result.articles ?? []).length / pageSize);
+    const userPages = Math.ceil((result.users ?? []).length / pageSize);
     if (activeResultType === "video") return Math.max(1, videoPages);
     if (activeResultType === "bangumi") return Math.max(1, bangumiPages);
-    return Math.max(1, videoPages, bangumiPages, loadedPages);
+    if (activeResultType === "film") return Math.max(1, filmPages);
+    if (activeResultType === "live") return Math.max(1, livePages);
+    if (activeResultType === "article") return Math.max(1, articlePages);
+    if (activeResultType === "user") return Math.max(1, userPages);
+    return Math.max(1, videoPages, bangumiPages, filmPages, livePages, articlePages, userPages, loadedPages);
   }, [activeResultType, loadedPages, pageSize, result]);
 
   const aggregateTotalPageCount = useMemo(() => {
     if (result?.type !== "Aggregate") return 1;
     if (activeResultType === "video") return result.video_page.page_count;
     if (activeResultType === "bangumi") return result.bangumi_page.page_count;
-    return Math.max(result.video_page.page_count, result.bangumi_page.page_count);
+    if (activeResultType === "film") return (result.film_page ?? EMPTY_SEARCH_PAGE_INFO).page_count;
+    if (activeResultType === "live") return (result.live_page ?? EMPTY_SEARCH_PAGE_INFO).page_count;
+    if (activeResultType === "article") return (result.article_page ?? EMPTY_SEARCH_PAGE_INFO).page_count;
+    if (activeResultType === "user") return (result.user_page ?? EMPTY_SEARCH_PAGE_INFO).page_count;
+    return Math.max(result.video_page.page_count, result.bangumi_page.page_count, (result.film_page ?? EMPTY_SEARCH_PAGE_INFO).page_count, (result.live_page ?? EMPTY_SEARCH_PAGE_INFO).page_count, (result.article_page ?? EMPTY_SEARCH_PAGE_INFO).page_count, (result.user_page ?? EMPTY_SEARCH_PAGE_INFO).page_count);
   }, [activeResultType, result]);
 
   const aggregateCanLoadMore = useMemo(() => {
@@ -290,9 +331,41 @@ export function SearchView() {
       ? result.video_page.has_more
       : activeResultType === "bangumi"
         ? result.bangumi_page.has_more
-        : result.video_page.has_more || result.bangumi_page.has_more;
+        : activeResultType === "film"
+          ? (result.film_page ?? EMPTY_SEARCH_PAGE_INFO).has_more
+          : activeResultType === "live"
+            ? (result.live_page ?? EMPTY_SEARCH_PAGE_INFO).has_more
+            : activeResultType === "article"
+              ? (result.article_page ?? EMPTY_SEARCH_PAGE_INFO).has_more
+              : activeResultType === "user"
+                ? (result.user_page ?? EMPTY_SEARCH_PAGE_INFO).has_more
+                : result.video_page.has_more || result.bangumi_page.has_more || (result.film_page ?? EMPTY_SEARCH_PAGE_INFO).has_more || (result.live_page ?? EMPTY_SEARCH_PAGE_INFO).has_more || (result.article_page ?? EMPTY_SEARCH_PAGE_INFO).has_more || (result.user_page ?? EMPTY_SEARCH_PAGE_INFO).has_more;
     return hasMoreByType && aggregateLoadedPageCount < aggregateTotalPageCount;
   }, [activeResultType, aggregateLoadedPageCount, aggregateTotalPageCount, result]);
+
+  const searchTypeTabs = useMemo(() => {
+    if (result?.type !== "Aggregate") {
+      return [
+        { value: "all" as const, label: "综合", count: 0 },
+        { value: "video" as const, label: "视频", count: 0 },
+        { value: "bangumi" as const, label: "番剧", count: 0 },
+        { value: "film" as const, label: "影视", count: 0 },
+        { value: "live" as const, label: "直播", count: 0 },
+        { value: "article" as const, label: "专栏", count: 0 },
+        { value: "user" as const, label: "用户", count: 0 },
+      ];
+    }
+    const totalLoaded = result.videos.length + result.bangumi.length + (result.films ?? []).length + (result.lives ?? []).length + (result.articles ?? []).length + (result.users ?? []).length;
+    return [
+      { value: "all" as const, label: "综合", count: totalLoaded },
+      { value: "video" as const, label: "视频", count: result.video_page.total || result.videos.length },
+      { value: "bangumi" as const, label: "番剧", count: result.bangumi_page.total || result.bangumi.length },
+      { value: "film" as const, label: "影视", count: result.film_page?.total || (result.films ?? []).length },
+      { value: "live" as const, label: "直播", count: result.live_page?.total || (result.lives ?? []).length },
+      { value: "article" as const, label: "专栏", count: result.article_page?.total || (result.articles ?? []).length },
+      { value: "user" as const, label: "用户", count: result.user_page?.total || (result.users ?? []).length },
+    ];
+  }, [result]);
 
   const visibleAggregateResult = useMemo(() => {
     if (result?.type !== "Aggregate") return null;
@@ -301,6 +374,14 @@ export function SearchView() {
       ...result,
       videos: result.videos.slice(start, start + pageSize),
       bangumi: result.bangumi.slice(start, start + pageSize),
+      films: (result.films ?? []).slice(start, start + pageSize),
+      lives: (result.lives ?? []).slice(start, start + pageSize),
+      articles: (result.articles ?? []).slice(start, start + pageSize),
+      users: (result.users ?? []).slice(start, start + pageSize),
+      film_page: result.film_page ?? EMPTY_SEARCH_PAGE_INFO,
+      live_page: result.live_page ?? EMPTY_SEARCH_PAGE_INFO,
+      article_page: result.article_page ?? EMPTY_SEARCH_PAGE_INFO,
+      user_page: result.user_page ?? EMPTY_SEARCH_PAGE_INFO,
     };
   }, [currentPage, pageSize, result]);
 
@@ -521,72 +602,79 @@ export function SearchView() {
         </motion.button>
       </motion.div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.08, duration: 0.25 }}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "12px",
-          flexWrap: "wrap",
-          marginBottom: "20px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "5px", padding: "4px", borderRadius: "11px", backgroundColor: "#f1f1f7" }}>
-          {([
-            ["all", "全部"],
-            ["video", "视频"],
-            ["bangumi", "番剧"],
-          ] as const).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setActiveResultType(value)}
-              style={{
-                padding: "7px 14px",
-                borderRadius: "8px",
-                border: "none",
-                backgroundColor: activeResultType === value ? "#fff" : "transparent",
-                boxShadow: activeResultType === value ? "0 1px 4px rgba(65,65,95,0.09)" : "none",
-                color: activeResultType === value ? "#4338ca" : "#666679",
-                fontSize: "13px",
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <FilterSelect
-          label="排序"
-          value={currentFilters.order}
-          options={orderOptions}
-          onChange={(value) =>
-            updateFilters({ ...currentFilters, order: value as SearchOrder })
-          }
-        />
-        <FilterSelect
-          label="日期"
-          value={currentFilters.pubtime}
-          options={dateOptions}
-          onChange={(value) =>
-            updateFilters({ ...currentFilters, pubtime: value as SearchDate })
-          }
-        />
-        <FilterSelect
-          label="时长"
-          value={currentFilters.duration}
-          options={durationOptions}
-          onChange={(value) =>
-            updateFilters({ ...currentFilters, duration: value as SearchDuration })
-          }
-        />
-        <span style={{ fontSize: "12.5px", color: "#9a9aa8" }}>
-          排序、日期和时长对关键词视频结果生效
-        </span>
-      </motion.div>
+      {result?.type === "Aggregate" ? (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08, duration: 0.25 }}
+          style={{ display: "grid", gap: "10px", marginBottom: "20px" }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "5px", padding: "4px", borderRadius: "11px", backgroundColor: "#f1f1f7", overflowX: "auto", width: "fit-content", maxWidth: "100%" }}>
+            {searchTypeTabs.map(({ value, label, count }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setSearchPageState({ activeResultType: value, currentPage: 1 })}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "7px",
+                  padding: "7px 12px",
+                  borderRadius: "8px",
+                  border: "none",
+                  backgroundColor: activeResultType === value ? "#fff" : "transparent",
+                  boxShadow: activeResultType === value ? "0 1px 4px rgba(65,65,95,0.09)" : "none",
+                  color: activeResultType === value ? "#4338ca" : "#666679",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {label}
+                <span style={tabCountBadgeStyle}>{formatSearchTabCount(count)}</span>
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+            <FilterSelect
+              label="排序"
+              value={currentFilters.order}
+              options={orderOptions}
+              onChange={(value) =>
+                updateFilters({ ...currentFilters, order: value as SearchOrder })
+              }
+            />
+            <FilterSelect
+              label="日期"
+              value={currentFilters.pubtime}
+              options={dateOptions}
+              onChange={(value) =>
+                updateFilters({ ...currentFilters, pubtime: value as SearchDate })
+              }
+            />
+            <FilterSelect
+              label="时长"
+              value={currentFilters.duration}
+              options={durationOptions}
+              onChange={(value) =>
+                updateFilters({ ...currentFilters, duration: value as SearchDuration })
+              }
+            />
+            <span style={{ fontSize: "12.5px", color: "#9a9aa8" }}>
+              排序、日期和时长对关键词视频结果生效
+            </span>
+            <div style={{ marginLeft: "auto" }}>
+              <PageCardControls
+                layoutKey="search"
+                viewMode={viewMode}
+                onViewModeChange={(mode) => setCardViewMode("search", mode)}
+                showLayoutControls={false}
+              />
+            </div>
+          </div>
+        </motion.div>
+      ) : null}
 
       <AnimatePresence>
         {error ? (
@@ -639,22 +727,34 @@ export function SearchView() {
           {result.type === "Aggregate" ? (
             <>
               {visibleAggregateResult ? (
-              <AggregateResult
-                result={visibleAggregateResult}
-                activeType={activeResultType}
-                columns={columns}
-                scale={cardScale}
-                onOpenVideoPlayer={handleOpenVideoPlayer}
-                onOpenBangumiPlayer={handleOpenBangumiPlayer}
-                onDownloadVideo={handleSearchVideoDownload}
-                onDownloadBangumi={handleSearchBangumiDownload}
-                onResolveVideoDownloadTargets={resolveSearchVideoDownloadTargets}
-                onResolveBangumiDownloadTargets={resolveSearchBangumiDownloadTargets}
-                onRequestDownloadQuality={requestDownloadQuality}
-                onDownloadError={(err) => setError(String(err))}
-                onOpenBrowser={handleOpenBrowser}
-                onOpenAuthor={openUpProfile}
-              />
+                <AggregateResult
+                  result={visibleAggregateResult}
+                  activeType={activeResultType}
+                  columns={columns}
+                  viewMode={viewMode}
+                  scale={cardScale}
+                  activeLiveType={activeLiveType}
+                  onLiveTypeChange={(type) => setSearchPageState({ activeLiveType: type, currentPage: 1 })}
+                  loadedCounts={{
+                    video: result.videos.length,
+                    bangumi: result.bangumi.length,
+                    film: (result.films ?? []).length,
+                    live: (result.lives ?? []).length,
+                    article: (result.articles ?? []).length,
+                    user: (result.users ?? []).length,
+                  }}
+                  onOpenVideoPlayer={handleOpenVideoPlayer}
+                  onOpenBangumiPlayer={handleOpenBangumiPlayer}
+                  onDownloadVideo={handleSearchVideoDownload}
+                  onDownloadBangumi={handleSearchBangumiDownload}
+                  onResolveVideoDownloadTargets={resolveSearchVideoDownloadTargets}
+                  onResolveBangumiDownloadTargets={resolveSearchBangumiDownloadTargets}
+                  onRequestDownloadQuality={requestDownloadQuality}
+                  onDownloadError={(err) => setError(String(err))}
+                  onOpenBrowser={handleOpenBrowser}
+                  onOpenAuthor={openUpProfile}
+                  onOpenContent={openContentDetail}
+                />
               ) : null}
               {aggregatePageInfo && Math.max(aggregateLoadedPageCount, aggregateTotalPageCount) > 1 ? (
                 <SearchPagination
@@ -947,7 +1047,11 @@ function AggregateResult({
   result,
   activeType,
   columns,
+  viewMode,
   scale,
+  activeLiveType,
+  onLiveTypeChange,
+  loadedCounts,
   onOpenVideoPlayer,
   onOpenBangumiPlayer,
   onDownloadVideo,
@@ -958,11 +1062,16 @@ function AggregateResult({
   onDownloadError,
   onOpenBrowser,
   onOpenAuthor,
+  onOpenContent,
 }: {
   result: Extract<SearchResponse, { type: "Aggregate" }>;
   activeType: SearchResultType;
   columns: number;
+  viewMode: "grid" | "list";
   scale: number;
+  activeLiveType: "room" | "user";
+  onLiveTypeChange: (type: "room" | "user") => void;
+  loadedCounts: Record<Exclude<SearchResultType, "all">, number>;
   onOpenVideoPlayer: (video: { bvid: string; cid?: number; title: string; pic?: string }) => void;
   onOpenBangumiPlayer: (bangumi: { season_id: number; title: string; cover: string }) => void;
   onDownloadVideo: (video: AggregateSearchResult["videos"][number], quality?: string) => Promise<boolean>;
@@ -973,16 +1082,24 @@ function AggregateResult({
   onDownloadError: (error: unknown) => void;
   onOpenBrowser: (url: string) => void;
   onOpenAuthor: (author: { mid: number; name?: string; face?: string }) => void;
+  onOpenContent: (content: ContentDetailState) => void;
 }) {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [multiSelectEnabled, setMultiSelectEnabled] = useState(false);
   const [batchDownloading, setBatchDownloading] = useState(false);
   const showVideos = activeType === "all" || activeType === "video";
   const showBangumi = activeType === "all" || activeType === "bangumi";
+  const showFilms = activeType === "all" || activeType === "film";
+  const showLives = activeType === "all" || activeType === "live";
+  const showArticles = activeType === "all" || activeType === "article";
+  const showUsers = activeType === "all" || activeType === "user";
   const visibleKeys = [
     ...(showVideos ? result.videos.map((video) => `video:${video.bvid}`) : []),
     ...(showBangumi ? result.bangumi.map((bangumi) => `bangumi:${bangumi.season_id}`) : []),
   ];
+  const liveRooms = result.lives.filter((item) => item.badge === "直播间");
+  const liveUsers = result.lives.filter((item) => item.badge === "主播");
+  const displayedLives = activeLiveType === "room" ? liveRooms : liveUsers;
   const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((key) => selectedKeys.has(key));
 
   useEffect(() => {
@@ -1060,16 +1177,16 @@ function AggregateResult({
     <>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px", flexWrap: "wrap" }}>
         <span style={{ fontSize: "13px", color: "#7a7a8c" }}>
-          当前类别 {activeType === "all" ? "全部" : activeType === "video" ? "视频" : "番剧"}
+          当前类别 {getSearchTypeLabel(activeType)}
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap" }}>
-          <GhostActionButton onClick={toggleMultiSelect} icon={<span aria-hidden="true">{multiSelectEnabled ? "✓" : "□"}</span>}>
-            {multiSelectEnabled ? "关闭多选" : "开启多选"}
-          </GhostActionButton>
           {multiSelectEnabled ? (
             <>
               <GhostActionButton onClick={toggleVisibleSelection} icon={<span aria-hidden="true">{allVisibleSelected ? "✓" : "□"}</span>}>
-                {allVisibleSelected ? "取消当前全选" : "全选当前"}
+                {allVisibleSelected ? "取消全选" : "全选当前"}
+              </GhostActionButton>
+              <GhostActionButton onClick={toggleMultiSelect} icon={<span aria-hidden="true">✓</span>}>
+                取消
               </GhostActionButton>
               <GhostActionButton
                 onClick={() => void handleBatchDownload()}
@@ -1079,14 +1196,18 @@ function AggregateResult({
                 下载选中 {selectedKeys.size ? `(${selectedKeys.size})` : ""}
               </GhostActionButton>
             </>
-          ) : null}
+          ) : (
+            <GhostActionButton onClick={toggleMultiSelect} icon={<span aria-hidden="true">□</span>}>
+              多选
+            </GhostActionButton>
+          )}
         </div>
       </div>
 
       {showVideos && result.videos.length ? (
         <>
-          <SectionHeader title="视频结果" count={result.videos.length} />
-          <div style={{ display: "grid", gridTemplateColumns: fixedCardGridColumns(columns), gap: `${14 * scale}px` }}>
+          <SearchSectionHeader title="视频结果" shown={result.videos.length} loaded={loadedCounts.video} total={result.video_page.total} />
+          <div style={{ display: "grid", gridTemplateColumns: viewMode === "grid" ? fixedCardGridColumns(columns) : "1fr", gap: `${14 * scale}px` }}>
             {result.videos.map((video) => (
               <AggregateVideoCard
                 key={video.bvid}
@@ -1107,8 +1228,8 @@ function AggregateResult({
 
       {showBangumi && result.bangumi.length ? (
         <>
-          <SectionHeader title="番剧结果" count={result.bangumi.length} />
-          <div style={{ display: "grid", gridTemplateColumns: fixedCardGridColumns(columns), gap: `${14 * scale}px` }}>
+          <SearchSectionHeader title="番剧结果" shown={result.bangumi.length} loaded={loadedCounts.bangumi} total={result.bangumi_page.total} />
+          <div style={{ display: "grid", gridTemplateColumns: viewMode === "grid" ? fixedCardGridColumns(columns) : "1fr", gap: `${14 * scale}px` }}>
             {result.bangumi.map((bangumi) => (
               <AggregateBangumiCard
                 key={bangumi.season_id}
@@ -1126,7 +1247,32 @@ function AggregateResult({
         </>
       ) : null}
 
-      {(!showVideos || !result.videos.length) && (!showBangumi || !result.bangumi.length) ? (
+      {showFilms && result.films.length ? (
+        <GenericSearchSection title="影视结果" items={result.films} loaded={loadedCounts.film} pageInfo={result.film_page} columns={columns} viewMode={viewMode} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+      ) : null}
+
+      {showLives && result.lives.length ? (
+        <>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginTop: "4px", flexWrap: "wrap" }}>
+            <SearchSectionHeader title="直播结果" shown={displayedLives.length} loaded={loadedCounts.live} total={result.live_page.total} />
+            <div style={{ display: "inline-flex", padding: "3px", borderRadius: "10px", backgroundColor: "#f3f4f8" }}>
+              <MiniSearchTab active={activeLiveType === "room"} onClick={() => onLiveTypeChange("room")}>直播间 {liveRooms.length ? formatSearchTabCount(liveRooms.length) : ""}</MiniSearchTab>
+              <MiniSearchTab active={activeLiveType === "user"} onClick={() => onLiveTypeChange("user")}>主播 {liveUsers.length ? formatSearchTabCount(liveUsers.length) : ""}</MiniSearchTab>
+            </div>
+          </div>
+          <GenericSearchGrid items={displayedLives} columns={columns} viewMode={viewMode} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+        </>
+      ) : null}
+
+      {showArticles && result.articles.length ? (
+        <GenericSearchSection title="专栏结果" items={result.articles} loaded={loadedCounts.article} pageInfo={result.article_page} columns={columns} viewMode={viewMode} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+      ) : null}
+
+      {showUsers && result.users.length ? (
+        <GenericSearchSection title="用户结果" items={result.users} loaded={loadedCounts.user} pageInfo={result.user_page} columns={columns} viewMode={viewMode} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+      ) : null}
+
+      {(!showVideos || !result.videos.length) && (!showBangumi || !result.bangumi.length) && (!showFilms || !result.films.length) && (!showLives || !result.lives.length) && (!showArticles || !result.articles.length) && (!showUsers || !result.users.length) ? (
         <div style={{ padding: "52px 0", textAlign: "center", color: "#8b8b9a", fontSize: "14px" }}>该类型暂无结果</div>
       ) : null}
     </>
@@ -1473,6 +1619,241 @@ function MetaPill({ icon, text }: { icon: React.ReactNode; text: string }) {
       {text}
     </span>
   );
+}
+
+function GenericSearchSection({
+  title,
+  items,
+  loaded,
+  pageInfo,
+  columns,
+  viewMode,
+  scale,
+  onOpenBrowser,
+  onOpenAuthor,
+  onOpenContent,
+}: {
+  title: string;
+  items: AggregateSearchResult["films"];
+  loaded: number;
+  pageInfo: SearchPageInfo;
+  columns: number;
+  viewMode: "grid" | "list";
+  scale: number;
+  onOpenBrowser: (url: string) => void;
+  onOpenAuthor: (author: { mid: number; name?: string; face?: string }) => void;
+  onOpenContent: (content: ContentDetailState) => void;
+}) {
+  return (
+    <>
+      <SearchSectionHeader title={title} shown={items.length} loaded={loaded} total={pageInfo.total} />
+      <GenericSearchGrid items={items} columns={columns} viewMode={viewMode} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+    </>
+  );
+}
+
+function GenericSearchGrid({
+  items,
+  columns,
+  viewMode,
+  scale,
+  onOpenBrowser,
+  onOpenAuthor,
+  onOpenContent,
+}: {
+  items: AggregateSearchResult["films"];
+  columns: number;
+  viewMode: "grid" | "list";
+  scale: number;
+  onOpenBrowser: (url: string) => void;
+  onOpenAuthor: (author: { mid: number; name?: string; face?: string }) => void;
+  onOpenContent: (content: ContentDetailState) => void;
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: viewMode === "grid" ? fixedCardGridColumns(columns) : "1fr", gap: `${14 * scale}px` }}>
+      {items.map((item) => (
+        <GenericSearchCard key={`${item.badge}:${item.id}`} item={item} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+      ))}
+    </div>
+  );
+}
+
+function GenericSearchCard({
+  item,
+  scale,
+  onOpenBrowser,
+  onOpenAuthor,
+  onOpenContent,
+}: {
+  item: AggregateSearchResult["films"][number];
+  scale: number;
+  onOpenBrowser: (url: string) => void;
+  onOpenAuthor: (author: { mid: number; name?: string; face?: string }) => void;
+  onOpenContent: (content: ContentDetailState) => void;
+}) {
+  const hasAuthor = item.mid > 0;
+  const open = () => {
+    if (item.badge === "用户" && hasAuthor) {
+      onOpenAuthor({ mid: item.mid, name: item.title || item.author, face: item.cover || item.author_face });
+      return;
+    }
+    if (item.badge === "主播" && hasAuthor) {
+      onOpenAuthor({ mid: item.mid, name: item.title || item.author, face: item.cover || item.author_face });
+      return;
+    }
+    if (item.badge === "直播间") {
+      onOpenContent(buildGenericContentDetail(item, "live"));
+      return;
+    }
+    if (item.badge === "影视") {
+      onOpenContent(buildGenericContentDetail(item, "film"));
+      return;
+    }
+    if (item.badge === "专栏") {
+      onOpenContent(buildGenericContentDetail(item, "article"));
+      return;
+    }
+    if (item.url) onOpenBrowser(item.url);
+  };
+
+  return (
+    <div
+      onClick={open}
+      style={{
+        display: "grid",
+        gridTemplateColumns: `${112 * scale}px minmax(0, 1fr)`,
+        gap: `${12 * scale}px`,
+        padding: `${12 * scale}px`,
+        borderRadius: `${12 * scale}px`,
+        border: "1px solid #ececf2",
+        backgroundColor: "#fff",
+        cursor: item.url || hasAuthor ? "pointer" : "default",
+      }}
+    >
+      <div style={{ position: "relative", width: "100%", aspectRatio: item.badge === "用户" ? "1 / 1" : "16 / 10", borderRadius: `${9 * scale}px`, overflow: "hidden", backgroundColor: "#eef2ff" }}>
+        {item.cover || item.author_face ? (
+          <img src={formatBiliImageUrl(item.cover || item.author_face, item.badge === "用户" ? "@128w_128h_1c.webp" : "@320w_200h_1c.webp")} alt={item.title} loading="lazy" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : null}
+        <span style={{ position: "absolute", left: 6, top: 6, padding: "2px 6px", borderRadius: 999, backgroundColor: "rgba(67,56,202,0.9)", color: "#fff", fontSize: 11, fontWeight: 800 }}>{item.badge}</span>
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <h3 style={{ color: "#1a1a2e", fontSize: `${14.5 * scale}px`, fontWeight: 800, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+          {item.title || item.author || "未命名结果"}
+        </h3>
+        {item.author && item.badge !== "用户" ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (hasAuthor) onOpenAuthor({ mid: item.mid, name: item.author, face: item.author_face });
+            }}
+            style={{ marginTop: 6, border: "none", background: "transparent", padding: 0, color: "#6366f1", fontSize: `${12.5 * scale}px`, fontWeight: 700, cursor: hasAuthor ? "pointer" : "default" }}
+          >
+            {item.author}
+          </button>
+        ) : null}
+        {item.description ? (
+          <p style={{ marginTop: 7, color: "#6b7280", fontSize: `${12.5 * scale}px`, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.description}</p>
+        ) : null}
+        {item.stats.length ? (
+          <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {item.stats.map((stat) => (
+              <span key={stat} style={{ padding: "2px 7px", borderRadius: 999, backgroundColor: "#f3f4f8", color: "#7a7a8c", fontSize: `${11.5 * scale}px`, fontWeight: 700 }}>{stat}</span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SearchSectionHeader({ title, shown, loaded, total }: { title: string; shown: number; loaded: number; total: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "4px" }}>
+      <h2 style={{ fontSize: "16px", fontWeight: 700, color: "#1a1a2e" }}>{title}</h2>
+      <span style={{ fontSize: "13px", color: "#8b8b9a" }}>已显示 {shown} 个，已加载 {loaded}/{Math.max(total, loaded)} 个</span>
+    </div>
+  );
+}
+
+function MiniSearchTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        height: "30px",
+        padding: "0 11px",
+        borderRadius: "8px",
+        border: "none",
+        backgroundColor: active ? "#fff" : "transparent",
+        color: active ? "#4338ca" : "#666679",
+        boxShadow: active ? "0 1px 4px rgba(65,65,95,0.09)" : "none",
+        fontSize: "12.5px",
+        fontWeight: 800,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function buildGenericContentDetail(item: AggregateSearchResult["films"][number], kind: ContentDetailState["kind"]): ContentDetailState {
+  const title = item.title || item.author || "未命名内容";
+  return {
+    id: `${kind}:${item.id}`,
+    kind,
+    title,
+    text: "",
+    contentText: item.description,
+    cover: item.cover || item.author_face,
+    url: item.url,
+    images: item.cover ? [item.cover] : [],
+    liveRoomId: kind === "live" ? Number(item.id) || undefined : undefined,
+    seasonId: kind === "film" ? Number(item.id) || undefined : undefined,
+    articleId: kind === "article" ? Number(item.id) || undefined : undefined,
+    typeLabel: item.badge,
+    author: item.author || item.mid > 0 ? {
+      mid: item.mid,
+      name: item.author || item.title,
+      face: item.author_face || item.cover,
+    } : undefined,
+  };
+}
+
+function formatSearchTabCount(count: number) {
+  if (count >= 100) return "99+";
+  return String(Math.max(0, count));
+}
+
+const tabCountBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: "28px",
+  height: "19px",
+  padding: "0 7px",
+  borderRadius: "999px",
+  backgroundColor: "#eceef3",
+  color: "#657080",
+  fontSize: "11.5px",
+  fontWeight: 850,
+  lineHeight: 1,
+};
+
+function getSearchTypeLabel(type: SearchResultType) {
+  const labels: Record<SearchResultType, string> = {
+    all: "综合",
+    video: "视频",
+    bangumi: "番剧",
+    film: "影视",
+    live: "直播",
+    article: "专栏",
+    user: "用户",
+  };
+  return labels[type];
 }
 
 function SectionHeader({ title, count }: { title: string; count: number }) {

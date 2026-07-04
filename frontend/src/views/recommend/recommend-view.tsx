@@ -9,7 +9,6 @@ import {
   MessageCircle,
   MoreVertical,
   PlaySquare,
-  RefreshCw,
   Repeat2,
   Rss,
   Search,
@@ -28,6 +27,8 @@ import { useAppStore } from "@/stores/app-store";
 import type { RecommendPageDynamicItem } from "@/stores/app-store";
 import { ClickableAvatar, UnifiedVideoCard } from "@/components/video-card";
 import { showNotice } from "@/lib/coming-soon";
+import { PageCardControls } from "@/components/page-card-controls";
+import { PurpleRefreshButton } from "@/components/toolbar-controls";
 
 interface BackendVideo {
   aid: number;
@@ -124,7 +125,11 @@ export function RecommendView() {
   const openPlayer = useAppStore((s) => s.openPlayer);
   const openUpProfile = useAppStore((s) => s.openUpProfile);
   const openContentDetail = useAppStore((s) => s.openContentDetail);
-  const { pageSize, cardScale, columns } = useCardLayout();
+  const viewMode = useAppStore((s) => s.cardViewModes.recommend ?? "grid");
+  const dynamicViewMode = useAppStore((s) => s.cardViewModes.dynamic ?? "grid");
+  const setCardViewMode = useAppStore((s) => s.setCardViewMode);
+  const { pageSize, cardScale, columns } = useCardLayout("recommend", viewMode);
+  const { cardScale: dynamicCardScale, columns: dynamicColumns } = useCardLayout("dynamic", dynamicViewMode);
   const recommendPageState = useAppStore((s) => s.recommendPageState);
   const setRecommendPageState = useAppStore((s) => s.setRecommendPageState);
   const {
@@ -146,6 +151,7 @@ export function RecommendView() {
   const [dynamicLoading, setDynamicLoading] = useState(false);
   const [dynamicRefreshing, setDynamicRefreshing] = useState(false);
   const [multiSelectEnabled, setMultiSelectEnabled] = useState(false);
+  const [searchDraft, setSearchDraft] = useState(searchQuery);
   const [selectedVideoIds, setSelectedVideoIds] = useState<Set<string>>(new Set());
   const [selectedDynamicIds, setSelectedDynamicIds] = useState<Set<string>>(new Set());
   const [batchDownloading, setBatchDownloading] = useState(false);
@@ -154,6 +160,7 @@ export function RecommendView() {
   const batchIndexesRef = useRef<Record<string, number>>(recommendPageState.batchIndexes);
   const paginationMountedRef = useRef(false);
   const requestIdRef = useRef(0);
+  const searchComposingRef = useRef(false);
 
   const activeCategoryInfo = useMemo(
     () => ALL_CATEGORIES.find((category) => category.label === activeCategory) ?? CATEGORIES[0],
@@ -281,6 +288,12 @@ export function RecommendView() {
   }, [activeCategoryInfo, fetchVideos, loadedCategory, setRecommendPageState]);
 
   useEffect(() => {
+    if (!searchComposingRef.current) {
+      setSearchDraft(searchQuery);
+    }
+  }, [searchQuery]);
+
+  useEffect(() => {
     if (activeTab !== "dynamic" || dynamicItems.length > 0 || dynamicLoading) return;
     void fetchFollowingDynamics("replace");
   }, [activeTab, dynamicItems.length, dynamicLoading, fetchFollowingDynamics]);
@@ -304,13 +317,13 @@ export function RecommendView() {
     setRecommendPageState({ currentPage: 1 });
   }, [activeCategory, pageSize, searchQuery, setRecommendPageState, sortMode]);
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     if (activeTab === "dynamic") {
-      void fetchFollowingDynamics("replace", true);
+      await fetchFollowingDynamics("replace", true);
       return;
     }
     setRecommendPageState({ currentPage: 1 });
-    void fetchVideos(activeCategoryInfo, "replace", true);
+    await fetchVideos(activeCategoryInfo, "replace", true);
   };
 
   const handleLoadMore = useCallback(async (targetPage?: number) => {
@@ -325,13 +338,21 @@ export function RecommendView() {
   const displayedVideos = useMemo(() => {
     let result = [...videos];
 
-    if (searchQuery.trim()) {
-      const keyword = searchQuery.trim().toLowerCase();
-      result = result.filter(
-        (video) =>
-          video.title.toLowerCase().includes(keyword) ||
-          video.author.toLowerCase().includes(keyword)
-      );
+    if (normalizeSearchText(searchQuery)) {
+      const keyword = normalizeSearchText(searchQuery);
+      result = result.filter((video) => matchesSearchFields(keyword, [
+        video.title,
+        video.author,
+        video.bvid,
+        video.cid,
+        video.duration,
+        video.views,
+        video.likes,
+        video.viewCount,
+        video.likeCount,
+        video.favoriteCount,
+        video.replyCount,
+      ]));
     }
 
     const parseDuration = (duration: string) =>
@@ -359,21 +380,48 @@ export function RecommendView() {
   }, [searchQuery, sortMode, videos]);
 
   const displayedDynamicItems = useMemo(() => {
-    const keyword = searchQuery.trim().toLowerCase();
+    const keyword = normalizeSearchText(searchQuery);
     const result = dynamicItems.filter((item) => {
       if (!keyword) return true;
-      return (
-        item.author_name.toLowerCase().includes(keyword) ||
-        item.major_title.toLowerCase().includes(keyword) ||
-        item.text.toLowerCase().includes(keyword) ||
-        item.content_text.toLowerCase().includes(keyword)
-      );
+      return matchesSearchFields(keyword, [
+        item.author_name,
+        item.author_mid,
+        item.type_label,
+        item.action_text,
+        item.text,
+        item.content_text,
+        item.topic_name,
+        item.major_title,
+        item.major_url,
+        item.bvid,
+        item.aid,
+        item.duration_text,
+        item.view_count,
+        item.danmaku_count,
+        item.repost_count,
+        item.comment_count,
+        item.like_count,
+      ]);
     });
     if (sortMode === "duration_desc" || sortMode === "likes_desc") {
       return [...result].sort((left, right) => right.pub_ts - left.pub_ts);
     }
     return result;
   }, [dynamicItems, searchQuery, sortMode]);
+
+  const groupedDynamicItems = useMemo(() => {
+    const groups: Array<{ bucket: string; items: FollowingDynamicItem[] }> = [];
+    for (const item of displayedDynamicItems) {
+      const bucket = getDynamicTimeBucket(item.pub_ts);
+      const last = groups[groups.length - 1];
+      if (last?.bucket === bucket) {
+        last.items.push(item);
+      } else {
+        groups.push({ bucket, items: [item] });
+      }
+    }
+    return groups;
+  }, [displayedDynamicItems]);
 
   const pageCount = useMemo(
     () => Math.max(1, Math.ceil(displayedVideos.length / pageSize)),
@@ -552,6 +600,21 @@ export function RecommendView() {
       style={{ background: "#f5f5f7" }}
     >
       <div style={{ padding: "32px 36px 20px" }}>
+        <motion.div variants={itemVariants} style={{ marginBottom: "14px" }}>
+          <h1 style={{ fontSize: "24px", color: "#1a1a2e", fontWeight: 800 }}>
+            推荐/关注动态
+          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "13px", color: "#8b8b9a" }}>
+              {activeTab === "dynamic" ? "关注 UP 主的最新动态" : activeCategory === "全部" ? "首页个性化推荐" : `${activeCategory}分区近期投稿`}
+            </span>
+            <PurpleRefreshButton
+              loading={isRefreshing || isLoading || dynamicRefreshing || dynamicLoading}
+              onClick={handleRefresh}
+            />
+          </div>
+        </motion.div>
+
         <motion.div
           variants={itemVariants}
           style={{
@@ -563,51 +626,16 @@ export function RecommendView() {
             flexWrap: "wrap",
           }}
         >
-          <div>
-            <h1 style={{ fontSize: "24px", color: "#1a1a2e", fontWeight: 800 }}>
-              推荐/关注动态
-            </h1>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "6px", flexWrap: "wrap" }}>
-              <span style={{ fontSize: "13px", color: "#8b8b9a" }}>
-                {activeCategory === "全部" ? "首页个性化推荐" : `${activeCategory}分区近期投稿`}
-              </span>
-              <button
-                onClick={() => void handleRefresh()}
-                disabled={isRefreshing || isLoading || dynamicRefreshing || dynamicLoading}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "6px",
-                  backgroundColor: "transparent",
-                  border: "none",
-                  padding: "4px 10px",
-                  borderRadius: "8px",
-                  color: isRefreshing || isLoading || dynamicRefreshing || dynamicLoading ? "#aaa" : "#6366f1",
-                  fontSize: "12.5px",
-                  fontWeight: 600,
-                  cursor: isRefreshing || isLoading || dynamicRefreshing || dynamicLoading ? "not-allowed" : "pointer",
-                }}
-              >
-                {isRefreshing || dynamicRefreshing || dynamicLoading ? (
-                  <Loader2 className="animate-spin" style={{ width: 14, height: 14 }} />
-                ) : (
-                  <RefreshCw style={{ width: 14, height: 14 }} />
-                )}
-                刷新
-              </button>
-            </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "4px", padding: "4px", borderRadius: "11px", backgroundColor: "#ececf4", flexShrink: 0 }}>
+            <TabButton active={activeTab === "home"} onClick={() => setRecommendPageState({ activeTab: "home" })} icon={<SlidersHorizontal style={{ width: 15, height: 15 }} />}>
+              首页推荐
+            </TabButton>
+            <TabButton active={activeTab === "dynamic"} onClick={() => setRecommendPageState({ activeTab: "dynamic" })} icon={<Rss style={{ width: 15, height: 15 }} />}>
+              关注动态
+            </TabButton>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "4px", padding: "4px", borderRadius: "11px", backgroundColor: "#ececf4" }}>
-              <TabButton active={activeTab === "home"} onClick={() => setRecommendPageState({ activeTab: "home" })} icon={<SlidersHorizontal style={{ width: 15, height: 15 }} />}>
-                首页推荐
-              </TabButton>
-              <TabButton active={activeTab === "dynamic"} onClick={() => setRecommendPageState({ activeTab: "dynamic" })} icon={<Rss style={{ width: 15, height: 15 }} />}>
-                关注动态
-              </TabButton>
-            </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "10px", flexWrap: "wrap", flex: 1 }}>
             <div
               style={{
                 display: "flex",
@@ -625,8 +653,23 @@ export function RecommendView() {
               <input
                 type="text"
                 placeholder={activeTab === "dynamic" ? "搜索关注动态、UP 主或内容简介" : "搜索标题、UP 主或关键词"}
-                value={searchQuery}
-                onChange={(e) => setRecommendPageState({ searchQuery: e.target.value })}
+                value={searchDraft}
+                onCompositionStart={() => {
+                  searchComposingRef.current = true;
+                }}
+                onCompositionEnd={(event) => {
+                  searchComposingRef.current = false;
+                  const nextValue = event.currentTarget.value;
+                  setSearchDraft(nextValue);
+                  setRecommendPageState({ searchQuery: nextValue });
+                }}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  setSearchDraft(nextValue);
+                  if (!searchComposingRef.current) {
+                    setRecommendPageState({ searchQuery: nextValue });
+                  }
+                }}
                 style={{
                   width: "100%",
                   border: "none",
@@ -639,6 +682,7 @@ export function RecommendView() {
               />
             </div>
 
+            {activeTab === "home" ? (
             <button
               onClick={handleToggleSort}
               title={
@@ -667,18 +711,37 @@ export function RecommendView() {
               <SlidersHorizontal style={{ width: 15, height: 15 }} />
               {sortMode === "default" ? "默认排序" : sortMode === "likes_desc" ? "点赞优先" : "时长优先"}
             </button>
+            ) : null}
+            {activeTab === "dynamic" ? (
+              <PageCardControls
+                layoutKey="dynamic"
+                viewMode={dynamicViewMode}
+                onViewModeChange={(mode) => setCardViewMode("dynamic", mode)}
+                showLayoutControls={false}
+              />
+            ) : null}
+            {multiSelectEnabled ? (
+              <PageButton onClick={toggleSelectCurrent}>
+                {allVisibleSelected ? "取消全选" : "全选当前"}
+              </PageButton>
+            ) : null}
             <PageButton onClick={toggleMultiSelect}>
-              {multiSelectEnabled ? "关闭多选" : "开启多选"}
+              {multiSelectEnabled ? "取消" : "多选"}
             </PageButton>
             {multiSelectEnabled ? (
               <>
-                <PageButton onClick={toggleSelectCurrent}>
-                  {allVisibleSelected ? "取消当前全选" : "全选当前"}
-                </PageButton>
                 <PageButton disabled={batchDownloading || selectedCount === 0} onClick={() => void handleBatchDownload()}>
                   {batchDownloading ? "下载中" : `下载选中${selectedCount ? `(${selectedCount})` : ""}`}
                 </PageButton>
               </>
+            ) : null}
+            {activeTab === "home" ? (
+              <PageCardControls
+                layoutKey="recommend"
+                viewMode={viewMode}
+                onViewModeChange={(mode) => setCardViewMode("recommend", mode)}
+                showLayoutControls={false}
+              />
             ) : null}
           </div>
         </motion.div>
@@ -815,32 +878,43 @@ export function RecommendView() {
             </div>
           ) : (
             <>
-              <div style={{ display: "grid", gap: "10px", maxWidth: "780px", margin: "0 auto" }}>
-                {displayedDynamicItems.map((item, index) => {
-                  const key = item.id || item.bvid;
-                  const toggleSelection = () => {
-                    setSelectedDynamicIds((previous) => {
-                      const next = new Set(previous);
-                      if (next.has(key)) next.delete(key);
-                      else next.add(key);
-                      return next;
-                    });
-                  };
-                  return (
-                    <div key={item.id || `${item.author_mid}-${item.pub_ts}-${item.text}`}>
-                      <DynamicTimelineLabel item={item} previous={displayedDynamicItems[index - 1]} />
-                      <FollowingDynamicCard
-                        item={item}
-                        onOpenAuthor={() => item.author_mid ? openUpProfile({ mid: item.author_mid, name: item.author_name, face: item.author_face }) : undefined}
-                        onOpenContent={handleOpenDynamic}
-                        onOpenBrowser={handleOpenDynamicBrowser}
-                        selectable={multiSelectEnabled && Boolean(item.bvid)}
-                        selected={selectedDynamicIds.has(key)}
-                        onToggleSelection={toggleSelection}
-                      />
+              <div style={{ display: "grid", gap: `${14 * dynamicCardScale}px`, maxWidth: dynamicViewMode === "grid" ? "1180px" : "780px", margin: "0 auto" }}>
+                {groupedDynamicItems.map((group) => (
+                  <section key={group.bucket} style={{ display: "grid", gap: `${10 * dynamicCardScale}px` }}>
+                    <DynamicTimelineLabelText label={group.bucket} />
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: dynamicViewMode === "grid" ? fixedCardGridColumns(dynamicColumns) : "1fr",
+                        gap: `${12 * dynamicCardScale}px`,
+                      }}
+                    >
+                      {group.items.map((item) => {
+                        const key = item.id || item.bvid;
+                        const toggleSelection = () => {
+                          setSelectedDynamicIds((previous) => {
+                            const next = new Set(previous);
+                            if (next.has(key)) next.delete(key);
+                            else next.add(key);
+                            return next;
+                          });
+                        };
+                        return (
+                          <FollowingDynamicCard
+                            key={item.id || `${item.author_mid}-${item.pub_ts}-${item.text}`}
+                            item={item}
+                            onOpenAuthor={() => item.author_mid ? openUpProfile({ mid: item.author_mid, name: item.author_name, face: item.author_face }) : undefined}
+                            onOpenContent={handleOpenDynamic}
+                            onOpenBrowser={handleOpenDynamicBrowser}
+                            selectable={multiSelectEnabled && Boolean(item.bvid)}
+                            selected={selectedDynamicIds.has(key)}
+                            onToggleSelection={toggleSelection}
+                          />
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  </section>
+                ))}
               </div>
               {dynamicHasMore ? (
                 <div style={{ display: "flex", justifyContent: "center", marginTop: "22px" }}>
@@ -865,7 +939,7 @@ export function RecommendView() {
               variants={itemVariants}
               style={{
                 display: "grid",
-                gridTemplateColumns: fixedCardGridColumns(columns),
+                gridTemplateColumns: viewMode === "grid" ? fixedCardGridColumns(columns) : "1fr",
                 gap: "18px",
               }}
             >
@@ -963,15 +1037,11 @@ function TabButton({
   );
 }
 
-function DynamicTimelineLabel({ item, previous }: { item: FollowingDynamicItem; previous?: FollowingDynamicItem }) {
-  const currentBucket = getDynamicTimeBucket(item.pub_ts);
-  if (previous && getDynamicTimeBucket(previous.pub_ts) === currentBucket) {
-    return null;
-  }
+function DynamicTimelineLabelText({ label }: { label: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "12px", margin: "2px 0 8px", color: "#8b8b9a", fontSize: "13px", fontWeight: 850 }}>
       <span style={{ flex: 1, height: 1, backgroundColor: "#e4e4ec" }} />
-      <span>{currentBucket}</span>
+      <span>{label}</span>
       <span style={{ flex: 1, height: 1, backgroundColor: "#e4e4ec" }} />
     </div>
   );
@@ -1210,6 +1280,18 @@ async function copyText(text: string) {
   textarea.select();
   document.execCommand("copy");
   document.body.removeChild(textarea);
+}
+
+function normalizeSearchText(value?: string | null) {
+  return (value || "")
+    .normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase("zh-CN");
+}
+
+function matchesSearchFields(keyword: string, fields: Array<string | number | null | undefined>) {
+  if (!keyword) return true;
+  return fields.some((field) => normalizeSearchText(String(field ?? "")).includes(keyword));
 }
 
 const dynamicActionButtonStyle = {

@@ -13,6 +13,8 @@ import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
 import { formatBiliImageUrl, formatDateTime, formatNumber } from "@/lib/utils";
 import type { VideoInfo } from "@/lib/types";
 import type { RecommendPageDynamicItem } from "@/stores/app-store";
+import { PageCardControls } from "@/components/page-card-controls";
+import { PurpleRefreshButton } from "@/components/toolbar-controls";
 
 interface UpProfile {
   mid: number;
@@ -82,7 +84,9 @@ export function UpProfileView() {
   const openUpProfile = useAppStore((s) => s.openUpProfile);
   const openPlayer = useAppStore((s) => s.openPlayer);
   const openContentDetail = useAppStore((s) => s.openContentDetail);
-  const { cardScale, columns } = useCardLayout();
+  const viewMode = useAppStore((s) => s.cardViewModes.up ?? "grid");
+  const setCardViewMode = useAppStore((s) => s.setCardViewMode);
+  const { cardScale, columns } = useCardLayout("up", viewMode);
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const [activeTab, setActiveTab] = useState<ActiveTab>("videos");
   const [profile, setProfile] = useState<UpProfile | null>(null);
@@ -391,9 +395,12 @@ export function UpProfileView() {
         <ClickableAvatar src={displayProfile.face} alt={displayProfile.name} size={78} />
         <div style={{ minWidth: 0 }}>
           <h1 style={{ fontSize: "24px", lineHeight: 1.2, fontWeight: 800, color: "#1a1a2e" }}>{displayProfile.name || "UP 主"}</h1>
-          <p style={{ marginTop: "8px", color: "#7a7a8c", fontSize: "13.5px", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-            {displayProfile.sign || "这个 UP 主暂时没有填写简介"}
-          </p>
+          <div style={{ marginTop: "8px", display: "flex", alignItems: "flex-start", gap: "10px", flexWrap: "wrap" }}>
+            <p style={{ flex: "1 1 280px", color: "#7a7a8c", fontSize: "13.5px", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+              {displayProfile.sign || "这个 UP 主暂时没有填写简介"}
+            </p>
+            <PurpleRefreshButton loading={loading} onClick={() => activeTab === "videos" ? fetchVideos(1, "replace") : fetchDynamics("", "replace")} />
+          </div>
           <div style={{ marginTop: "12px", display: "flex", gap: "16px", color: "#505065", fontSize: "13px", flexWrap: "wrap" }}>
             {headerStats.map(([label, value]) => (
               <span key={label}><strong style={{ color: "#1a1a2e" }}>{value}</strong> {label}</span>
@@ -429,27 +436,21 @@ export function UpProfileView() {
           </TabButton>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap" }}>
-          <ActionButton
-            onClick={() => activeTab === "videos" ? void fetchVideos(1, "replace") : void fetchDynamics("", "replace")}
-            icon={<RefreshCw style={{ width: 15, height: 15 }} />}
-          >
-            刷新
-          </ActionButton>
           {activeTab === "videos" ? (
             <>
-              <ActionButton
-                onClick={() => {
-                  setMultiSelectEnabled((value) => !value);
-                  if (multiSelectEnabled) setSelectedVideoIds(new Set());
-                }}
-                icon={<span aria-hidden="true">{multiSelectEnabled ? "✓" : "□"}</span>}
-              >
-                {multiSelectEnabled ? "关闭多选" : "开启多选"}
-              </ActionButton>
               {multiSelectEnabled ? (
                 <>
                   <ActionButton onClick={toggleCurrentVideoSelection} icon={<span aria-hidden="true">☑</span>}>
-                    {videos.length > 0 && videos.every((video) => selectedVideoIds.has(video.bvid)) ? "取消当前全选" : "全选当前"}
+                    {videos.length > 0 && videos.every((video) => selectedVideoIds.has(video.bvid)) ? "取消全选" : "全选当前"}
+                  </ActionButton>
+                  <ActionButton
+                    onClick={() => {
+                      setMultiSelectEnabled(false);
+                      setSelectedVideoIds(new Set());
+                    }}
+                    icon={<span aria-hidden="true">✓</span>}
+                  >
+                    取消
                   </ActionButton>
                   <ActionButton
                     disabled={downloadingAll || selectedVideoIds.size === 0}
@@ -459,8 +460,23 @@ export function UpProfileView() {
                     下载选中({selectedVideoIds.size})
                   </ActionButton>
                 </>
-              ) : null}
+              ) : (
+                <ActionButton
+                  onClick={() => setMultiSelectEnabled(true)}
+                  icon={<span aria-hidden="true">□</span>}
+                >
+                  多选
+                </ActionButton>
+              )}
             </>
+          ) : null}
+          {activeTab === "videos" ? (
+            <PageCardControls
+              layoutKey="up"
+              viewMode={viewMode}
+              onViewModeChange={(mode) => setCardViewMode("up", mode)}
+              showLayoutControls={false}
+            />
           ) : null}
         </div>
       </div>
@@ -471,7 +487,7 @@ export function UpProfileView() {
         </div>
       ) : activeTab === "videos" ? (
         <>
-          <div style={{ marginTop: "18px", display: "grid", gridTemplateColumns: fixedCardGridColumns(columns), gap: `${14 * cardScale}px` }}>
+          <div style={{ marginTop: "18px", display: "grid", gridTemplateColumns: viewMode === "grid" ? fixedCardGridColumns(columns) : "1fr", gap: `${14 * cardScale}px` }}>
             {videos.map((video) => (
               <UnifiedVideoCard
                 key={video.bvid}

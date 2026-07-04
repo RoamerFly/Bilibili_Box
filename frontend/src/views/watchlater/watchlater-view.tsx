@@ -3,12 +3,9 @@ import {
   ChevronDown,
   Clock,
   Download,
-  LayoutGrid,
-  List,
   Loader2,
   MoreVertical,
   Play,
-  RefreshCw,
   Search,
   Trash2,
 } from "lucide-react";
@@ -25,6 +22,8 @@ import { useAppStore } from "@/stores/app-store";
 import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
 import { runPreservingMainScroll } from "@/lib/scroll-position";
 import { ClickableAvatar } from "@/components/video-card";
+import { PageCardControls } from "@/components/page-card-controls";
+import { PurpleRefreshButton } from "@/components/toolbar-controls";
 
 interface WatchLaterItem {
   aid: number;
@@ -108,7 +107,7 @@ export function WatchLaterView() {
   const openUpProfile = useAppStore((s) => s.openUpProfile);
   const viewMode = useAppStore((s) => s.cardViewModes.watchlater ?? "list");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
-  const { pageSize, cardScale, columns } = useCardLayout();
+  const { pageSize, cardScale, columns } = useCardLayout("watchlater", viewMode);
   const [items, setItems] = useState<WatchLaterItem[]>([]);
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -185,6 +184,7 @@ export function WatchLaterView() {
     const start = (currentPage - 1) * pageSize;
     return filteredItems.slice(start, start + pageSize);
   }, [currentPage, filteredItems, pageSize]);
+  const allCurrentSelected = pagedItems.length > 0 && pagedItems.every((item) => selectedIds.has(item.aid));
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -278,13 +278,13 @@ export function WatchLaterView() {
           <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
             稍后再看
           </h1>
-          <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "4px" }}>共 {count} 个视频</p>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "14px", color: "#8b8b9a" }}>共 {count} 个视频</span>
+            <PurpleRefreshButton loading={refreshing} onClick={handleRefresh} />
+          </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <ActionButton onClick={() => void handleRefresh()} icon={<RefreshCw className={refreshing ? "animate-spin" : ""} style={{ width: 15, height: 15 }} />}>
-            刷新
-          </ActionButton>
           <ActionButton onClick={handleClearAll} icon={<Trash2 style={{ width: 15, height: 15 }} />}>
             清空列表
           </ActionButton>
@@ -328,27 +328,30 @@ export function WatchLaterView() {
               flexWrap: "wrap",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>              <ActionButton
-                onClick={() => {
-                  setMultiSelectEnabled((enabled) => {
-                    if (enabled) setSelectedIds(new Set());
-                    return !enabled;
-                  });
-                }}
-                icon={<span aria-hidden="true">{multiSelectEnabled ? "✓" : "□"}</span>}
-              >
-                {multiSelectEnabled ? "关闭多选" : "开启多选"}
-              </ActionButton>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
               {multiSelectEnabled ? (
                 <>
                   <ActionButton onClick={handleToggleSelectAll} icon={<span aria-hidden="true">□</span>}>
-                    全选当前
+                    {allCurrentSelected ? "取消全选" : "全选当前"}
+                  </ActionButton>
+                  <ActionButton
+                    onClick={() => {
+                      setMultiSelectEnabled(false);
+                      setSelectedIds(new Set());
+                    }}
+                    icon={<span aria-hidden="true">✓</span>}
+                  >
+                    取消
                   </ActionButton>
                   <ActionButton onClick={() => void handleBatchDownload()} icon={batchDownloading ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Download style={{ width: 15, height: 15 }} />}>
                     下载选中{selectedIds.size ? `(${selectedIds.size})` : ""}
                   </ActionButton>
                 </>
-              ) : null}
+              ) : (
+                <ActionButton onClick={() => setMultiSelectEnabled(true)} icon={<span aria-hidden="true">□</span>}>
+                  多选
+                </ActionButton>
+              )}
               <div style={{ position: "relative", width: "220px" }}>
                 <Search
                   style={{
@@ -401,10 +404,12 @@ export function WatchLaterView() {
               />
             </div>
 
-            <div style={{ display: "flex", gap: "2px", padding: "3px", borderRadius: "9px", backgroundColor: "#f3f3f8" }}>
-              <ViewButton active={viewMode === "list"} onClick={() => setCardViewMode("watchlater", "list")} icon={<List style={{ width: 16, height: 16 }} />} />
-              <ViewButton active={viewMode === "grid"} onClick={() => setCardViewMode("watchlater", "grid")} icon={<LayoutGrid style={{ width: 16, height: 16 }} />} />
-            </div>
+            <PageCardControls
+              layoutKey="watchlater"
+              viewMode={viewMode}
+              onViewModeChange={(mode) => setCardViewMode("watchlater", mode)}
+              showLayoutControls={false}
+            />
           </div>
 
           {filteredItems.length === 0 ? (
@@ -719,36 +724,6 @@ function ActionButton({
       {icon}
       {children}
     </motion.button>
-  );
-}
-
-function ViewButton({
-  active,
-  onClick,
-  icon,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        width: "32px",
-        height: "30px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: "7px",
-        border: "none",
-        cursor: "pointer",
-        backgroundColor: active ? "#6366f1" : "transparent",
-        color: active ? "#fff" : "#8b8b9a",
-      }}
-    >
-      {icon}
-    </button>
   );
 }
 

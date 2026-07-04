@@ -6,7 +6,7 @@ import {
   Folder,
   Heart,
   Loader2,
-  RefreshCw,
+  Search,
   Star,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -22,6 +22,8 @@ import { useAppStore } from "@/stores/app-store";
 import { runPreservingMainScroll } from "@/lib/scroll-position";
 import { ClickableAvatar } from "@/components/video-card";
 import type { VideoInfo } from "@/lib/types";
+import { PageCardControls } from "@/components/page-card-controls";
+import { PurpleRefreshButton } from "@/components/toolbar-controls";
 
 interface FavFolder {
   id: number;
@@ -96,13 +98,35 @@ function isLoggedIn(user: SavedUserInfo | null | undefined) {
   return Boolean(user && (user.isLogin ?? user.is_login) && user.mid);
 }
 
+function normalizeFavoriteSearchText(value?: string | number | null) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase("zh-CN");
+}
+
+function matchesFavoriteSearch(media: FavMedia, keyword: string) {
+  const normalized = normalizeFavoriteSearchText(keyword);
+  if (!normalized) return true;
+  return [
+    media.title,
+    media.bvid,
+    media.cid,
+    media.duration,
+    media.upper?.name,
+    media.upper?.mid,
+  ].some((field) => normalizeFavoriteSearchText(field).includes(normalized));
+}
+
 export function FavoritesView() {
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
   const openUpProfile = useAppStore((s) => s.openUpProfile);
   const activeSection = useAppStore((s) => s.favoritesPageState.activeTab);
   const setFavoritesPageState = useAppStore((s) => s.setFavoritesPageState);
-  const { pageSize, cardScale, columns } = useCardLayout();
+  const viewMode = useAppStore((s) => s.cardViewModes.favorites ?? "grid");
+  const setCardViewMode = useAppStore((s) => s.setCardViewMode);
+  const { pageSize, cardScale, columns } = useCardLayout("favorites", viewMode);
   const [folders, setFolders] = useState<FavFolder[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<FavFolder | null>(null);
   const [medias, setMedias] = useState<FavMedia[]>([]);
@@ -120,6 +144,7 @@ export function FavoritesView() {
   const [likedHasMore, setLikedHasMore] = useState(false);
   const [likedLoading, setLikedLoading] = useState(false);
   const [likedSource, setLikedSource] = useState<LikedSource>("web");
+  const [searchKeyword, setSearchKeyword] = useState("");
   const selectedFolderIdRef = useRef<number | null>(null);
   const likedInitialFetchKeyRef = useRef<string | null>(null);
 
@@ -284,13 +309,27 @@ export function FavoritesView() {
     void fetchFolderContent(selectedFolder, 1, "replace");
   }, [fetchFolderContent, selectedFolder?.id, pageSize]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+    setSelectedMediaIds(new Set());
+  }, [activeSection, searchKeyword]);
+
+  const likedMedias = useMemo(() => likedVideos.map(likedVideoToFavMedia), [likedVideos]);
+  const filteredLikedMedias = useMemo(
+    () => likedMedias.filter((media) => matchesFavoriteSearch(media, searchKeyword)),
+    [likedMedias, searchKeyword]
+  );
+  const filteredMedias = useMemo(
+    () => medias.filter((media) => matchesFavoriteSearch(media, searchKeyword)),
+    [medias, searchKeyword]
+  );
   const pageCount = useMemo(
-    () => Math.max(1, Math.ceil((selectedFolder?.media_count || 0) / pageSize)),
-    [pageSize, selectedFolder?.media_count]
+    () => Math.max(1, Math.ceil((searchKeyword.trim() ? filteredMedias.length : selectedFolder?.media_count || 0) / pageSize)),
+    [filteredMedias.length, pageSize, searchKeyword, selectedFolder?.media_count]
   );
   const loadedPageCount = useMemo(
-    () => Math.max(1, loadedPages, Math.ceil(medias.length / pageSize)),
-    [loadedPages, medias.length, pageSize]
+    () => Math.max(1, searchKeyword.trim() ? Math.ceil(filteredMedias.length / pageSize) : loadedPages, Math.ceil(filteredMedias.length / pageSize)),
+    [filteredMedias.length, loadedPages, pageSize, searchKeyword]
   );
 
   const visiblePages = useMemo(
@@ -299,11 +338,10 @@ export function FavoritesView() {
   );
   const pagedMedias = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
-    return medias.slice(start, start + pageSize);
-  }, [currentPage, medias, pageSize]);
-  const likedMedias = useMemo(() => likedVideos.map(likedVideoToFavMedia), [likedVideos]);
-  const selectableMedias = activeSection === "likes" ? likedMedias : medias;
-  const visibleSelectableMedias = activeSection === "likes" ? likedMedias : pagedMedias;
+    return filteredMedias.slice(start, start + pageSize);
+  }, [currentPage, filteredMedias, pageSize]);
+  const selectableMedias = activeSection === "likes" ? filteredLikedMedias : filteredMedias;
+  const visibleSelectableMedias = activeSection === "likes" ? filteredLikedMedias : pagedMedias;
   const currentPageAllSelected = visibleSelectableMedias.length > 0 && visibleSelectableMedias.every((media) => selectedMediaIds.has(media.id));
   const handlePageChange = (page: number) => {
     runPreservingMainScroll(() => setCurrentPage(page));
@@ -540,31 +578,43 @@ export function FavoritesView() {
           <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
             我的点赞/收藏
           </h1>
-          <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "4px" }}>
-            {activeSection === "likes" ? `已加载 ${likedVideos.length} 个点赞视频` : `共 ${folders.length} 个收藏夹`}
-          </p>
-          <div style={{ display: "none" }}>
-          <h1 style={{ display: "none", fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
-            我的收藏
-          </h1>
-          <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "4px" }}>
-            共 {folders.length} 个收藏夹
-          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "14px", color: "#8b8b9a" }}>
+              {activeSection === "likes" ? `已加载 ${likedVideos.length} 个点赞视频` : `共 ${folders.length} 个收藏夹`}
+            </span>
+            <PurpleRefreshButton loading={refreshing || likedLoading} onClick={handleRefresh} />
           </div>
         </div>
-
-        <ActionButton onClick={() => void handleRefresh()} icon={<RefreshCw className={refreshing ? "animate-spin" : ""} style={{ width: 16, height: 16 }} />}>
-          刷新
-        </ActionButton>
       </motion.div>
 
-      <div style={{ display: "inline-flex", alignSelf: "flex-start", padding: "4px", borderRadius: "12px", backgroundColor: "#f3f4f8", marginBottom: "18px" }}>
-        <SectionTab active={activeSection === "likes"} icon={<Heart style={{ width: 16, height: 16 }} />} onClick={() => setFavoritesPageState({ activeTab: "likes" })}>
-          我的点赞
-        </SectionTab>
-        <SectionTab active={activeSection === "favorites"} icon={<Star style={{ width: 16, height: 16 }} />} onClick={() => setFavoritesPageState({ activeTab: "favorites" })}>
-          我的收藏
-        </SectionTab>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px", marginBottom: "18px", flexWrap: "wrap" }}>
+        <div style={{ display: "inline-flex", alignSelf: "flex-start", padding: "4px", borderRadius: "12px", backgroundColor: "#f3f4f8", flexShrink: 0 }}>
+          <SectionTab active={activeSection === "likes"} icon={<Heart style={{ width: 16, height: 16 }} />} onClick={() => setFavoritesPageState({ activeTab: "likes" })}>
+            我的点赞
+          </SectionTab>
+          <SectionTab active={activeSection === "favorites"} icon={<Star style={{ width: 16, height: 16 }} />} onClick={() => setFavoritesPageState({ activeTab: "favorites" })}>
+            我的收藏
+          </SectionTab>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "10px", flexWrap: "wrap", flex: 1 }}>
+          {activeSection === "likes" ? (
+            <div style={{ display: "inline-flex", padding: "3px", borderRadius: "10px", backgroundColor: "#f3f4f8" }}>
+              <MiniSourceTab active={likedSource === "web"} onClick={() => handleLikedSourceChange("web")}>
+                网页最近点赞
+              </MiniSourceTab>
+              <MiniSourceTab active={likedSource === "app"} onClick={() => handleLikedSourceChange("app")}>
+                APP 点赞列表
+              </MiniSourceTab>
+            </div>
+          ) : null}
+          <FavoriteSearchBox value={searchKeyword} onChange={setSearchKeyword} />
+          <PageCardControls
+            layoutKey="favorites"
+            viewMode={viewMode}
+            onViewModeChange={(mode) => setCardViewMode("favorites", mode)}
+            showLayoutControls={false}
+          />
+        </div>
       </div>
 
       {error ? (
@@ -599,31 +649,27 @@ export function FavoritesView() {
                 {likedSource === "web" ? "最近点赞的视频" : "APP 点赞列表"}
               </h2>
               <p style={{ marginTop: "3px", fontSize: "13px", color: "#8b8b9a" }}>
-                已加载 {likedMedias.length} 个{likedTotal > 0 ? `，共 ${likedTotal} 个` : ""}
+                已显示 {filteredLikedMedias.length} 个{likedTotal > 0 ? `，已加载 ${likedMedias.length}/${likedTotal} 个` : ""}
               </p>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-              <div style={{ display: "inline-flex", padding: "3px", borderRadius: "10px", backgroundColor: "#f3f4f8" }}>
-                <MiniSourceTab active={likedSource === "web"} onClick={() => handleLikedSourceChange("web")}>
-                  网页最近点赞
-                </MiniSourceTab>
-                <MiniSourceTab active={likedSource === "app"} onClick={() => handleLikedSourceChange("app")}>
-                  APP 点赞列表
-                </MiniSourceTab>
-              </div>
-              <GhostButton onClick={handleToggleBatchMode}>
-                {batchMode ? "退出批量" : "批量管理"}
-              </GhostButton>
               {batchMode ? (
                 <>
                   <GhostButton onClick={handleSelectAll}>
                     {currentPageAllSelected ? "取消全选" : "全选当前"}
                   </GhostButton>
+                  <GhostButton onClick={handleToggleBatchMode}>
+                    取消
+                  </GhostButton>
                   <GhostButton onClick={() => void handleBatchDownload()} disabled={selectedMediaIds.size === 0}>
                     下载选中
                   </GhostButton>
                 </>
-              ) : null}
+              ) : (
+                <GhostButton onClick={handleToggleBatchMode}>
+                  多选
+                </GhostButton>
+              )}
               <GhostButton disabled={likedLoading || refreshing || likedMedias.length === 0} onClick={() => void handleDownloadAllLikes()}>
                 下载全部
               </GhostButton>
@@ -637,20 +683,20 @@ export function FavoritesView() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingTop: "120px" }}>
               <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
             </div>
-          ) : likedMedias.length === 0 ? (
-            <EmptyState message="暂时没有获取到点赞视频" />
+          ) : filteredLikedMedias.length === 0 ? (
+            <EmptyState message={searchKeyword.trim() ? `没有找到“${searchKeyword}”` : "暂时没有获取到点赞视频"} />
           ) : (
             <>
               <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: "4px" }}>
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: fixedCardGridColumns(columns),
+                    gridTemplateColumns: viewMode === "grid" ? fixedCardGridColumns(columns) : "1fr",
                     gap: "14px",
                   }}
                 >
                   <AnimatePresence>
-                    {likedMedias.map((media) => (
+                    {filteredLikedMedias.map((media) => (
                       <FavoriteCard
                         key={media.id || media.bvid}
                         media={media}
@@ -776,25 +822,28 @@ export function FavoritesView() {
                   {selectedFolder?.title || "选择收藏夹"}
                 </h2>
                 <p style={{ marginTop: "3px", fontSize: "13px", color: "#8b8b9a" }}>
-                  当前页显示 {pagedMedias.length} 项，共 {selectedFolder?.media_count || 0} 项
+                  当前页显示 {pagedMedias.length} 项{searchKeyword.trim() ? `，匹配 ${filteredMedias.length} 项` : `，共 ${selectedFolder?.media_count || 0} 项`}
                 </p>
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                <GhostButton onClick={handleToggleBatchMode}>
-                  {batchMode ? "退出批量" : "批量管理"}
-                </GhostButton>
-
                 {batchMode ? (
                   <>
                     <GhostButton onClick={handleSelectAll}>
                       {currentPageAllSelected ? "取消全选" : "全选当前"}
                     </GhostButton>
+                    <GhostButton onClick={handleToggleBatchMode}>
+                      取消
+                    </GhostButton>
                     <GhostButton onClick={() => void handleBatchDownload()} disabled={selectedMediaIds.size === 0}>
                       下载选中
                     </GhostButton>
                   </>
-                ) : null}
+                ) : (
+                  <GhostButton onClick={handleToggleBatchMode}>
+                    多选
+                  </GhostButton>
+                )}
                 <GhostButton onClick={() => void handleDownloadAllFavorites()} disabled={!selectedFolder || refreshing || medias.length === 0}>
                   下载全部
                 </GhostButton>
@@ -807,15 +856,15 @@ export function FavoritesView() {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingTop: "120px" }}>
                 <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
               </div>
-            ) : medias.length === 0 ? (
-              <EmptyState message="这个收藏夹里暂时还没有内容" />
+            ) : filteredMedias.length === 0 ? (
+              <EmptyState message={searchKeyword.trim() ? `没有找到“${searchKeyword}”` : "这个收藏夹里暂时还没有内容"} />
             ) : (
               <>
                 <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: "4px" }}>
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: fixedCardGridColumns(columns),
+                      gridTemplateColumns: viewMode === "grid" ? fixedCardGridColumns(columns) : "1fr",
                       gap: "14px",
                     }}
                   >
@@ -1116,6 +1165,40 @@ function MiniSourceTab({
     >
       {children}
     </button>
+  );
+}
+
+function FavoriteSearchBox({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div style={{ position: "relative", width: 220, display: "flex", alignItems: "center" }}>
+      <Search
+        style={{
+          position: "absolute",
+          left: 12,
+          width: 15,
+          height: 15,
+          color: "#b0b0bc",
+          pointerEvents: "none",
+        }}
+      />
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="搜索标题或 UP 主"
+        style={{
+          width: "100%",
+          height: 36,
+          padding: "0 12px 0 36px",
+          borderRadius: 10,
+          border: "1px solid #ececf2",
+          backgroundColor: "#fff",
+          color: "#1a1a2e",
+          fontSize: 13,
+          fontFamily: "inherit",
+          outline: "none",
+        }}
+      />
+    </div>
   );
 }
 

@@ -20,8 +20,8 @@ use crate::api::history::{GetHistoryInfoParams, HistoryInfo};
 use crate::api::subtitle::{Subtitle, SubtitleInfo};
 use crate::api::up::{UpDynamicPage, UpProfile, UpVideoPage};
 use crate::api::video::{
-    PlayUrlInfo, PlayableUrlInfo, SearchResult, SearchVideoOptions, VideoActionResult,
-    VideoFavoriteFolder, VideoInfo, VideoInteractionState,
+    ArticleDetailInfo, LivePlayInfo, PlayUrlInfo, PlayableUrlInfo, SearchResult,
+    SearchVideoOptions, VideoActionResult, VideoFavoriteFolder, VideoInfo, VideoInteractionState,
 };
 use crate::api::watchlater::WatchLaterInfo;
 use crate::api::BiliClient;
@@ -68,6 +68,35 @@ pub struct ApiHealthItem {
     pub skipped: bool,
     pub message: String,
     pub elapsed_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheBucketInfo {
+    pub label: String,
+    pub path: String,
+    pub file_count: u64,
+    pub total_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheOverview {
+    pub page_cache: CacheBucketInfo,
+    pub download_cache: CacheBucketInfo,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SavedAccountProfile {
+    pub profile: String,
+    pub username: String,
+    pub mid: i64,
+    pub face: String,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AccountSwitchResult {
+    pub config: Config,
+    pub user_info: Option<UserInfo>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -205,6 +234,106 @@ pub fn save_page_cache(
     std::fs::write(path, content).map_err(|e| format!("写入页面缓存失败: {e}"))
 }
 
+#[tauri::command]
+pub fn get_cache_overview(app: AppHandle) -> Result<CacheOverview, String> {
+    let cache_dir = Config::user_cache_dir(&app)?;
+    let page_stats = collect_cache_stats(&cache_dir, CacheStatsMode::Page)?;
+    let download_stats = collect_cache_stats(&cache_dir, CacheStatsMode::Download)?;
+    Ok(CacheOverview {
+        page_cache: CacheBucketInfo {
+            label: "页面缓存".to_string(),
+            path: cache_dir.display().to_string(),
+            file_count: page_stats.0,
+            total_bytes: page_stats.1,
+        },
+        download_cache: CacheBucketInfo {
+            label: "下载缓存".to_string(),
+            path: cache_dir.display().to_string(),
+            file_count: download_stats.0,
+            total_bytes: download_stats.1,
+        },
+    })
+}
+
+#[tauri::command]
+pub fn clear_page_cache(app: AppHandle) -> Result<CacheOverview, String> {
+    let cache_dir = Config::user_cache_dir(&app)?;
+    if cache_dir.is_dir() {
+        for entry in std::fs::read_dir(&cache_dir)
+            .map_err(|e| format!("读取缓存目录失败: {e}"))?
+            .filter_map(Result::ok)
+        {
+            let path = entry.path();
+            let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+            if name == "download" || name == "download_tasks" {
+                continue;
+            }
+            if path.is_dir() {
+                std::fs::remove_dir_all(&path)
+                    .map_err(|e| format!("清理页面缓存失败 ({}): {e}", path.display()))?;
+            } else {
+                std::fs::remove_file(&path)
+                    .map_err(|e| format!("清理页面缓存失败 ({}): {e}", path.display()))?;
+            }
+        }
+    }
+    get_cache_overview(app)
+}
+
+enum CacheStatsMode {
+    Page,
+    Download,
+}
+
+fn collect_cache_stats(root: &std::path::Path, mode: CacheStatsMode) -> Result<(u64, u64), String> {
+    if !root.exists() {
+        return Ok((0, 0));
+    }
+
+    let mut total_files = 0_u64;
+    let mut total_bytes = 0_u64;
+    collect_cache_stats_inner(root, root, &mode, &mut total_files, &mut total_bytes)?;
+    Ok((total_files, total_bytes))
+}
+
+fn collect_cache_stats_inner(
+    root: &std::path::Path,
+    current: &std::path::Path,
+    mode: &CacheStatsMode,
+    total_files: &mut u64,
+    total_bytes: &mut u64,
+) -> Result<(), String> {
+    for entry in std::fs::read_dir(current)
+        .map_err(|e| format!("读取缓存目录失败 ({}): {e}", current.display()))?
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        let relative = path.strip_prefix(root).unwrap_or(&path);
+        let top = relative
+            .components()
+            .next()
+            .and_then(|component| component.as_os_str().to_str())
+            .unwrap_or("");
+        let is_download_cache = top == "download" || top == "download_tasks";
+        match mode {
+            CacheStatsMode::Page if is_download_cache => continue,
+            CacheStatsMode::Download if !is_download_cache => continue,
+            _ => {}
+        }
+
+        let metadata = entry
+            .metadata()
+            .map_err(|e| format!("读取缓存文件信息失败 ({}): {e}", path.display()))?;
+        if metadata.is_dir() {
+            collect_cache_stats_inner(root, &path, mode, total_files, total_bytes)?;
+        } else if metadata.is_file() {
+            *total_files += 1;
+            *total_bytes += metadata.len();
+        }
+    }
+    Ok(())
+}
+
 /// 生成二维码
 #[tauri::command]
 pub async fn generate_qrcode(
@@ -293,6 +422,83 @@ pub fn clear_user_info(
     Config::ensure_user_dirs(&app)?;
     download_manager.reload_current_profile_tasks();
     Ok(())
+}
+
+#[tauri::command]
+pub fn list_saved_accounts(app: AppHandle) -> Result<Vec<SavedAccountProfile>, String> {
+    let data_root = Config::data_root_dir(&app)?;
+    let active_profile = Config::current_profile_name(&app)?;
+    if !data_root.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut accounts = Vec::new();
+    for entry in std::fs::read_dir(&data_root)
+        .map_err(|e| format!("读取账号目录失败: {e}"))?
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(profile) = path.file_name().and_then(|value| value.to_str()).map(str::to_string) else {
+            continue;
+        };
+        if profile == "guest" {
+            continue;
+        }
+        let user_path = path.join("user.json");
+        if !user_path.exists() {
+            continue;
+        }
+        let Ok(user_json) = std::fs::read_to_string(&user_path) else {
+            continue;
+        };
+        let Ok(user_info) = serde_json::from_str::<UserInfo>(&user_json) else {
+            continue;
+        };
+        accounts.push(SavedAccountProfile {
+            profile: profile.clone(),
+            username: user_info.uname,
+            mid: user_info.mid,
+            face: user_info.face,
+            active: profile == active_profile,
+        });
+    }
+
+    accounts.sort_by(|left, right| right.active.cmp(&left.active).then_with(|| left.username.cmp(&right.username)));
+    Ok(accounts)
+}
+
+#[tauri::command]
+pub fn switch_account_profile(
+    app: AppHandle,
+    config: State<'_, Arc<RwLock<Config>>>,
+    bili_client: State<'_, Arc<BiliClient>>,
+    download_manager: State<'_, Arc<DownloadManager>>,
+    profile: String,
+) -> Result<AccountSwitchResult, String> {
+    let profile = Config::sanitize_path_component(&profile);
+    if profile == "guest" {
+        return Err("请使用退出登录进入 guest 模式".to_string());
+    }
+    let data_root = Config::data_root_dir(&app)?;
+    let profile_dir = data_root.join(&profile);
+    if !profile_dir.join("user.json").exists() {
+        return Err("账号数据不存在，无法切换".to_string());
+    }
+
+    Config::set_current_profile(&app, &profile)?;
+    Config::ensure_user_dirs(&app)?;
+    let next_config = Config::load(&app)?;
+    *config.write() = next_config.clone();
+    bili_client.reload_client()?;
+    download_manager.reload_current_profile_tasks();
+    let user_info = get_saved_user_info(app)?;
+    Ok(AccountSwitchResult {
+        config: next_config,
+        user_info,
+    })
 }
 
 #[tauri::command]
@@ -1021,6 +1227,22 @@ pub async fn get_normal_info(
     bvid: String,
 ) -> Result<VideoInfo, String> {
     bili_client.get_normal_info(&bvid).await
+}
+
+#[tauri::command]
+pub async fn get_live_play_info(
+    bili_client: State<'_, Arc<BiliClient>>,
+    room_id: i64,
+) -> Result<LivePlayInfo, String> {
+    bili_client.get_live_play_info(room_id).await
+}
+
+#[tauri::command]
+pub async fn get_article_detail(
+    bili_client: State<'_, Arc<BiliClient>>,
+    article_id: i64,
+) -> Result<ArticleDetailInfo, String> {
+    bili_client.get_article_detail(article_id).await
 }
 
 /// 获取普通视频播放地址

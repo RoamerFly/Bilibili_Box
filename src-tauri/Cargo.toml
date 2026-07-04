@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "bilibili-box"
 version = "1.0.4"
 description = "BiliBox - Bilibili 媒体工作站"

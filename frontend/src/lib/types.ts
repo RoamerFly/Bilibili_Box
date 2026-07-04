@@ -14,6 +14,7 @@ export interface Config {
   theme: string;
   download_quality: string;
   prompt_download_quality: boolean;
+  show_comments: boolean;
   video_quality_priority: number[];
   codec_type_priority: number[];
   audio_quality_priority: number[];
@@ -176,12 +177,33 @@ export interface AggregateKeywordBangumiResult {
   goto_url: string;
 }
 
+export interface AggregateKeywordGenericResult {
+  id: string;
+  title: string;
+  cover: string;
+  description: string;
+  url: string;
+  author: string;
+  author_face: string;
+  mid: number;
+  badge: string;
+  stats: string[];
+}
+
 export interface AggregateSearchResult {
   keyword: string;
   videos: AggregateKeywordVideoResult[];
   bangumi: AggregateKeywordBangumiResult[];
+  films: AggregateKeywordGenericResult[];
+  lives: AggregateKeywordGenericResult[];
+  articles: AggregateKeywordGenericResult[];
+  users: AggregateKeywordGenericResult[];
   video_page: SearchPageInfo;
   bangumi_page: SearchPageInfo;
+  film_page: SearchPageInfo;
+  live_page: SearchPageInfo;
+  article_page: SearchPageInfo;
+  user_page: SearchPageInfo;
 }
 
 export type SearchOrder = "totalrank" | "click" | "pubdate" | "dm" | "stow";

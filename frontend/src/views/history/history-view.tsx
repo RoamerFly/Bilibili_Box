@@ -3,8 +3,6 @@ import {
   ChevronDown,
   Download,
   History,
-  LayoutGrid,
-  List,
   MoreVertical,
   Play,
   RefreshCw,
@@ -23,6 +21,8 @@ import type { BangumiInfo } from "@/lib/types";
 import { useAppStore } from "@/stores/app-store";
 import { runPreservingMainScroll } from "@/lib/scroll-position";
 import { ClickableAvatar } from "@/components/video-card";
+import { PageCardControls } from "@/components/page-card-controls";
+import { PurpleRefreshButton } from "@/components/toolbar-controls";
 
 type ViewMode = "list" | "grid";
 type TimeFilter = "all" | "today" | "yesterday" | "week";
@@ -159,7 +159,7 @@ export function HistoryView() {
   const openUpProfile = useAppStore((s) => s.openUpProfile);
   const viewMode = useAppStore((s) => s.cardViewModes.history ?? "list");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
-  const { pageSize, cardScale, columns } = useCardLayout();
+  const { pageSize, cardScale, columns } = useCardLayout("history", viewMode);
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -430,7 +430,10 @@ export function HistoryView() {
           <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
             观看历史
           </h1>
-          <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "4px" }}>共 {total} 条记录</p>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "14px", color: "#8b8b9a" }}>共 {total} 条记录</span>
+            <PurpleRefreshButton loading={refreshing} onClick={handleRefresh} />
+          </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -468,30 +471,29 @@ export function HistoryView() {
           <ActionButton onClick={() => setKeyword(searchInput.trim())} icon={<Search style={{ width: 15, height: 15 }} />}>
             搜索
           </ActionButton>
-          <ActionButton onClick={() => void handleRefresh()} icon={<RefreshCw className={refreshing ? "animate-spin" : ""} style={{ width: 15, height: 15 }} />}>
-            刷新
-          </ActionButton>
-          <ActionButton
-            onClick={() => {
-              setMultiSelectEnabled((enabled) => {
-                if (enabled) setSelectedKeys(new Set());
-                return !enabled;
-              });
-            }}
-            icon={<span aria-hidden="true">{multiSelectEnabled ? "✓" : "□"}</span>}
-          >
-            {multiSelectEnabled ? "关闭多选" : "开启多选"}
-          </ActionButton>
           {multiSelectEnabled ? (
             <>
               <ActionButton onClick={toggleSelectCurrent} icon={<span aria-hidden="true">□</span>}>
-                {allCurrentSelected ? "取消当前全选" : "全选当前"}
+                {allCurrentSelected ? "取消全选" : "全选当前"}
+              </ActionButton>
+              <ActionButton
+                onClick={() => {
+                  setMultiSelectEnabled(false);
+                  setSelectedKeys(new Set());
+                }}
+                icon={<span aria-hidden="true">✓</span>}
+              >
+                取消
               </ActionButton>
               <ActionButton onClick={() => void handleBatchDownload()} icon={batchDownloading ? <RefreshCw className="animate-spin" style={{ width: 15, height: 15 }} /> : <Download style={{ width: 15, height: 15 }} />}>
                 下载选中{selectedKeys.size ? `(${selectedKeys.size})` : ""}
               </ActionButton>
             </>
-          ) : null}
+          ) : (
+            <ActionButton onClick={() => setMultiSelectEnabled(true)} icon={<span aria-hidden="true">□</span>}>
+              多选
+            </ActionButton>
+          )}
         </div>
       </motion.div>
 
@@ -560,10 +562,12 @@ export function HistoryView() {
           />
         </div>
 
-        <div style={{ display: "flex", gap: "2px", padding: "3px", borderRadius: "9px", backgroundColor: "#f3f3f8" }}>
-          <ViewButton active={viewMode === "list"} onClick={() => setCardViewMode("history", "list")} icon={<List style={{ width: 16, height: 16 }} />} />
-          <ViewButton active={viewMode === "grid"} onClick={() => setCardViewMode("history", "grid")} icon={<LayoutGrid style={{ width: 16, height: 16 }} />} />
-        </div>
+        <PageCardControls
+          layoutKey="history"
+          viewMode={viewMode}
+          onViewModeChange={(mode) => setCardViewMode("history", mode)}
+          showLayoutControls={false}
+        />
       </div>
 
       {loading ? (
@@ -932,36 +936,6 @@ function ActionButton({
       {icon}
       {children}
     </motion.button>
-  );
-}
-
-function ViewButton({
-  active,
-  onClick,
-  icon,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        width: "32px",
-        height: "30px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: "7px",
-        border: "none",
-        cursor: "pointer",
-        backgroundColor: active ? "#6366f1" : "transparent",
-        color: active ? "#fff" : "#8b8b9a",
-      }}
-    >
-      {icon}
-    </button>
   );
 }
 

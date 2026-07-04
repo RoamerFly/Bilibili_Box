@@ -169,6 +169,27 @@ pub struct PlayableUrlInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LivePlayInfo {
+    pub room_id: i64,
+    pub title: String,
+    pub url: Option<String>,
+    pub cover: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleDetailInfo {
+    pub id: i64,
+    pub title: String,
+    pub summary: String,
+    pub content_text: String,
+    pub images: Vec<String>,
+    pub banner_url: String,
+    pub author_mid: i64,
+    pub author_name: String,
+    pub author_face: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum SearchResult {
     Normal(VideoInfo),
@@ -190,8 +211,16 @@ pub struct AggregateSearchResult {
     pub keyword: String,
     pub videos: Vec<KeywordVideoResult>,
     pub bangumi: Vec<KeywordBangumiResult>,
+    pub films: Vec<KeywordGenericSearchResult>,
+    pub lives: Vec<KeywordGenericSearchResult>,
+    pub articles: Vec<KeywordGenericSearchResult>,
+    pub users: Vec<KeywordGenericSearchResult>,
     pub video_page: SearchPageInfo,
     pub bangumi_page: SearchPageInfo,
+    pub film_page: SearchPageInfo,
+    pub live_page: SearchPageInfo,
+    pub article_page: SearchPageInfo,
+    pub user_page: SearchPageInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,6 +274,20 @@ pub struct KeywordBangumiResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeywordGenericSearchResult {
+    pub id: String,
+    pub title: String,
+    pub cover: String,
+    pub description: String,
+    pub url: String,
+    pub author: String,
+    pub author_face: String,
+    pub mid: i64,
+    pub badge: String,
+    pub stats: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BangumiSearchResult {
     pub season_id: i64,
     pub title: String,
@@ -279,6 +322,108 @@ impl super::BiliClient {
             .await?;
 
         serde_json::from_value(data).map_err(|e| format!("解析视频信息失败: {}", e))
+    }
+
+    pub async fn get_live_play_info(&self, room_id: i64) -> Result<LivePlayInfo, String> {
+        let endpoint = "https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo";
+        let data = self
+            .request_bili_value(
+                self.api_client()
+                    .get(endpoint)
+                    .query(&[
+                        ("room_id", room_id.to_string()),
+                        ("protocol", "0,1".to_string()),
+                        ("format", "0,1,2".to_string()),
+                        ("codec", "0,1".to_string()),
+                        ("qn", "10000".to_string()),
+                        ("platform", "web".to_string()),
+                        ("ptype", "8".to_string()),
+                    ])
+                    .header("cookie", self.get_cookie_for_url(endpoint)),
+            )
+            .await?;
+
+        Ok(LivePlayInfo {
+            room_id: data
+                .get("room_id")
+                .and_then(parse_i64_value)
+                .unwrap_or(room_id),
+            title: data
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("直播间")
+                .to_string(),
+            url: extract_live_play_url(&data),
+            cover: data
+                .get("cover")
+                .or_else(|| data.get("keyframe"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        })
+    }
+
+    pub async fn get_article_detail(&self, article_id: i64) -> Result<ArticleDetailInfo, String> {
+        let endpoint = "https://api.bilibili.com/x/article/view";
+        let data = self
+            .request_bili_value(
+                self.api_client()
+                    .get(endpoint)
+                    .query(&[("id", article_id.to_string())])
+                    .header("cookie", self.get_cookie_for_url(endpoint))
+                    .header("referer", format!("https://www.bilibili.com/read/cv{}", article_id)),
+            )
+            .await?;
+
+        let mut content_text = String::new();
+        let mut images = Vec::new();
+        if let Some(content) = data.get("content").and_then(Value::as_str) {
+            if let Ok(content_json) = serde_json::from_str::<Value>(content) {
+                extract_article_content(&content_json, &mut content_text, &mut images);
+            }
+        }
+        extract_article_images(&data, &mut images);
+        images.sort();
+        images.dedup();
+
+        let author = data.get("author").unwrap_or(&Value::Null);
+        Ok(ArticleDetailInfo {
+            id: data.get("id").and_then(parse_i64_value).unwrap_or(article_id),
+            title: data
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            summary: data
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            content_text: content_text.trim().to_string(),
+            images,
+            banner_url: data
+                .get("banner_url")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            author_mid: author
+                .get("mid")
+                .or_else(|| data.get("mid"))
+                .and_then(parse_i64_value)
+                .unwrap_or(0),
+            author_name: author
+                .get("name")
+                .or_else(|| data.get("author_name"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            author_face: author
+                .get("face")
+                .or_else(|| data.get("author_face"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        })
     }
 
     pub async fn get_video_interaction_state(
@@ -810,6 +955,7 @@ impl super::BiliClient {
         keyword: &str,
         options: &SearchVideoOptions,
     ) -> Result<SearchResult, String> {
+        self.ensure_buvid_cookie().await?;
         self.warm_up_web_session(Some(keyword)).await?;
 
         let encoded_keyword: String =
@@ -829,6 +975,14 @@ impl super::BiliClient {
             ("page_size".to_string(), page_size.to_string()),
             ("order".to_string(), order.to_string()),
             ("duration".to_string(), duration.to_string()),
+            ("tids".to_string(), "0".to_string()),
+            ("platform".to_string(), "pc".to_string()),
+            ("web_location".to_string(), "1430654".to_string()),
+            ("source_tag".to_string(), "3".to_string()),
+            ("dm_img_list".to_string(), "[]".to_string()),
+            ("dm_img_str".to_string(), String::new()),
+            ("dm_cover_img_str".to_string(), String::new()),
+            ("dm_img_inter".to_string(), "{}".to_string()),
             ("pubtime_begin_s".to_string(), pubtime_begin_s.clone()),
             ("pubtime_end_s".to_string(), pubtime_end_s.clone()),
         ]);
@@ -839,8 +993,8 @@ impl super::BiliClient {
             encoded_keyword, order, duration, pubtime_begin_s, pubtime_end_s
         );
 
-        let video_data = self
-            .request_search_value(
+        let video_data = match self
+            .request_search_value(apply_search_headers(
                 self.api_client()
                     .get("https://api.bilibili.com/x/web-interface/wbi/search/type")
                     .query(&video_params)
@@ -850,14 +1004,49 @@ impl super::BiliClient {
                             "https://api.bilibili.com/x/web-interface/wbi/search/type",
                         ),
                     )
-                    .header("referer", &search_referer)
                     .header("origin", "https://search.bilibili.com"),
-            )
-            .await?;
+                &search_referer,
+            ))
+            .await
+        {
+            Ok(data) => data,
+            Err(error) if error.contains("412") || error.contains("风控") || error.contains("椋庢帶") => {
+                let fallback_video_params = vec![
+                    ("search_type", "video".to_string()),
+                    ("keyword", keyword.to_string()),
+                    ("page", page.to_string()),
+                    ("page_size", page_size.to_string()),
+                    ("order", order.to_string()),
+                    ("duration", duration.to_string()),
+                    ("tids", "0".to_string()),
+                    ("platform", "pc".to_string()),
+                    ("web_location", "1430654".to_string()),
+                    ("pubtime_begin_s", pubtime_begin_s.clone()),
+                    ("pubtime_end_s", pubtime_end_s.clone()),
+                ];
+                self.request_search_value(apply_search_headers(
+                    self.api_client()
+                        .get("https://api.bilibili.com/x/web-interface/search/type")
+                        .query(&fallback_video_params)
+                        .header(
+                            "cookie",
+                            self.get_cookie_for_url(
+                                "https://api.bilibili.com/x/web-interface/search/type",
+                            ),
+                        )
+                        .header("origin", "https://search.bilibili.com"),
+                    &search_referer,
+                ))
+                .await
+                .map_err(|fallback_error| format!("{error}; fallback search/type: {fallback_error}"))?
+            }
+            Err(error) => return Err(error),
+        };
 
         let bangumi_data = self
             .request_search_value(
-                self.api_client()
+                apply_search_headers(
+                    self.api_client()
                     .get("https://api.bilibili.com/x/web-interface/search/type")
                     .query(&[
                         ("search_type", "media_bangumi"),
@@ -871,17 +1060,110 @@ impl super::BiliClient {
                             "https://api.bilibili.com/x/web-interface/search/type",
                         ),
                     )
-                    .header("referer", &search_referer)
                     .header("origin", "https://search.bilibili.com"),
+                    &search_referer,
+                ),
             )
             .await?;
+        let film_data = self
+            .request_search_value(apply_search_headers(
+                self.api_client()
+                    .get("https://api.bilibili.com/x/web-interface/search/type")
+                    .query(&[
+                        ("search_type", "media_ft"),
+                        ("keyword", keyword),
+                        ("page", page_string.as_str()),
+                        ("page_size", page_size_string.as_str()),
+                    ])
+                    .header(
+                        "cookie",
+                        self.get_cookie_for_url(
+                            "https://api.bilibili.com/x/web-interface/search/type",
+                        ),
+                    )
+                    .header("origin", "https://search.bilibili.com"),
+                &search_referer,
+            ))
+            .await
+            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }));
+        let live_data = self
+            .request_search_value(apply_search_headers(
+                self.api_client()
+                    .get("https://api.bilibili.com/x/web-interface/search/type")
+                    .query(&[
+                        ("search_type", "live"),
+                        ("keyword", keyword),
+                        ("page", page_string.as_str()),
+                        ("page_size", page_size_string.as_str()),
+                    ])
+                    .header(
+                        "cookie",
+                        self.get_cookie_for_url(
+                            "https://api.bilibili.com/x/web-interface/search/type",
+                        ),
+                    )
+                    .header("origin", "https://search.bilibili.com"),
+                &search_referer,
+            ))
+            .await
+            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }));
+        let article_data = self
+            .request_search_value(apply_search_headers(
+                self.api_client()
+                    .get("https://api.bilibili.com/x/web-interface/search/type")
+                    .query(&[
+                        ("search_type", "article"),
+                        ("keyword", keyword),
+                        ("page", page_string.as_str()),
+                        ("page_size", page_size_string.as_str()),
+                    ])
+                    .header(
+                        "cookie",
+                        self.get_cookie_for_url(
+                            "https://api.bilibili.com/x/web-interface/search/type",
+                        ),
+                    )
+                    .header("origin", "https://search.bilibili.com"),
+                &search_referer,
+            ))
+            .await
+            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }));
+        let user_data = self
+            .request_search_value(apply_search_headers(
+                self.api_client()
+                    .get("https://api.bilibili.com/x/web-interface/search/type")
+                    .query(&[
+                        ("search_type", "bili_user"),
+                        ("keyword", keyword),
+                        ("page", page_string.as_str()),
+                        ("page_size", page_size_string.as_str()),
+                    ])
+                    .header(
+                        "cookie",
+                        self.get_cookie_for_url(
+                            "https://api.bilibili.com/x/web-interface/search/type",
+                        ),
+                    )
+                    .header("origin", "https://search.bilibili.com"),
+                &search_referer,
+            ))
+            .await
+            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }));
 
         Ok(SearchResult::Aggregate(AggregateSearchResult {
             keyword: keyword.to_string(),
             videos: parse_keyword_video_results(&video_data),
             bangumi: parse_keyword_bangumi_results(&bangumi_data),
+            films: parse_keyword_generic_results(&film_data, "影视"),
+            lives: parse_keyword_live_results(&live_data),
+            articles: parse_keyword_generic_results(&article_data, "专栏"),
+            users: parse_keyword_generic_results(&user_data, "用户"),
             video_page: parse_search_page_info(&video_data, page, page_size),
             bangumi_page: parse_search_page_info(&bangumi_data, page, page_size),
+            film_page: parse_search_page_info(&film_data, page, page_size),
+            live_page: parse_live_search_page_info(&live_data, page, page_size),
+            article_page: parse_search_page_info(&article_data, page, page_size),
+            user_page: parse_search_page_info(&user_data, page, page_size),
         }))
     }
 
@@ -1414,6 +1696,19 @@ fn search_pubtime_range(value: Option<&str>) -> (String, String) {
     (begin_ts.to_string(), end_ts.to_string())
 }
 
+fn apply_search_headers(request: RequestBuilder, referer: &str) -> RequestBuilder {
+    request
+        .header("accept", "application/json, text/plain, */*")
+        .header("accept-language", "zh-CN,zh;q=0.9,en;q=0.8")
+        .header("referer", referer)
+        .header("sec-ch-ua", "\"Chromium\";v=\"136\", \"Google Chrome\";v=\"136\", \"Not.A/Brand\";v=\"99\"")
+        .header("sec-ch-ua-mobile", "?0")
+        .header("sec-ch-ua-platform", "\"Windows\"")
+        .header("sec-fetch-dest", "empty")
+        .header("sec-fetch-mode", "cors")
+        .header("sec-fetch-site", "same-site")
+}
+
 fn local_day_timestamp(date: chrono::NaiveDate, hour: u32, minute: u32, second: u32) -> i64 {
     let Some(naive) = date.and_hms_opt(hour, minute, second) else {
         return 0;
@@ -1720,6 +2015,356 @@ fn parse_keyword_bangumi_results(data: &Value) -> Vec<KeywordBangumiResult> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn parse_keyword_generic_results(data: &Value, badge: &str) -> Vec<KeywordGenericSearchResult> {
+    data.get("result")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    let mid = parse_i64_field(item, &["mid", "uid", "up_mid"]);
+                    let id = item
+                        .get("id")
+                        .or_else(|| item.get("season_id"))
+                        .or_else(|| item.get("roomid"))
+                        .or_else(|| item.get("room_id"))
+                        .or_else(|| item.get("mid"))
+                        .or_else(|| item.get("uid"))
+                        .and_then(|value| {
+                            value
+                                .as_str()
+                                .map(ToString::to_string)
+                                .or_else(|| value.as_i64().map(|number| number.to_string()))
+                        })
+                        .unwrap_or_else(|| format!("{}-{}", badge, index));
+                    let title = clean_search_text(first_string_field(
+                        item,
+                        &["title", "uname", "name", "author", "roomname"],
+                    ));
+                    let cover = first_string_field(
+                        item,
+                        &["cover", "pic", "user_cover", "upic", "face", "cover_url"],
+                    )
+                    .to_string();
+                    let description = clean_search_text(first_string_field(
+                        item,
+                        &["desc", "description", "content", "usign", "area_name"],
+                    ));
+                    let url = normalize_search_jump_url(first_string_field(
+                        item,
+                        &["url", "goto_url", "arcurl", "jump_url", "uri"],
+                    ));
+                    let author = clean_search_text(first_string_field(
+                        item,
+                        &["author", "uname", "name", "up_name"],
+                    ));
+                    let author_face = first_string_field(item, &["upic", "face", "avatar"]).to_string();
+                    let stats = collect_generic_stats(item);
+
+                    KeywordGenericSearchResult {
+                        id,
+                        title,
+                        cover,
+                        description,
+                        url,
+                        author,
+                        author_face,
+                        mid,
+                        badge: badge.to_string(),
+                        stats,
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_keyword_live_results(data: &Value) -> Vec<KeywordGenericSearchResult> {
+    let result = data.get("result").unwrap_or(data);
+    let mut items = Vec::new();
+
+    for item in live_sub_items(result, &["live_room", "room", "rooms"]) {
+        let room_id = parse_i64_field(item, &["roomid", "room_id", "id"]);
+        let title = clean_search_text(first_string_field(
+            item,
+            &["title", "roomname", "uname", "name"],
+        ));
+        let author = clean_search_text(first_string_field(item, &["uname", "name", "author"]));
+        let cover = first_string_field(
+            item,
+            &["user_cover", "cover", "pic", "system_cover", "keyframe"],
+        )
+        .to_string();
+        let url = normalize_search_jump_url(first_string_field(item, &["url", "goto_url", "link"]));
+        items.push(KeywordGenericSearchResult {
+            id: if room_id > 0 { room_id.to_string() } else { format!("room-{}", items.len()) },
+            title: if title.is_empty() { author.clone() } else { title },
+            cover,
+            description: clean_search_text(first_string_field(
+                item,
+                &["area_name", "parent_area_name", "desc", "description"],
+            )),
+            url,
+            author,
+            author_face: first_string_field(item, &["uface", "face", "upic", "avatar"]).to_string(),
+            mid: parse_i64_field(item, &["uid", "mid"]),
+            badge: "直播间".to_string(),
+            stats: collect_generic_stats(item),
+        });
+    }
+
+    for item in live_sub_items(result, &["live_user", "user", "users"]) {
+        let mid = parse_i64_field(item, &["uid", "mid"]);
+        let name = clean_search_text(first_string_field(item, &["uname", "name", "title"]));
+        items.push(KeywordGenericSearchResult {
+            id: if mid > 0 { mid.to_string() } else { format!("user-{}", items.len()) },
+            title: name.clone(),
+            cover: first_string_field(item, &["uface", "face", "upic", "avatar"]).to_string(),
+            description: clean_search_text(first_string_field(
+                item,
+                &["usign", "sign", "desc", "description"],
+            )),
+            url: normalize_search_jump_url(first_string_field(item, &["url", "goto_url", "link"])),
+            author: name,
+            author_face: first_string_field(item, &["uface", "face", "upic", "avatar"]).to_string(),
+            mid,
+            badge: "主播".to_string(),
+            stats: collect_generic_stats(item),
+        });
+    }
+
+    if items.is_empty() {
+        return parse_keyword_generic_results(data, "直播间");
+    }
+    items
+}
+
+fn live_sub_items<'a>(result: &'a Value, names: &[&str]) -> Vec<&'a Value> {
+    names
+        .iter()
+        .find_map(|name| result.get(*name))
+        .and_then(|value| {
+            if let Some(items) = value.as_array() {
+                Some(items.iter().collect())
+            } else {
+                value
+                    .get("items")
+                    .or_else(|| value.get("result"))
+                    .or_else(|| value.get("list"))
+                    .and_then(Value::as_array)
+                    .map(|items| items.iter().collect())
+            }
+        })
+        .unwrap_or_default()
+}
+
+fn parse_live_search_page_info(
+    data: &Value,
+    requested_page: i64,
+    requested_page_size: i64,
+) -> SearchPageInfo {
+    let result = data.get("result").unwrap_or(data);
+    let item_count = live_sub_items(result, &["live_room", "room", "rooms"]).len() as i64
+        + live_sub_items(result, &["live_user", "user", "users"]).len() as i64;
+    let room_total = parse_nested_i64(result, &["live_room", "numResults", "total", "count"]);
+    let user_total = parse_nested_i64(result, &["live_user", "numResults", "total", "count"]);
+    let root_total = parse_i64_field(result, &["numResults", "total", "count"]);
+    let total = if room_total > 0 || user_total > 0 {
+        room_total + user_total
+    } else {
+        root_total
+    };
+    let total = total.max(item_count);
+    let page_size = requested_page_size.max(1);
+    let page_count = if total > 0 {
+        ((total + page_size - 1) / page_size).max(1)
+    } else {
+        1
+    };
+    SearchPageInfo {
+        page: requested_page.max(1),
+        page_size,
+        total,
+        page_count,
+        has_more: requested_page < page_count || (total == 0 && item_count >= page_size),
+    }
+}
+
+fn extract_live_play_url(data: &Value) -> Option<String> {
+    let streams = data
+        .get("playurl_info")?
+        .get("playurl")?
+        .get("stream")?
+        .as_array()?;
+    for stream in streams {
+        let formats = stream.get("format")?.as_array()?;
+        for format in formats {
+            let codecs = format.get("codec")?.as_array()?;
+            for codec in codecs {
+                let base_url = codec.get("base_url").and_then(Value::as_str).unwrap_or("");
+                if base_url.is_empty() {
+                    continue;
+                }
+                if let Some(url_info) = codec.get("url_info").and_then(Value::as_array) {
+                    if let Some(info) = url_info.first() {
+                        let host = info.get("host").and_then(Value::as_str).unwrap_or("");
+                        let extra = info.get("extra").and_then(Value::as_str).unwrap_or("");
+                        let url = format!("{host}{base_url}{extra}");
+                        if !url.is_empty() {
+                            return Some(url);
+                        }
+                    }
+                }
+                if base_url.starts_with("http") {
+                    return Some(base_url.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_article_content(value: &Value, text: &mut String, images: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            if let Some(insert) = map.get("insert") {
+                extract_article_insert(insert, text, images);
+            }
+            for child in map.values() {
+                extract_article_content(child, text, images);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                extract_article_content(item, text, images);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_article_insert(value: &Value, text: &mut String, images: &mut Vec<String>) {
+    match value {
+        Value::String(raw) => {
+            text.push_str(raw);
+            if !raw.ends_with('\n') {
+                text.push('\n');
+            }
+        }
+        Value::Object(map) => {
+            for key in ["native-image", "image", "image-upload", "video-card", "article-card"] {
+                if let Some(node) = map.get(key) {
+                    extract_article_images(node, images);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_article_images(value: &Value, images: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            for key in ["url", "src", "img_src", "cover", "banner_url"] {
+                if let Some(url) = map.get(key).and_then(Value::as_str) {
+                    if is_article_image_url(url) {
+                        images.push(url.to_string());
+                    }
+                }
+            }
+            for key in ["image_urls", "origin_image_urls"] {
+                if let Some(items) = map.get(key).and_then(Value::as_array) {
+                    for item in items {
+                        if let Some(url) = item.as_str() {
+                            if is_article_image_url(url) {
+                                images.push(url.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            for child in map.values() {
+                extract_article_images(child, images);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                extract_article_images(item, images);
+            }
+        }
+        Value::String(url) if is_article_image_url(url) => images.push(url.to_string()),
+        _ => {}
+    }
+}
+
+fn is_article_image_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    (lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("//"))
+        && (lower.contains(".jpg")
+            || lower.contains(".jpeg")
+            || lower.contains(".png")
+            || lower.contains(".webp")
+            || lower.contains(".gif"))
+}
+
+fn parse_nested_i64(item: &Value, path: &[&str]) -> i64 {
+    if path.is_empty() {
+        return parse_i64_value(item).unwrap_or(0);
+    }
+    let mut current = item;
+    for key in path {
+        match current.get(*key) {
+            Some(next) => current = next,
+            None => return 0,
+        }
+    }
+    parse_i64_value(current).unwrap_or(0)
+}
+
+fn first_string_field<'a>(item: &'a Value, names: &[&str]) -> &'a str {
+    names
+        .iter()
+        .find_map(|name| item.get(*name).and_then(Value::as_str))
+        .unwrap_or("")
+}
+
+fn normalize_search_jump_url(url: &str) -> String {
+    if url.starts_with("//") {
+        format!("https:{url}")
+    } else if url.starts_with('/') {
+        format!("https://www.bilibili.com{url}")
+    } else {
+        url.to_string()
+    }
+}
+
+fn collect_generic_stats(item: &Value) -> Vec<String> {
+    [
+        ("播放", parse_i64_field(item, &["play", "view", "view_count"])),
+        ("关注", parse_i64_field(item, &["fans", "fans_count"])),
+        ("视频", parse_i64_field(item, &["videos", "video_count"])),
+        ("阅读", parse_i64_field(item, &["view", "read", "read_count"])),
+        ("评论", parse_i64_field(item, &["reply", "reply_count", "comment"])),
+        ("在线", parse_i64_field(item, &["online", "online_count"])),
+    ]
+    .into_iter()
+    .filter(|(_, value)| *value > 0)
+    .take(3)
+    .map(|(label, value)| format!("{} {}", label, format_compact_number(value)))
+    .collect()
+}
+
+fn format_compact_number(value: i64) -> String {
+    if value >= 100_000_000 {
+        format!("{:.1}亿", value as f64 / 100_000_000.0)
+    } else if value >= 10_000 {
+        format!("{:.1}万", value as f64 / 10_000.0)
+    } else {
+        value.to_string()
+    }
 }
 
 fn parse_i64_field(item: &Value, names: &[&str]) -> i64 {

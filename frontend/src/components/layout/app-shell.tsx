@@ -130,7 +130,7 @@ export function AppShell() {
             {renderView(currentView)}
           </AnimatePresence>
         </motion.div>
-        <div className="absolute bottom-0 left-0 right-0 z-30">
+        <div className="absolute bottom-0 left-0 z-30" style={{ right: 12 }}>
           <BottomBar />
         </div>
         <AnimatePresence>
