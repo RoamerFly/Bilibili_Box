@@ -372,6 +372,8 @@ export function HistoryView() {
       const downloadQuality = await requestDownloadQuality(resolved.map((target) => ({ bvid: target.bvid, cid: target.cid })));
       if (!downloadQuality) return;
       const taskGroups: string[][] = [];
+      const groupId = `history-selected:${Date.now()}`;
+      const groupTitle = resolved.slice(0, 2).map((target) => target.title).join("、") + (resolved.length > 2 ? " 等" : "");
       for (const target of resolved) {
         const taskIds = await invoke<string[]>("create_download_task", {
           params: {
@@ -382,6 +384,9 @@ export function HistoryView() {
             collection_title: target.collectionTitle,
             episode_title: target.episodeTitle,
             download_quality: downloadQuality,
+            group_id: groupId,
+            group_title: groupTitle,
+            group_total: resolved.length,
           },
         });
         taskGroups.push(taskIds);

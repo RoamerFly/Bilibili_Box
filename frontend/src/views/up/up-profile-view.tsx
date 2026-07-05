@@ -64,7 +64,7 @@ interface UpDynamicItem {
   bvid: string;
   aid: number;
   images: string[];
-  comment_oid: number;
+  comment_oid: string;
   comment_type: number;
 }
 
@@ -72,6 +72,17 @@ interface UpDynamicPage {
   list: UpDynamicItem[];
   offset: string;
   has_more: boolean;
+}
+
+interface ArticleImageInfo {
+  url: string;
+  title: string;
+}
+
+interface ArticleDetailInfo {
+  id: number;
+  title: string;
+  images: ArticleImageInfo[];
 }
 
 type ActiveTab = "videos" | "dynamics";
@@ -100,6 +111,9 @@ export function UpProfileView() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
+  const [downloadScopeOpen, setDownloadScopeOpen] = useState(false);
+  const [downloadVideosScope, setDownloadVideosScope] = useState(true);
+  const [downloadArticlesScope, setDownloadArticlesScope] = useState(false);
   const [multiSelectEnabled, setMultiSelectEnabled] = useState(false);
   const [selectedVideoIds, setSelectedVideoIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
@@ -237,17 +251,62 @@ export function UpProfileView() {
       setVideoTotal(data.total);
       setHasMoreVideos(data.has_more);
     }
-    while (nextHasMore) {
+    const maxPages = Math.max(page + 1, Math.ceil((videoTotal || displayProfile.archive_count || allVideos.length) / UP_VIDEO_PAGE_SIZE) + 2);
+    while (nextHasMore && page < maxPages) {
       page += 1;
       const data = await invoke<UpVideoPage>("get_up_videos", { mid, page, pageSize: UP_VIDEO_PAGE_SIZE });
+      const previousCount = allVideos.length;
       allVideos = Array.from(new Map([...allVideos, ...data.list].map((item) => [item.bvid, item])).values());
       nextHasMore = data.has_more;
       setVideos(allVideos);
       setVideoPage(data.page);
       setVideoTotal(data.total);
       setHasMoreVideos(data.has_more);
+      if (!data.list.length || allVideos.length === previousCount) {
+        nextHasMore = false;
+        setHasMoreVideos(false);
+      }
     }
     return allVideos;
+  };
+
+  const loadAllDynamics = async () => {
+    let allDynamics = [...dynamics];
+    let offset = dynamicOffset;
+    let nextHasMore = hasMoreDynamics;
+    let guard = 0;
+    while (nextHasMore && offset && guard < 80) {
+      guard += 1;
+      const data = await invoke<UpDynamicPage>("get_up_dynamics", { mid, offset });
+      const previousCount = allDynamics.length;
+      allDynamics = Array.from(new Map([...allDynamics, ...data.list].map((item) => [item.id || `${item.pub_ts}-${item.text}`, item])).values());
+      offset = data.offset;
+      nextHasMore = data.has_more && allDynamics.length > previousCount;
+      setDynamics(allDynamics);
+      setDynamicOffset(data.offset);
+      setHasMoreDynamics(nextHasMore);
+    }
+    return allDynamics;
+  };
+
+  const handleDownloadArticles = async (items: UpDynamicItem[], groupId: string, groupTitle: string, groupTotalBase: number) => {
+    const articleIds = Array.from(new Set(items.map((item) => extractArticleId(item.major_url)).filter((id): id is number => Boolean(id))));
+    let index = 0;
+    for (const articleId of articleIds) {
+      const article = await invoke<ArticleDetailInfo>("get_article_detail", { articleId });
+      if (!article.images.length) continue;
+      index += 1;
+      await invoke<string[]>("create_article_download_task", {
+        params: {
+          article_id: article.id || articleId,
+          title: article.title || `专栏 ${articleId}`,
+          images: article.images,
+          group_id: groupId,
+          group_title: groupTitle,
+          group_total: groupTotalBase + articleIds.length,
+        },
+      });
+    }
   };
 
   const handleDownloadVideos = async (scope: "loaded" | "all" | "selected") => {
@@ -271,6 +330,12 @@ export function UpProfileView() {
       );
       if (!downloadQuality) return;
       const taskGroups: string[][] = [];
+      const groupId = scope === "selected"
+        ? `up-selected:${mid}:${Date.now()}`
+        : `up-all:${mid}:${Date.now()}`;
+      const groupTitle = scope === "selected"
+        ? targets.slice(0, 2).map((video) => video.title).join("、") + (targets.length > 2 ? " 等" : "")
+        : `${displayProfile.name} 全部作品`;
       for (const { video, detail } of resolved) {
         const taskIds = await invoke<string[]>("create_download_task", {
           params: {
@@ -279,12 +344,65 @@ export function UpProfileView() {
             title: detail.title || video.title,
             cids: [detail.cid],
             download_quality: downloadQuality,
+            group_id: groupId,
+            group_title: groupTitle,
+            group_total: targets.length,
           },
         });
         taskGroups.push(taskIds);
       }
       notifyDownloadQueued(taskGroups.flat(), scope === "selected" ? `已选 ${targets.length} 个投稿` : `${displayProfile.name} 的投稿`);
       if (scope === "selected") setSelectedVideoIds(new Set());
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
+
+  const handleDownloadAllWorks = async () => {
+    if (!downloadVideosScope && !downloadArticlesScope) return;
+    setDownloadingAll(true);
+    setError("");
+    setDownloadScopeOpen(false);
+    const groupId = `up-works:${mid}:${Date.now()}`;
+    const groupTitle = `${displayProfile.name} 全部作品`;
+    try {
+      let videoCount = 0;
+      if (downloadVideosScope) {
+        const targets = await loadAllVideos();
+        videoCount = targets.length;
+        if (targets.length) {
+          const resolved: Array<{ video: UpVideoItem; detail: VideoInfo }> = [];
+          for (const video of targets) {
+            const detail = await resolveDownloadTarget(video);
+            resolved.push({ video, detail });
+          }
+          const downloadQuality = await requestDownloadQuality(
+            resolved.map(({ detail }) => ({ bvid: detail.bvid, cid: detail.cid } satisfies DownloadQualityTarget))
+          );
+          if (downloadQuality) {
+            for (const { video, detail } of resolved) {
+              await invoke<string[]>("create_download_task", {
+                params: {
+                  bvid: detail.bvid,
+                  cid: detail.cid,
+                  title: detail.title || video.title,
+                  cids: [detail.cid],
+                  download_quality: downloadQuality,
+                  group_id: groupId,
+                  group_title: groupTitle,
+                  group_total: resolved.length,
+                },
+              });
+            }
+          }
+        }
+      }
+      if (downloadArticlesScope) {
+        const allDynamics = await loadAllDynamics();
+        await handleDownloadArticles(allDynamics, groupId, groupTitle, videoCount);
+      }
     } catch (err) {
       setError(String(err));
     } finally {
@@ -414,7 +532,7 @@ export function UpProfileView() {
           <ActionButton disabled={downloadingAll || !videos.length} onClick={() => void handleDownloadVideos("loaded")} icon={downloadingAll ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Download style={{ width: 15, height: 15 }} />}>
             下载已加载
           </ActionButton>
-          <ActionButton disabled={downloadingAll} onClick={() => void handleDownloadVideos("all")} icon={downloadingAll ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Download style={{ width: 15, height: 15 }} />}>
+          <ActionButton disabled={downloadingAll} onClick={() => setDownloadScopeOpen(true)} icon={downloadingAll ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Download style={{ width: 15, height: 15 }} />}>
             下载全部投稿
           </ActionButton>
         </div>
@@ -537,6 +655,27 @@ export function UpProfileView() {
         </>
       )}
       {downloadQualityDialog}
+      {downloadScopeOpen ? (
+        <div style={{ position: "fixed", inset: 0, zIndex: 900, display: "grid", placeItems: "center", backgroundColor: "rgba(15,23,42,0.38)" }}>
+          <div style={{ width: "min(420px, 92vw)", padding: "22px", borderRadius: "16px", backgroundColor: "#fff", boxShadow: "0 22px 60px rgba(15,23,42,0.22)" }}>
+            <h2 style={{ fontSize: "18px", fontWeight: 850, color: "#1a1a2e" }}>选择下载内容</h2>
+            <div style={{ marginTop: "16px", display: "grid", gap: "12px" }}>
+              <label style={checkboxRowStyle}>
+                <input type="checkbox" checked={downloadVideosScope} onChange={(event) => setDownloadVideosScope(event.target.checked)} />
+                视频投稿
+              </label>
+              <label style={checkboxRowStyle}>
+                <input type="checkbox" checked={downloadArticlesScope} onChange={(event) => setDownloadArticlesScope(event.target.checked)} />
+                专栏图片
+              </label>
+            </div>
+            <div style={{ marginTop: "20px", display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <ActionButton onClick={() => setDownloadScopeOpen(false)} icon={<span aria-hidden="true">×</span>}>取消</ActionButton>
+              <ActionButton disabled={downloadingAll || (!downloadVideosScope && !downloadArticlesScope)} onClick={() => void handleDownloadAllWorks()} icon={downloadingAll ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Download style={{ width: 15, height: 15 }} />}>开始下载</ActionButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -553,6 +692,20 @@ const backButtonStyle: CSSProperties = {
   color: "#505065",
   fontSize: "13px",
   fontWeight: 700,
+  cursor: "pointer",
+};
+
+const checkboxRowStyle: CSSProperties = {
+  height: "40px",
+  display: "flex",
+  alignItems: "center",
+  gap: "10px",
+  padding: "0 12px",
+  borderRadius: "10px",
+  border: "1px solid #ececf2",
+  color: "#33334a",
+  fontSize: "14px",
+  fontWeight: 750,
   cursor: "pointer",
 };
 
@@ -701,6 +854,11 @@ function toRecommendDynamicItem(item: UpDynamicItem, profile: UpProfile): Recomm
     comment_count: maybeItem.comment_count || 0,
     like_count: maybeItem.like_count || 0,
   };
+}
+
+function extractArticleId(url: string) {
+  const match = String(url || "").match(/(?:read\/cv|cv)(\d+)/i);
+  return match ? Number(match[1]) : 0;
 }
 
 function LoadMoreButton({ loading, onClick }: { loading: boolean; onClick: () => void }) {

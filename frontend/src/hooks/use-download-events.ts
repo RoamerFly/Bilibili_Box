@@ -24,6 +24,7 @@ interface BackendDownloadProgress {
   created_at?: number;
   quality?: string;
   audio_only?: boolean;
+  media_kind?: "video" | "audio" | "article" | string;
 }
 
 // 下载事件类型定义
@@ -102,8 +103,8 @@ function mapBackendTask(task: BackendDownloadProgress): DownloadTask {
     outputPath: task.output_path,
     createdAt: task.created_at,
     quality: task.quality,
-    mediaKind: task.audio_only ? "audio" : "video",
-    format: task.audio_only ? "MP3" : "MP4",
+    mediaKind: task.media_kind === "article" ? "article" : task.audio_only ? "audio" : "video",
+    format: task.media_kind === "article" ? "图片" : task.audio_only ? "MP3" : "MP4",
   };
 }
 
@@ -122,6 +123,8 @@ function stageLabel(stage?: DownloadStage, state?: TaskState | BackendTaskState)
       return "正在下载视频分片";
     case "downloading_audio":
       return "正在下载音频分片";
+    case "downloading_article":
+      return "正在下载专栏图片";
     case "converting_audio":
       return "正在转换 MP3";
     case "merging":

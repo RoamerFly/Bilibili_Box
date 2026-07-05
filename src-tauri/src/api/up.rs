@@ -59,7 +59,7 @@ pub struct UpDynamicItem {
     pub bvid: String,
     pub aid: i64,
     pub images: Vec<String>,
-    pub comment_oid: i64,
+    pub comment_oid: String,
     pub comment_type: i64,
     pub duration_text: String,
     pub view_count: i64,
@@ -824,8 +824,8 @@ fn parse_dynamic_item(item: &Value) -> Option<UpDynamicItem> {
         comment_oid: basic
             .get("comment_id_str")
             .or_else(|| basic.get("rid_str"))
-            .and_then(parse_i64_value)
-            .unwrap_or(0),
+            .and_then(value_to_id_string)
+            .unwrap_or_default(),
         comment_type: basic
             .get("comment_type")
             .and_then(parse_i64_value)
@@ -849,6 +849,16 @@ fn parse_i64_value(value: &Value) -> Option<i64> {
         .as_i64()
         .or_else(|| value.as_u64().and_then(|number| i64::try_from(number).ok()))
         .or_else(|| value.as_str().and_then(|text| text.parse::<i64>().ok()))
+}
+
+fn value_to_id_string(value: &Value) -> Option<String> {
+    if let Some(text) = value.as_str().map(str::trim).filter(|text| !text.is_empty()) {
+        return Some(text.to_string());
+    }
+    value
+        .as_i64()
+        .map(|number| number.to_string())
+        .or_else(|| value.as_u64().map(|number| number.to_string()))
 }
 
 fn format_duration_value(value: &Value) -> String {

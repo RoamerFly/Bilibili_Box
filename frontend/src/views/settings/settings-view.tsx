@@ -88,7 +88,7 @@ interface AccountSwitchResult {
 
 const PAGE_REFRESH_STEPS = [
   "首页",
-  "搜索视频",
+  "搜索内容",
   "推荐/关注动态",
   "我的点赞/收藏",
   "稍后再看",
@@ -99,7 +99,7 @@ const PAGE_REFRESH_STEPS = [
 ];
 
 const CARD_PAGE_LABELS: Record<CardLayoutKey, string> = {
-  search: "搜索视频",
+  search: "搜索内容",
   recommend: "首页推荐",
   dynamic: "关注动态",
   favorites: "我的点赞/收藏",
@@ -122,8 +122,7 @@ export function SettingsView() {
   const userInfo = useAppStore((s) => s.userInfo);
   const setConfig = useAppStore((s) => s.setConfig);
   const setUserInfo = useAppStore((s) => s.setUserInfo);
-  const resetSearchPageState = useAppStore((s) => s.resetSearchPageState);
-  const resetRecommendPageState = useAppStore((s) => s.resetRecommendPageState);
+  const resetAccountScopedState = useAppStore((s) => s.resetAccountScopedState);
   const cardLayouts = useAppStore((s) => s.cardLayouts);
   const cardScales = useAppStore((s) => s.cardScales);
   const setCardLayout = useAppStore((s) => s.setCardLayout);
@@ -231,6 +230,7 @@ export function SettingsView() {
     setBackendConfig(nextConfig);
     setConfig(nextConfig);
     setUserInfo(null);
+    resetAccountScopedState();
   };
 
   const handleBrowseFolder = async () => {
@@ -297,6 +297,30 @@ export function SettingsView() {
     }
   };
 
+  const handleClearPageCacheOnly = async () => {
+    setFeedback("");
+    try {
+      const overview = await invoke<CacheOverview>("clear_page_cache");
+      setCacheOverview(overview);
+      resetAccountScopedState();
+      window.dispatchEvent(new CustomEvent("bilibili-box:page-cache-cleared"));
+      setFeedback("已清理页面缓存");
+    } catch (err) {
+      setFeedback(`清理页面缓存失败：${String(err)}`);
+    }
+  };
+
+  const handleClearDownloadCacheOnly = async () => {
+    setFeedback("");
+    try {
+      const overview = await invoke<CacheOverview>("clear_download_cache");
+      setCacheOverview(overview);
+      setFeedback("已清理下载缓存");
+    } catch (err) {
+      setFeedback(`清理下载缓存失败：${String(err)}`);
+    }
+  };
+
   const handleClearCacheAndRefreshPages = async () => {
     setClearingCache(true);
     setCacheStepIndex(0);
@@ -304,8 +328,7 @@ export function SettingsView() {
     try {
       const overview = await invoke<CacheOverview>("clear_page_cache");
       setCacheOverview(overview);
-      resetSearchPageState();
-      resetRecommendPageState();
+      resetAccountScopedState();
       window.dispatchEvent(new CustomEvent("bilibili-box:page-cache-cleared"));
       for (let index = 0; index < PAGE_REFRESH_STEPS.length; index += 1) {
         setCacheStepIndex(index);
@@ -348,8 +371,7 @@ export function SettingsView() {
         loginTime: "--",
         deviceName: "Windows 桌面端",
       } : null);
-      resetSearchPageState();
-      resetRecommendPageState();
+      resetAccountScopedState();
       setAccountDialogOpen(false);
       window.dispatchEvent(new CustomEvent("bilibili-box:account-switched"));
       setFeedback(`已切换到账号：${result.user_info?.uname || profile}`);
@@ -653,6 +675,8 @@ export function SettingsView() {
       {cacheDialogOpen ? (
         <CacheDialog
           overview={cacheOverview}
+          onClearPageCache={() => void handleClearPageCacheOnly()}
+          onClearDownloadCache={() => void handleClearDownloadCacheOnly()}
           onClose={() => setCacheDialogOpen(false)}
         />
       ) : null}
@@ -970,7 +994,17 @@ function CardSettingsDialog({
   );
 }
 
-function CacheDialog({ overview, onClose }: { overview: CacheOverview | null; onClose: () => void }) {
+function CacheDialog({
+  overview,
+  onClearPageCache,
+  onClearDownloadCache,
+  onClose,
+}: {
+  overview: CacheOverview | null;
+  onClearPageCache: () => void;
+  onClearDownloadCache: () => void;
+  onClose: () => void;
+}) {
   return (
     <div style={dialogBackdropStyle} onClick={onClose}>
       <div style={dialogPanelStyle} onClick={(event) => event.stopPropagation()}>
@@ -980,8 +1014,8 @@ function CacheDialog({ overview, onClose }: { overview: CacheOverview | null; on
         </div>
         {overview ? (
           <div style={{ display: "grid", gap: "12px" }}>
-            <CacheBucketCard bucket={overview.page_cache} />
-            <CacheBucketCard bucket={overview.download_cache} />
+            <CacheBucketCard bucket={overview.page_cache} actionLabel="清理页面缓存" onAction={onClearPageCache} />
+            <CacheBucketCard bucket={overview.download_cache} actionLabel="清理下载缓存" onAction={onClearDownloadCache} />
           </div>
         ) : (
           <div style={{ color: "#8b8b9a", fontSize: "14px" }}>暂无缓存数据</div>
@@ -991,7 +1025,7 @@ function CacheDialog({ overview, onClose }: { overview: CacheOverview | null; on
   );
 }
 
-function CacheBucketCard({ bucket }: { bucket: CacheBucketInfo }) {
+function CacheBucketCard({ bucket, actionLabel, onAction }: { bucket: CacheBucketInfo; actionLabel: string; onAction: () => void }) {
   return (
     <div style={{ padding: "14px 16px", borderRadius: "12px", border: "1px solid #ececf2", backgroundColor: "#fafafe" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
@@ -1002,6 +1036,10 @@ function CacheBucketCard({ bucket }: { bucket: CacheBucketInfo }) {
         <div>文件数：{bucket.file_count}</div>
         <div style={{ wordBreak: "break-all" }}>目录：{bucket.path}</div>
       </div>
+      <button type="button" onClick={onAction} style={{ ...secondaryButtonStyle, marginTop: "12px" }}>
+        <Trash2 style={{ width: 14, height: 14, marginRight: "6px" }} />
+        {actionLabel}
+      </button>
     </div>
   );
 }

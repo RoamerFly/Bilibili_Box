@@ -128,7 +128,7 @@ export function SearchView() {
   const { pageSize, cardScale, columns } = cardLayout;
 
   const placeholder = useMemo(
-    () => "输入关键词、BV/AV、ep/ss、视频链接或番剧链接",
+    () => "输入关键词、BV/AV、ep/ss、视频链接、专栏链接或番剧链接等",
     []
   );
 
@@ -302,7 +302,8 @@ export function SearchView() {
     const videoPages = Math.ceil(result.videos.length / pageSize);
     const bangumiPages = Math.ceil(result.bangumi.length / pageSize);
     const filmPages = Math.ceil((result.films ?? []).length / pageSize);
-    const livePages = Math.ceil((result.lives ?? []).length / pageSize);
+    const activeLiveItems = (result.lives ?? []).filter((item) => item.badge === (activeLiveType === "room" ? "直播间" : "主播"));
+    const livePages = Math.ceil(activeLiveItems.length / pageSize);
     const articlePages = Math.ceil((result.articles ?? []).length / pageSize);
     const userPages = Math.ceil((result.users ?? []).length / pageSize);
     if (activeResultType === "video") return Math.max(1, videoPages);
@@ -312,7 +313,7 @@ export function SearchView() {
     if (activeResultType === "article") return Math.max(1, articlePages);
     if (activeResultType === "user") return Math.max(1, userPages);
     return Math.max(1, videoPages, bangumiPages, filmPages, livePages, articlePages, userPages, loadedPages);
-  }, [activeResultType, loadedPages, pageSize, result]);
+  }, [activeLiveType, activeResultType, loadedPages, pageSize, result]);
 
   const aggregateTotalPageCount = useMemo(() => {
     if (result?.type !== "Aggregate") return 1;
@@ -370,12 +371,15 @@ export function SearchView() {
   const visibleAggregateResult = useMemo(() => {
     if (result?.type !== "Aggregate") return null;
     const start = (Math.max(1, currentPage) - 1) * pageSize;
+    const activeLiveItems = result.lives.filter((item) => item.badge === (activeLiveType === "room" ? "直播间" : "主播"));
     return {
       ...result,
       videos: result.videos.slice(start, start + pageSize),
       bangumi: result.bangumi.slice(start, start + pageSize),
       films: (result.films ?? []).slice(start, start + pageSize),
-      lives: (result.lives ?? []).slice(start, start + pageSize),
+      lives: activeResultType === "live"
+        ? activeLiveItems.slice(start, start + pageSize)
+        : (result.lives ?? []).slice(start, start + pageSize),
       articles: (result.articles ?? []).slice(start, start + pageSize),
       users: (result.users ?? []).slice(start, start + pageSize),
       film_page: result.film_page ?? EMPTY_SEARCH_PAGE_INFO,
@@ -383,7 +387,7 @@ export function SearchView() {
       article_page: result.article_page ?? EMPTY_SEARCH_PAGE_INFO,
       user_page: result.user_page ?? EMPTY_SEARCH_PAGE_INFO,
     };
-  }, [currentPage, pageSize, result]);
+  }, [activeLiveType, activeResultType, currentPage, pageSize, result]);
 
   useEffect(() => {
     if (result?.type !== "Aggregate" || aggregateLoadedPageCount <= 0) return;
@@ -397,7 +401,7 @@ export function SearchView() {
     cid: number,
     title: string,
     downloadQuality: string,
-    options?: { collectionTitle?: string; episodeTitle?: string }
+    options?: { collectionTitle?: string; episodeTitle?: string; groupId?: string; groupTitle?: string; groupTotal?: number }
   ) => {
     const taskIds = await invoke<string[]>("create_download_task", {
       params: {
@@ -407,6 +411,9 @@ export function SearchView() {
         cids: [cid],
         collection_title: options?.collectionTitle,
         episode_title: options?.episodeTitle,
+        group_id: options?.groupId,
+        group_title: options?.groupTitle,
+        group_total: options?.groupTotal,
         download_quality: downloadQuality,
       },
     });
@@ -423,12 +430,16 @@ export function SearchView() {
     }
   };
 
-  const handleSearchVideoDownload = async (video: AggregateSearchResult["videos"][number], selectedQuality?: string) => {
+  const handleSearchVideoDownload = async (
+    video: AggregateSearchResult["videos"][number],
+    selectedQuality?: string,
+    groupOptions?: { groupId: string; groupTitle: string; groupTotal: number }
+  ) => {
     try {
       const detail = await invoke<VideoInfo>("get_normal_info", { bvid: video.bvid });
       const downloadQuality = selectedQuality ?? await requestDownloadQuality({ bvid: detail.bvid, cid: detail.cid });
       if (!downloadQuality) return false;
-      await queueDownload(detail.bvid, detail.cid, detail.title || video.title, downloadQuality);
+      await queueDownload(detail.bvid, detail.cid, detail.title || video.title, downloadQuality, groupOptions);
       return true;
     } catch (err) {
       setError(String(err));
@@ -436,7 +447,11 @@ export function SearchView() {
     }
   };
 
-  const handleSearchBangumiDownload = async (bangumi: { season_id: number; title: string }, selectedQuality?: string) => {
+  const handleSearchBangumiDownload = async (
+    bangumi: { season_id: number; title: string },
+    selectedQuality?: string,
+    groupOptions?: { groupId: string; groupTitle: string; groupTotal: number }
+  ) => {
     try {
       const detail = await invoke<BangumiInfo>("get_bangumi_info", { seasonId: bangumi.season_id });
       if (!detail.episodes.length) {
@@ -456,6 +471,9 @@ export function SearchView() {
               cids: [episode.cid],
               collection_title: detail.title || bangumi.title,
               episode_title: episode.long_title || episode.title,
+              group_id: groupOptions?.groupId ?? `search-bangumi:${bangumi.season_id}:${Date.now()}`,
+              group_title: groupOptions?.groupTitle ?? `${detail.title || bangumi.title} 全部剧集`,
+              group_total: groupOptions?.groupTotal ?? detail.episodes.length,
               download_quality: downloadQuality,
             },
           })
@@ -1074,8 +1092,16 @@ function AggregateResult({
   loadedCounts: Record<Exclude<SearchResultType, "all">, number>;
   onOpenVideoPlayer: (video: { bvid: string; cid?: number; title: string; pic?: string }) => void;
   onOpenBangumiPlayer: (bangumi: { season_id: number; title: string; cover: string }) => void;
-  onDownloadVideo: (video: AggregateSearchResult["videos"][number], quality?: string) => Promise<boolean>;
-  onDownloadBangumi: (bangumi: { season_id: number; title: string }, quality?: string) => Promise<boolean>;
+  onDownloadVideo: (
+    video: AggregateSearchResult["videos"][number],
+    quality?: string,
+    groupOptions?: { groupId: string; groupTitle: string; groupTotal: number }
+  ) => Promise<boolean>;
+  onDownloadBangumi: (
+    bangumi: { season_id: number; title: string },
+    quality?: string,
+    groupOptions?: { groupId: string; groupTitle: string; groupTotal: number }
+  ) => Promise<boolean>;
   onResolveVideoDownloadTargets: (video: AggregateSearchResult["videos"][number]) => Promise<DownloadQualityTarget[]>;
   onResolveBangumiDownloadTargets: (bangumi: { season_id: number; title: string }) => Promise<DownloadQualityTarget[]>;
   onRequestDownloadQuality: (targets: DownloadQualityTarget[]) => Promise<string | null>;
@@ -1146,15 +1172,19 @@ function AggregateResult({
         .filter((video) => selectedKeys.has(`video:${video.bvid}`))
         .map((video) => ({
           key: `video:${video.bvid}`,
+          title: video.title || video.bvid,
           targets: () => onResolveVideoDownloadTargets(video),
-          run: (quality: string) => onDownloadVideo(video, quality),
+          run: (quality: string, groupOptions: { groupId: string; groupTitle: string; groupTotal: number }) =>
+            onDownloadVideo(video, quality, groupOptions),
         })),
       ...result.bangumi
         .filter((bangumi) => selectedKeys.has(`bangumi:${bangumi.season_id}`))
         .map((bangumi) => ({
           key: `bangumi:${bangumi.season_id}`,
+          title: bangumi.title,
           targets: () => onResolveBangumiDownloadTargets(bangumi),
-          run: (quality: string) => onDownloadBangumi(bangumi, quality),
+          run: (quality: string, groupOptions: { groupId: string; groupTitle: string; groupTotal: number }) =>
+            onDownloadBangumi(bangumi, quality, groupOptions),
         })),
     ];
     if (!operations.length) return;
@@ -1164,7 +1194,12 @@ function AggregateResult({
       const targets = (await Promise.all(operations.map((operation) => operation.targets()))).flat();
       const downloadQuality = await onRequestDownloadQuality(targets);
       if (!downloadQuality) return;
-      const outcomes = await Promise.all(operations.map(async (operation) => ({ key: operation.key, ok: await operation.run(downloadQuality) })));
+      const groupOptions = {
+        groupId: `search-selected:${Date.now()}`,
+        groupTitle: operations.slice(0, 2).map((operation) => operation.title).join("、") + (operations.length > 2 ? " 等" : ""),
+        groupTotal: targets.length,
+      };
+      const outcomes = await Promise.all(operations.map(async (operation) => ({ key: operation.key, ok: await operation.run(downloadQuality, groupOptions) })));
       setSelectedKeys(new Set(outcomes.filter((outcome) => !outcome.ok).map((outcome) => outcome.key)));
     } catch (err) {
       onDownloadError(err);

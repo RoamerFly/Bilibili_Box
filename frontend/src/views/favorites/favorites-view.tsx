@@ -340,9 +340,32 @@ export function FavoritesView() {
     const start = (currentPage - 1) * pageSize;
     return filteredMedias.slice(start, start + pageSize);
   }, [currentPage, filteredMedias, pageSize]);
+  const likedLoadedPageCount = useMemo(
+    () => Math.max(1, Math.ceil(filteredLikedMedias.length / pageSize)),
+    [filteredLikedMedias.length, pageSize]
+  );
+  const likedPageCount = useMemo(() => {
+    if (searchKeyword.trim()) return likedLoadedPageCount;
+    if (likedTotal > 0) return Math.max(1, Math.ceil(likedTotal / pageSize));
+    return likedHasMore ? likedLoadedPageCount + 1 : likedLoadedPageCount;
+  }, [likedHasMore, likedLoadedPageCount, likedTotal, pageSize, searchKeyword]);
+  const likedVisiblePages = useMemo(
+    () => buildVisiblePages(Math.min(currentPage, likedLoadedPageCount), likedLoadedPageCount, 7),
+    [currentPage, likedLoadedPageCount]
+  );
+  const pagedLikedMedias = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredLikedMedias.slice(start, start + pageSize);
+  }, [currentPage, filteredLikedMedias, pageSize]);
   const selectableMedias = activeSection === "likes" ? filteredLikedMedias : filteredMedias;
-  const visibleSelectableMedias = activeSection === "likes" ? filteredLikedMedias : pagedMedias;
+  const visibleSelectableMedias = activeSection === "likes" ? pagedLikedMedias : pagedMedias;
   const currentPageAllSelected = visibleSelectableMedias.length > 0 && visibleSelectableMedias.every((media) => selectedMediaIds.has(media.id));
+
+  useEffect(() => {
+    if (activeSection !== "likes" || currentPage <= likedLoadedPageCount) return;
+    setCurrentPage(likedLoadedPageCount);
+  }, [activeSection, currentPage, likedLoadedPageCount]);
+
   const handlePageChange = (page: number) => {
     runPreservingMainScroll(() => setCurrentPage(page));
   };
@@ -465,6 +488,8 @@ export function FavoritesView() {
       resolved.map((media) => ({ bvid: media.bvid, cid: media.cid }))
     );
     if (!downloadQuality) return;
+    const groupId = `favorites-batch:${Date.now()}`;
+    const groupTitle = label || (resolved.slice(0, 2).map((media) => media.title).join("、") + (resolved.length > 2 ? " 等" : ""));
     const taskGroups = await Promise.all(
       resolved.map((media) =>
         invoke<string[]>("create_download_task", {
@@ -474,6 +499,9 @@ export function FavoritesView() {
             title: media.title,
             cids: [media.cid],
             download_quality: downloadQuality,
+            group_id: groupId,
+            group_title: groupTitle,
+            group_total: resolved.length,
           },
         })
       )
@@ -673,9 +701,6 @@ export function FavoritesView() {
               <GhostButton disabled={likedLoading || refreshing || likedMedias.length === 0} onClick={() => void handleDownloadAllLikes()}>
                 下载全部
               </GhostButton>
-              <GhostButton disabled={likedLoading || !likedHasMore} onClick={() => void fetchLikedVideos(likedPage + 1, "append")}>
-                {likedLoading ? "加载中" : likedHasMore ? "加载更多" : "没有更多"}
-              </GhostButton>
             </div>
           </div>
 
@@ -683,7 +708,7 @@ export function FavoritesView() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingTop: "120px" }}>
               <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
             </div>
-          ) : filteredLikedMedias.length === 0 ? (
+            ) : filteredLikedMedias.length === 0 ? (
             <EmptyState message={searchKeyword.trim() ? `没有找到“${searchKeyword}”` : "暂时没有获取到点赞视频"} />
           ) : (
             <>
@@ -696,7 +721,7 @@ export function FavoritesView() {
                   }}
                 >
                   <AnimatePresence>
-                    {filteredLikedMedias.map((media) => (
+                    {pagedLikedMedias.map((media) => (
                       <FavoriteCard
                         key={media.id || media.bvid}
                         media={media}
@@ -716,9 +741,36 @@ export function FavoritesView() {
               </div>
 
               <div style={{ display: "flex", justifyContent: "center", marginTop: "18px", paddingTop: "14px" }}>
-                <GhostButton disabled={likedLoading || !likedHasMore} onClick={() => void fetchLikedVideos(likedPage + 1, "append")}>
-                  {likedLoading ? "加载中" : likedHasMore ? "加载更多" : "没有更多"}
-                </GhostButton>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
+                  <span style={{ fontSize: "13px", color: "#8b8b9a", padding: "0 4px" }}>
+                    已载入 {likedLoadedPageCount}/{likedPageCount} 页
+                  </span>
+                  <PageButton disabled={currentPage <= 1} onClick={() => handlePageChange(currentPage - 1)}>
+                    上一页
+                  </PageButton>
+                  {likedVisiblePages.map((page) => (
+                    <PageButton key={page} active={page === currentPage} onClick={() => handlePageChange(page)}>
+                      {page}
+                    </PageButton>
+                  ))}
+                  <PageButton
+                    disabled={(currentPage >= likedLoadedPageCount && !likedHasMore) || likedLoading}
+                    onClick={() => {
+                      if (currentPage < likedLoadedPageCount) {
+                        handlePageChange(currentPage + 1);
+                        return;
+                      }
+                      void fetchLikedVideos(likedPage + 1, "append");
+                    }}
+                  >
+                    下一页
+                  </PageButton>
+                  {likedHasMore ? (
+                    <PageButton disabled={likedLoading} onClick={() => void fetchLikedVideos(likedPage + 1, "append")}>
+                      {likedLoading ? "加载中" : "加载更多"}
+                    </PageButton>
+                  ) : null}
+                </div>
               </div>
             </>
           )}

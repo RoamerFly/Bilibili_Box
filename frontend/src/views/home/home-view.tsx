@@ -298,8 +298,8 @@ export function HomeView() {
         <div className="bb-quick-grid">
           <QuickAction
             icon={<Search />}
-            title="搜索视频"
-            subtitle="搜索并下载视频"
+            title="搜索内容"
+            subtitle="搜索并下载内容"
             tone="search"
             onClick={() => setView("search")}
           />
@@ -565,6 +565,8 @@ function queueStageLabel(task: DownloadTask): string {
       return "正在下载视频分片";
     case "downloading_audio":
       return "正在下载音频分片";
+    case "downloading_article":
+      return "正在下载专栏图片";
     case "converting_audio":
       return "正在转换 MP3";
     case "merging":

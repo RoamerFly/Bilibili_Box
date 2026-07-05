@@ -61,6 +61,25 @@ pub struct DownloadProgress {
     pub episode_title: Option<String>,
     #[serde(default)]
     pub created_at: i64,
+    #[serde(default = "default_media_kind")]
+    pub media_kind: String,
+    #[serde(default)]
+    pub group_id: Option<String>,
+    #[serde(default)]
+    pub group_title: Option<String>,
+    #[serde(default)]
+    pub group_total: Option<usize>,
+    #[serde(default)]
+    pub group_index: Option<usize>,
+    #[serde(default)]
+    pub article_images: Vec<ArticleDownloadImage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ArticleDownloadImage {
+    pub url: String,
+    #[serde(default)]
+    pub title: String,
 }
 
 /// 下载管理器
@@ -249,6 +268,12 @@ impl DownloadManager {
                 collection_title,
                 episode_title,
                 created_at: Self::now_millis(),
+                media_kind: "video".to_string(),
+                group_id: params.group_id.clone(),
+                group_title: params.group_title.clone(),
+                group_total: params.group_total,
+                group_index: None,
+                article_images: Vec::new(),
             };
 
             // 保存进度
@@ -271,6 +296,66 @@ impl DownloadManager {
         }
 
         Ok(task_ids)
+    }
+
+    pub async fn create_article_download_task(
+        &self,
+        params: CreateArticleDownloadTaskParams,
+    ) -> Result<Vec<String>, String> {
+        let images: Vec<ArticleDownloadImage> = params
+            .images
+            .into_iter()
+            .filter(|image| !image.url.trim().is_empty())
+            .collect();
+        if images.is_empty() {
+            return Err("专栏中没有可下载的图片".to_string());
+        }
+
+        let task_id = format!(
+            "article_{}_{}",
+            params.article_id.max(0),
+            Self::now_millis()
+        );
+        let progress = DownloadProgress {
+            task_id: task_id.clone(),
+            aid: params.article_id,
+            bvid: String::new(),
+            cid: 0,
+            title: params.title.trim().to_string(),
+            cover: images.first().map(|image| image.url.clone()).unwrap_or_default(),
+            duration: 0,
+            quality: "原图".to_string(),
+            audio_only: false,
+            state: DownloadTaskState::Pending,
+            stage: DownloadStage::Pending,
+            progress: 0.0,
+            total_size: images.len() as u64,
+            downloaded_size: 0,
+            speed: 0.0,
+            video_url: None,
+            audio_url: None,
+            error: None,
+            output_path: None,
+            collection_title: Some(params.title.trim().to_string()),
+            episode_title: None,
+            created_at: Self::now_millis(),
+            media_kind: "article".to_string(),
+            group_id: params.group_id,
+            group_title: params.group_title,
+            group_total: params.group_total,
+            group_index: None,
+            article_images: images,
+        };
+
+        self.save_progress(&progress)?;
+        self.tasks
+            .write()
+            .insert(task_id.clone(), Arc::new(RwLock::new(progress)));
+        self.controls
+            .write()
+            .insert(task_id.clone(), Arc::new(TaskControl::new()));
+        self.start_download(task_id.clone());
+        Ok(vec![task_id])
     }
 
     /// 启动下载任务
@@ -435,6 +520,10 @@ impl DownloadManager {
         byte_per_sec: Arc<AtomicU64>,
         control: Arc<TaskControl>,
     ) -> Result<DownloadEnd, String> {
+        if task.read().media_kind == "article" {
+            return Self::download_article_task(app, task_id, task, byte_per_sec, control).await;
+        }
+
         let (
             video_url,
             audio_url,
@@ -782,6 +871,100 @@ impl DownloadManager {
         Ok(DownloadEnd::Completed)
     }
 
+    async fn download_article_task(
+        app: &AppHandle,
+        task_id: &str,
+        task: &Arc<RwLock<DownloadProgress>>,
+        byte_per_sec: Arc<AtomicU64>,
+        control: Arc<TaskControl>,
+    ) -> Result<DownloadEnd, String> {
+        let (download_dir, file_exist_action, progress_snapshot, images) = {
+            let progress = task.read();
+            let config = app.state::<Arc<RwLock<Config>>>();
+            let config = config.read();
+            (
+                config.download_dir.clone(),
+                config.file_exist_action.clone(),
+                progress.clone(),
+                progress.article_images.clone(),
+            )
+        };
+        if images.is_empty() {
+            return Err("专栏中没有可下载的图片".to_string());
+        }
+
+        let download_root = Config::resolve_download_dir(app, &download_dir)?;
+        let output_dir = Self::output_dir_from_root(&download_root, &progress_snapshot);
+        tokio::fs::create_dir_all(&output_dir)
+            .await
+            .map_err(|e| format!("创建专栏下载目录失败: {e}"))?;
+        {
+            let mut progress = task.write();
+            progress.state = DownloadTaskState::Downloading;
+            progress.stage = DownloadStage::DownloadingArticle;
+            progress.progress = 0.0;
+            progress.total_size = images.len() as u64;
+            progress.downloaded_size = 0;
+            progress.speed = 0.0;
+        }
+        Self::emit_progress_snapshot(app, task_id, task, TaskState::Downloading);
+
+        let client = app.state::<Arc<crate::api::BiliClient>>().media_client();
+        for (index, image) in images.iter().enumerate() {
+            if control.is_cancelled() {
+                return Ok(DownloadEnd::Cancelled);
+            }
+            if task.read().state == DownloadTaskState::Paused {
+                return Ok(DownloadEnd::Paused);
+            }
+            let normalized_url = Self::normalize_remote_url(&image.url);
+            let extension = Self::url_extension(&normalized_url).unwrap_or("jpg");
+            let title = Self::trimmed_string(Some(&image.title))
+                .unwrap_or_else(|| format!("图片{:02}", index + 1));
+            let safe_title = Self::sanitize_path_component(&title);
+            let expected = output_dir.join(format!("{:02}-{}.{}", index + 1, safe_title, extension));
+            let Some(path) = Self::resolve_existing_file(expected.clone(), &file_exist_action)? else {
+                let mut progress = task.write();
+                progress.downloaded_size = (index + 1) as u64;
+                progress.progress = ((index + 1) as f64 / images.len() as f64) * 100.0;
+                continue;
+            };
+
+            let started = Instant::now();
+            let response = client
+                .get(&normalized_url)
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                )
+                .header("Referer", "https://www.bilibili.com/")
+                .send()
+                .await
+                .map_err(|e| format!("请求专栏图片失败: {e}"))?;
+            if !response.status().is_success() {
+                return Err(format!("下载专栏图片失败: HTTP {}", response.status()));
+            }
+            let bytes = response
+                .bytes()
+                .await
+                .map_err(|e| format!("读取专栏图片失败: {e}"))?;
+            byte_per_sec.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            Self::write_binary_asset(path.clone(), bytes.as_ref(), &file_exist_action).await?;
+            {
+                let mut progress = task.write();
+                progress.downloaded_size = (index + 1) as u64;
+                progress.progress = ((index + 1) as f64 / images.len() as f64) * 100.0;
+                let elapsed = started.elapsed().as_secs_f64();
+                progress.speed = if elapsed > 0.0 { bytes.len() as f64 / elapsed } else { 0.0 };
+                progress.output_path = Some(output_dir.to_string_lossy().to_string());
+            }
+            Self::emit_progress_snapshot(app, task_id, task, TaskState::Downloading);
+        }
+
+        task.write().output_path = Some(output_dir.to_string_lossy().to_string());
+        Ok(DownloadEnd::Completed)
+    }
+
     fn emit_progress_snapshot(
         app: &AppHandle,
         task_id: &str,
@@ -960,12 +1143,19 @@ impl DownloadManager {
             return Err("任务尚未下载完成".to_string());
         }
 
+        if progress.media_kind == "article" {
+            return Err("专栏图片任务不是可播放媒体，请打开所在目录查看".to_string());
+        }
+
         self.find_existing_output_file(&progress)
             .ok_or_else(|| "没有找到可打开的已下载媒体文件".to_string())
     }
 
     fn find_existing_output_file(&self, progress: &DownloadProgress) -> Option<PathBuf> {
         if let Some(path) = progress.output_path.as_deref().map(PathBuf::from) {
+            if progress.media_kind == "article" && path.is_dir() {
+                return Some(path);
+            }
             if path.is_file() {
                 return Some(path);
             }
@@ -1095,6 +1285,9 @@ impl DownloadManager {
     fn expected_output_file(&self, progress: &DownloadProgress) -> Result<PathBuf, String> {
         let config = self.app.state::<Arc<RwLock<Config>>>();
         let root = Config::resolve_download_dir(&self.app, &config.read().download_dir)?;
+        if progress.media_kind == "article" {
+            return Ok(Self::output_dir_from_root(&root, progress));
+        }
         let extension = if progress.audio_only { "mp3" } else { "mp4" };
         Ok(Self::output_dir_from_root(&root, progress).join(format!(
             "{}.{}",
@@ -1294,6 +1487,9 @@ impl DownloadManager {
 
     fn task_output_dir(&self, progress: &DownloadProgress) -> Result<PathBuf, String> {
         if let Some(output_path) = progress.output_path.as_deref().map(PathBuf::from) {
+            if progress.media_kind == "article" && output_path.is_dir() {
+                return Ok(output_path);
+            }
             if let Some(parent) = output_path.parent() {
                 return Ok(parent.to_path_buf());
             }
@@ -1316,6 +1512,14 @@ impl DownloadManager {
         }
 
         let output_file = self.find_existing_output_file(progress);
+        if progress.media_kind == "article" {
+            if let Some(path) = output_file.as_ref() {
+                if path.starts_with(&root) && path.is_dir() {
+                    let _ = tokio::fs::remove_dir_all(path).await;
+                }
+            }
+            return Ok(());
+        }
         if let Some(path) = output_file.as_ref() {
             if path.starts_with(&root) && path.is_file() {
                 let _ = tokio::fs::remove_file(path).await;
@@ -1895,6 +2099,10 @@ fn default_quality_label() -> String {
     "自动".to_string()
 }
 
+fn default_media_kind() -> String {
+    "video".to_string()
+}
+
 fn quality_name_from_id(id: i64) -> &'static str {
     match id {
         127 => "8K",
@@ -1940,4 +2148,23 @@ pub struct CreateDownloadTaskParams {
     pub download_quality: Option<String>,
     #[serde(default)]
     pub audio_only: bool,
+    #[serde(default)]
+    pub group_id: Option<String>,
+    #[serde(default)]
+    pub group_title: Option<String>,
+    #[serde(default)]
+    pub group_total: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateArticleDownloadTaskParams {
+    pub article_id: i64,
+    pub title: String,
+    pub images: Vec<ArticleDownloadImage>,
+    #[serde(default)]
+    pub group_id: Option<String>,
+    #[serde(default)]
+    pub group_title: Option<String>,
+    #[serde(default)]
+    pub group_total: Option<usize>,
 }

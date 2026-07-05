@@ -115,6 +115,7 @@ export function PlayerView() {
   const [favoriteInitialSelection, setFavoriteInitialSelection] = useState<Set<number>>(new Set());
   const [favoriteFoldersLoading, setFavoriteFoldersLoading] = useState(false);
   const [actionNotice, setActionNotice] = useState<ActionNoticeState | null>(null);
+  const [commentRefreshKey, setCommentRefreshKey] = useState(0);
   const [bangumiInfo, setBangumiInfo] = useState<BangumiInfo | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeOption[]>([]);
   const [selectedEpisode, setSelectedEpisode] = useState<EpisodeOption | null>(null);
@@ -265,6 +266,7 @@ export function PlayerView() {
       } else {
         await loadBangumiPlayer();
       }
+      setCommentRefreshKey((key) => key + 1);
     } catch (err) {
       setError(String(err));
       setDashPlayback(null);
@@ -657,6 +659,7 @@ export function PlayerView() {
       );
       if (!downloadQuality) return;
       let taskIds: string[];
+      const groupId = `player-all:${playerState?.kind ?? "video"}:${Date.now()}`;
       if (playerState?.kind === "video") {
         taskIds = await invoke<string[]>("create_download_task", {
           params: {
@@ -665,6 +668,9 @@ export function PlayerView() {
             title: currentTitle,
             cids: episodes.map((episode) => episode.cid),
             download_quality: downloadQuality,
+            group_id: groupId,
+            group_title: `${currentTitle} 全部分P`,
+            group_total: episodes.length,
           },
         });
       } else {
@@ -679,6 +685,9 @@ export function PlayerView() {
                 collection_title: currentTitle,
                 episode_title: episode.title,
                 download_quality: downloadQuality,
+                group_id: groupId,
+                group_title: `${currentTitle} 全部剧集`,
+                group_total: episodes.length,
               },
             })
           )
@@ -1165,7 +1174,7 @@ export function PlayerView() {
           </div>
         </aside>
       </div>
-      {showComments ? <CommentsSection oid={commentOid} typeId={commentType} /> : null}
+      {showComments ? <CommentsSection oid={commentOid} typeId={commentType} refreshKey={commentRefreshKey} /> : null}
       {actionNotice ? (
         <motion.div
           key={actionNotice.id}

@@ -129,7 +129,7 @@ export function RecommendView() {
   const dynamicViewMode = useAppStore((s) => s.cardViewModes.dynamic ?? "grid");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
   const { pageSize, cardScale, columns } = useCardLayout("recommend", viewMode);
-  const { cardScale: dynamicCardScale, columns: dynamicColumns } = useCardLayout("dynamic", dynamicViewMode);
+  const { pageSize: dynamicPageSize, cardScale: dynamicCardScale, columns: dynamicColumns } = useCardLayout("dynamic", dynamicViewMode);
   const recommendPageState = useAppStore((s) => s.recommendPageState);
   const setRecommendPageState = useAppStore((s) => s.setRecommendPageState);
   const {
@@ -409,9 +409,31 @@ export function RecommendView() {
     return result;
   }, [dynamicItems, searchQuery, sortMode]);
 
+  const dynamicLoadedPageCount = useMemo(
+    () => Math.max(1, Math.ceil(displayedDynamicItems.length / dynamicPageSize)),
+    [displayedDynamicItems.length, dynamicPageSize]
+  );
+
+  const dynamicTotalPageCount = dynamicHasMore ? dynamicLoadedPageCount + 1 : dynamicLoadedPageCount;
+
+  useEffect(() => {
+    if (activeTab !== "dynamic" || currentPage <= dynamicLoadedPageCount) return;
+    setRecommendPageState({ currentPage: dynamicLoadedPageCount });
+  }, [activeTab, currentPage, dynamicLoadedPageCount, setRecommendPageState]);
+
+  const dynamicVisiblePages = useMemo(
+    () => buildVisiblePages(Math.min(currentPage, dynamicLoadedPageCount), dynamicLoadedPageCount, 7),
+    [currentPage, dynamicLoadedPageCount]
+  );
+
+  const pagedDynamicItems = useMemo(() => {
+    const start = (Math.max(1, currentPage) - 1) * dynamicPageSize;
+    return displayedDynamicItems.slice(start, start + dynamicPageSize);
+  }, [currentPage, displayedDynamicItems, dynamicPageSize]);
+
   const groupedDynamicItems = useMemo(() => {
     const groups: Array<{ bucket: string; items: FollowingDynamicItem[] }> = [];
-    for (const item of displayedDynamicItems) {
+    for (const item of pagedDynamicItems) {
       const bucket = getDynamicTimeBucket(item.pub_ts);
       const last = groups[groups.length - 1];
       if (last?.bucket === bucket) {
@@ -421,7 +443,7 @@ export function RecommendView() {
       }
     }
     return groups;
-  }, [displayedDynamicItems]);
+  }, [pagedDynamicItems]);
 
   const pageCount = useMemo(
     () => Math.max(1, Math.ceil(displayedVideos.length / pageSize)),
@@ -526,7 +548,7 @@ export function RecommendView() {
   };
 
   const visibleSelectionKeys = activeTab === "dynamic"
-    ? displayedDynamicItems.filter((item) => item.bvid).map((item) => item.id || item.bvid)
+    ? pagedDynamicItems.filter((item) => item.bvid).map((item) => item.id || item.bvid)
     : pagedVideos.map((video) => video.bvid);
   const selectedCount = activeTab === "dynamic" ? selectedDynamicIds.size : selectedVideoIds.size;
   const allVisibleSelected = visibleSelectionKeys.length > 0 && visibleSelectionKeys.every((key) => (
@@ -577,9 +599,20 @@ export function RecommendView() {
       }
       const downloadQuality = await requestDownloadQuality(resolved.map((item) => ({ bvid: item.bvid, cid: item.cid })));
       if (!downloadQuality) return;
+      const groupId = `recommend-selected:${Date.now()}`;
+      const groupTitle = resolved.slice(0, 2).map((item) => item.title).join("、") + (resolved.length > 2 ? " 等" : "");
       for (const item of resolved) {
         await invoke<string[]>("create_download_task", {
-          params: { bvid: item.bvid, cid: item.cid, title: item.title, cids: [item.cid], download_quality: downloadQuality },
+          params: {
+            bvid: item.bvid,
+            cid: item.cid,
+            title: item.title,
+            cids: [item.cid],
+            download_quality: downloadQuality,
+            group_id: groupId,
+            group_title: groupTitle,
+            group_total: resolved.length,
+          },
         });
       }
       setSelectedVideoIds(new Set());
@@ -916,13 +949,38 @@ export function RecommendView() {
                   </section>
                 ))}
               </div>
-              {dynamicHasMore ? (
-                <div style={{ display: "flex", justifyContent: "center", marginTop: "22px" }}>
-                  <PageButton disabled={dynamicRefreshing || dynamicLoading} onClick={() => void fetchFollowingDynamics("append")}>
-                    {dynamicRefreshing ? "加载中" : "加载更多"}
+              <div style={{ display: "flex", justifyContent: "center", marginTop: "22px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
+                  <span style={{ fontSize: "13px", color: "#8b8b9a", padding: "0 4px" }}>
+                    已载入 {dynamicLoadedPageCount}/{dynamicTotalPageCount} 页
+                  </span>
+                  <PageButton disabled={currentPage <= 1} onClick={() => runPreservingMainScroll(() => setRecommendPageState({ currentPage: currentPage - 1 }))}>
+                    上一页
                   </PageButton>
+                  {dynamicVisiblePages.map((page) => (
+                    <PageButton key={page} active={page === currentPage} onClick={() => runPreservingMainScroll(() => setRecommendPageState({ currentPage: page }))}>
+                      {page}
+                    </PageButton>
+                  ))}
+                  <PageButton
+                    disabled={(currentPage >= dynamicLoadedPageCount && !dynamicHasMore) || dynamicRefreshing || dynamicLoading}
+                    onClick={() => {
+                      if (currentPage < dynamicLoadedPageCount) {
+                        runPreservingMainScroll(() => setRecommendPageState({ currentPage: currentPage + 1 }));
+                        return;
+                      }
+                      void fetchFollowingDynamics("append");
+                    }}
+                  >
+                    下一页
+                  </PageButton>
+                  {dynamicHasMore ? (
+                    <PageButton disabled={dynamicRefreshing || dynamicLoading} onClick={() => void fetchFollowingDynamics("append")}>
+                      {dynamicRefreshing ? "加载中" : "加载更多"}
+                    </PageButton>
+                  ) : null}
                 </div>
-              ) : null}
+              </div>
             </>
           )
         ) : isLoading ? (

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { background: #18181c; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; font-family: sans-serif; gap: 24px; }
+    h2 { color: #fff; font-size: 18px; margin: 0; }
+    .dialog { width: 360px; border-radius: 16px; border: 1px solid #ececf2; background: #fff; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22); padding: 18px; }
+    .header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .header h3 { font-size: 17px; font-weight: 850; color: #1a1a2e; margin: 0; }
+    .close-btn { width: 32px; height: 32px; border: 1px solid #ececf2; border-radius: 8px; background: #fff; color: #666a73; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+    .options { display: flex; gap: 16px; justify-content: center; padding: 10px 0 20px; }
+    .option { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: #fff; border: 1px solid #ececf2; cursor: pointer; transition: all 0.2s; }
+    .option:hover { border: 2px solid #2ea9f7; background: #eff9ff; }
+    .option span { font-size: 13px; font-weight: 600; color: #242432; }
+    .hint { text-align: center; color: #8b8b9a; font-size: 12px; margin-top: -8px; }
+
+    @keyframes coinSprite22 { from { background-position: 0 0; } to { background-position: 100% 0; } }
+    @keyframes coinSprite33 { from { background-position: 0 0; } to { background-position: 100% 0; } }
+
+    .sprite-22 { width: 102px; height: 150px; background: url(./assets/22-coin-ani.png); background-size: auto 100%; background-repeat: no-repeat; }
+    .sprite-33 { width: 68px; height: 150px; background: url(./assets/33-coin-ani.png); background-size: auto 100%; background-repeat: no-repeat; }
+    .option:hover .sprite-22 { animation: coinSprite22 2.2s steps(21) forwards; }
+    .option:hover .sprite-33 { animation: coinSprite33 3.3s steps(32) forwards; }
+  </style>
+</head>
+<body>
+
+<h2>投币弹窗预览</h2>
+
+<div class="dialog">
+  <div class="header">
+    <h3>投币</h3>
+    <button class="close-btn" title="关闭">✕</button>
+  </div>
+  <div class="options">
+    <button class="option" type="button">
+      <div class="sprite-22"></div>
+      <span>投1个币</span>
+    </button>
+    <button class="option" type="button">
+      <div class="sprite-33"></div>
+      <span>投2个币</span>
+    </button>
+  </div>
+</div>
+
+</body>
+</html>

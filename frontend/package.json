@@ -26,6 +26,7 @@
     "clsx": "^2.1.1",
     "dashjs": "^5.1.1",
     "framer-motion": "^12.6.3",
+    "hls.js": "^1.6.16",
     "lucide-react": "^0.475.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",

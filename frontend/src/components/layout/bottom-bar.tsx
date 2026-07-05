@@ -75,6 +75,13 @@ export function BottomBar() {
     });
   };
 
+  const openTaskFolder = (event: React.MouseEvent, taskId: string) => {
+    event.stopPropagation();
+    invoke("open_download_task_folder", { taskId }).catch((error) => {
+      console.error("Failed to open task folder:", error);
+    });
+  };
+
   const runTaskAction = async (command: string, taskIds: string[]) => {
     if (!taskIds.length) return;
     try {
@@ -203,6 +210,9 @@ export function BottomBar() {
                               <Play size={14} />
                             </button>
                           ) : null}
+                          <button type="button" title="打开文件夹" onClick={(event) => openTaskFolder(event, task.id)}>
+                            <FolderOpen size={14} />
+                          </button>
                           <button type="button" title="删除" className="danger" onClick={() => setPendingDeleteIds([task.id])}>
                             <Trash2 size={14} />
                           </button>
@@ -300,6 +310,8 @@ function stageLabel(task: { stage?: string; status?: string }) {
       return "正在下载视频分片";
     case "downloading_audio":
       return "正在下载音频分片";
+    case "downloading_article":
+      return "正在下载专栏图片";
     case "converting_audio":
       return "正在转换 MP3";
     case "merging":

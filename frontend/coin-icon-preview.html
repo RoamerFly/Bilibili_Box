@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body {
+      margin: 0; padding: 32px;
+      background: #18181c;
+      display: flex; gap: 32px; align-items: flex-start;
+    }
+    .col { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .label { color: #a0a0b0; font-size: 13px; }
+    .btn-icon { width: 64px; height: 64px; display: block; }
+  </style>
+</head>
+<body>
+
+<div class="col">
+  <div class="label">未投币（灰色 #62666d）</div>
+  <svg class="btn-icon" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="24" fill="#62666d" />
+    <line x1="24" y1="20.2" x2="40" y2="20.2" stroke="#fff" stroke-width="5.2" stroke-linecap="round" />
+    <line x1="32" y1="20.2" x2="32" y2="47" stroke="#fff" stroke-width="5.2" stroke-linecap="round" />
+    <path d="M20.2 43 C20.2 34.5 25.2 29.5 32 29.5 C38.8 29.5 43.8 34.5 43.8 43" fill="none" stroke="#fff" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round" />
+  </svg>
+</div>
+
+<div class="col">
+  <div class="label">已投币（蓝色 #37aceb）</div>
+  <svg class="btn-icon" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="24" fill="#37aceb" />
+    <line x1="24" y1="20.2" x2="40" y2="20.2" stroke="#fff" stroke-width="5.2" stroke-linecap="round" />
+    <line x1="32" y1="20.2" x2="32" y2="47" stroke="#fff" stroke-width="5.2" stroke-linecap="round" />
+    <path d="M20.2 43 C20.2 34.5 25.2 29.5 32 29.5 C38.8 29.5 43.8 34.5 43.8 43" fill="none" stroke="#fff" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round" />
+  </svg>
+</div>
+
+</body>
+</html>

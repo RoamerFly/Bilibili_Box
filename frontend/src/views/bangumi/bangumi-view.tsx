@@ -198,6 +198,7 @@ export function BangumiView() {
         );
         if (!downloadQuality) return;
 
+        const groupId = `bangumi:${seasonId}:${Date.now()}`;
         const taskGroups = await Promise.all(
           bangumiInfo.episodes.map((ep) =>
             invoke<string[]>("create_download_task", {
@@ -209,6 +210,9 @@ export function BangumiView() {
                 collection_title: title,
                 episode_title: ep.long_title || ep.title,
                 download_quality: downloadQuality,
+                group_id: groupId,
+                group_title: `${title} 全部剧集`,
+                group_total: bangumiInfo.episodes.length,
               },
             })
           )

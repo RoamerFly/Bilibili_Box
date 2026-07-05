@@ -231,9 +231,20 @@ export function WatchLaterView() {
     try {
       const downloadQuality = await requestDownloadQuality(targets.map((item) => ({ bvid: item.bvid, cid: item.cid })));
       if (!downloadQuality) return;
+      const groupId = `watchlater-selected:${Date.now()}`;
+      const groupTitle = targets.slice(0, 2).map((item) => item.title).join("、") + (targets.length > 2 ? " 等" : "");
       const groups = await Promise.all(targets.map((item) =>
         invoke<string[]>("create_download_task", {
-          params: { bvid: item.bvid, cid: item.cid, title: item.title, cids: [item.cid], download_quality: downloadQuality },
+          params: {
+            bvid: item.bvid,
+            cid: item.cid,
+            title: item.title,
+            cids: [item.cid],
+            download_quality: downloadQuality,
+            group_id: groupId,
+            group_title: groupTitle,
+            group_total: targets.length,
+          },
         })
       ));
       notifyDownloadQueued(groups.flat(), `稍后再看 ${targets.length} 个视频`);

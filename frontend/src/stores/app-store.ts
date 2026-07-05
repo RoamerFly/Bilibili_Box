@@ -48,7 +48,7 @@ export interface UpProfileState {
 
 export interface ContentDetailState {
   id: string;
-  kind: "image" | "link" | "text" | "dynamic" | "film" | "article" | "live";
+  kind: "image" | "link" | "text" | "dynamic" | "film" | "article" | "articleList" | "live";
   title: string;
   text: string;
   contentText?: string;
@@ -58,7 +58,8 @@ export interface ContentDetailState {
   liveRoomId?: number;
   seasonId?: number;
   articleId?: number;
-  commentOid?: number;
+  articleListId?: number;
+  commentOid?: number | string;
   commentType?: number;
   pubTs?: number;
   typeLabel?: string;
@@ -98,7 +99,7 @@ export interface DownloadTask {
   errorMessage?: string;
   outputPath?: string;
   createdAt?: number;
-  mediaKind?: "video" | "audio";
+  mediaKind?: "video" | "audio" | "article";
   quality?: string;
   format?: string;
 }
@@ -176,7 +177,7 @@ export interface RecommendPageDynamicItem {
   bvid: string;
   aid: number;
   images: string[];
-  comment_oid: number;
+  comment_oid: string;
   comment_type: number;
   duration_text: string;
   view_count: number;
@@ -281,6 +282,7 @@ interface AppState {
   closeUpProfile: () => void;
 
   contentDetailState: ContentDetailState | null;
+  contentDetailStack: ContentDetailState[];
   openContentDetail: (contentDetailState: ContentDetailState) => void;
   closeContentDetail: () => void;
 
@@ -294,6 +296,7 @@ interface AppState {
 
   favoritesPageState: FavoritesPageState;
   setFavoritesPageState: (state: Partial<FavoritesPageState>) => void;
+  resetAccountScopedState: () => void;
 
   cardViewModes: Partial<Record<CardViewModeKey, CardViewMode>>;
   setCardViewMode: (key: CardViewModeKey, mode: CardViewMode) => void;
@@ -358,15 +361,33 @@ export const useAppStore = create<AppState>()(
         set((state) => popViewStack(state.viewStack, { upProfileState: null })),
 
       contentDetailState: null,
+      contentDetailStack: [],
       openContentDetail: (contentDetailState) =>
         set((state) => ({
           previousView: state.currentView === "content" ? state.previousView ?? "home" : state.currentView,
           viewStack: pushViewStack(state.viewStack, state.currentView, "content"),
+          contentDetailStack:
+            state.currentView === "content" && state.contentDetailState
+              ? [...state.contentDetailStack, state.contentDetailState].slice(-12)
+              : [],
           contentDetailState,
           currentView: "content",
         })),
       closeContentDetail: () =>
-        set((state) => popViewStack(state.viewStack, { contentDetailState: null })),
+        set((state) => {
+          if (state.contentDetailStack.length > 0) {
+            const nextStack = [...state.contentDetailStack];
+            const previousContent = nextStack.pop() ?? null;
+            return {
+              contentDetailState: previousContent,
+              contentDetailStack: nextStack,
+              currentView: "content",
+              previousView: state.previousView,
+              viewStack: state.viewStack,
+            };
+          }
+          return popViewStack(state.viewStack, { contentDetailState: null, contentDetailStack: [] });
+        }),
 
       searchPageState: defaultSearchPageState,
       setSearchPageState: (nextSearchState) =>
@@ -396,6 +417,18 @@ export const useAppStore = create<AppState>()(
             ...nextFavoritesState,
           },
         })),
+      resetAccountScopedState: () =>
+        set({
+          searchPageState: defaultSearchPageState,
+          recommendPageState: defaultRecommendPageState,
+          favoritesPageState: defaultFavoritesPageState,
+          playerState: null,
+          upProfileState: null,
+          contentDetailState: null,
+          contentDetailStack: [],
+          previousView: null,
+          viewStack: [],
+        }),
 
       cardViewModes: {
         search: "grid",

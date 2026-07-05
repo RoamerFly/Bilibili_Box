@@ -28,7 +28,7 @@ pub struct BiliClient {
     action_client: RwLock<Client>,
     media_client: RwLock<ClientWithMiddleware>,
     content_length_client: RwLock<Client>,
-    shared_cookie_jar: Arc<Jar>,
+    shared_cookie_jar: RwLock<Arc<Jar>>,
     pub login_cookie_jar: Arc<Jar>,
 }
 
@@ -47,17 +47,19 @@ impl BiliClient {
             action_client,
             media_client,
             content_length_client,
-            shared_cookie_jar,
+            shared_cookie_jar: RwLock::new(shared_cookie_jar),
             login_cookie_jar,
         })
     }
 
     pub fn reload_client(&self) -> Result<(), String> {
+        let shared_cookie_jar = Arc::new(Jar::default());
+        *self.shared_cookie_jar.write() = shared_cookie_jar.clone();
         *self.api_client.write() =
-            Self::create_api_client(&self.app, self.shared_cookie_jar.clone())?;
+            Self::create_api_client(&self.app, shared_cookie_jar.clone())?;
         *self.action_client.write() = Self::create_action_client(&self.app)?;
         *self.media_client.write() =
-            Self::create_media_client(&self.app, self.shared_cookie_jar.clone())?;
+            Self::create_media_client(&self.app, shared_cookie_jar)?;
         *self.content_length_client.write() = Self::create_content_length_client(&self.app)?;
         Ok(())
     }
@@ -121,7 +123,7 @@ impl BiliClient {
     /// 从 cookie jar 中提取指定 name 的 cookie 值，用于获取可能不在 config 中的 cookie（如 bili_jct）
     pub fn get_jar_cookie(&self, url: &str, name: &str) -> Option<String> {
         let url: reqwest::Url = url.parse().ok()?;
-        let cookies = self.shared_cookie_jar.cookies(&url)?;
+        let cookies = self.shared_cookie_jar.read().cookies(&url)?;
         let cookie_str = cookies.to_str().ok()?;
         crate::api::video::extract_cookie_value(cookie_str, name)
             .filter(|v| !v.is_empty())
@@ -132,6 +134,7 @@ impl BiliClient {
             return String::new();
         };
         self.shared_cookie_jar
+            .read()
             .cookies(&url)
             .and_then(|cookies| cookies.to_str().ok().map(str::to_string))
             .unwrap_or_default()
@@ -145,7 +148,7 @@ impl BiliClient {
         }
 
         if let Ok(url) = Url::parse(url) {
-            if let Some(jar_cookie) = self.shared_cookie_jar.cookies(&url) {
+            if let Some(jar_cookie) = self.shared_cookie_jar.read().cookies(&url) {
                 if let Ok(jar_cookie) = jar_cookie.to_str() {
                     let jar_cookie = jar_cookie.trim().trim_end_matches(';');
                     if !jar_cookie.is_empty() {
@@ -261,7 +264,7 @@ impl BiliClient {
         let max_age = max_age
             .map(|value| format!("; Max-Age={value}"))
             .unwrap_or_default();
-        self.shared_cookie_jar.add_cookie_str(
+        self.shared_cookie_jar.read().add_cookie_str(
             &format!("{name}={value}; Domain=.bilibili.com; Path=/{max_age}"),
             url,
         );

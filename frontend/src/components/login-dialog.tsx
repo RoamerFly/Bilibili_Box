@@ -117,17 +117,29 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
   const [cookieInput, setCookieInput] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
   const [accounts, setAccounts] = useState<SavedAccountProfile[]>([]);
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [accountListOpen, setAccountListOpen] = useState(false);
   const [switchingProfile, setSwitchingProfile] = useState("");
+  const [addingAccount, setAddingAccount] = useState(false);
 
   const config = useAppStore((s) => s.config);
   const userInfo = useAppStore((s) => s.userInfo);
   const setConfig = useAppStore((s) => s.setConfig);
   const setUserInfo = useAppStore((s) => s.setUserInfo);
-  const resetSearchPageState = useAppStore((s) => s.resetSearchPageState);
-  const resetRecommendPageState = useAppStore((s) => s.resetRecommendPageState);
+  const resetAccountScopedState = useAppStore((s) => s.resetAccountScopedState);
   const isLoggedIn = userInfo !== null;
   const username = userInfo?.username || "";
+  const shouldShowSavedAccounts = open && !isLoggedIn && !addingAccount && accountsLoaded && accounts.length > 0;
+
+  const loadAccounts = useCallback(async () => {
+    setAccountsLoaded(false);
+    try {
+      const savedAccounts = await invoke<SavedAccountProfile[]>("list_saved_accounts");
+      setAccounts(savedAccounts);
+    } finally {
+      setAccountsLoaded(true);
+    }
+  }, []);
 
   const saveSessdata = useCallback(async (sessdata: string, cookie?: string | null) => {
     const currentConfig = await invoke<BackendConfig>("get_config");
@@ -157,7 +169,27 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
       loginTime: timeStr,
       deviceName: "Windows 桌面端",
     });
-  }, [saveSessdata, setUserInfo]);
+    resetAccountScopedState();
+    setAddingAccount(false);
+    setAccountListOpen(false);
+    await loadAccounts();
+    window.dispatchEvent(new CustomEvent("bilibili-box:account-switched"));
+  }, [loadAccounts, resetAccountScopedState, saveSessdata, setUserInfo]);
+
+  const handleClose = useCallback(() => {
+    setAddingAccount(false);
+    onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    if (open) {
+      void loadAccounts();
+    } else {
+      setAccountListOpen(false);
+      setAddingAccount(false);
+      setPolling(false);
+    }
+  }, [loadAccounts, open]);
 
   // ── 二维码生成 ──────────────────────────────────────
   const generateQrcode = useCallback(async () => {
@@ -194,7 +226,7 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
             console.log("[Login] 提取到 SESSDATA:", sessdata.substring(0, 20) + "...");
             await completeLogin(sessdata, status.cookie);
             setPolling(false);
-            onClose();
+            handleClose();
           } catch (err) {
             console.error("[Login] 保存 SESSDATA 失败:", err);
             setError(String(err));
@@ -218,7 +250,7 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
     } catch (e) {
       console.error("轮询失败:", e);
     }
-  }, [qrcodeKey, completeLogin, onClose]);
+  }, [qrcodeKey, completeLogin, handleClose]);
 
   useEffect(() => {
     if (!polling || !qrcodeKey) return;
@@ -228,14 +260,14 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
 
   // 打开对话框时生成二维码
   useEffect(() => {
-    if (open && mode === "qrcode") {
+    if (open && mode === "qrcode" && (addingAccount || (!isLoggedIn && accountsLoaded && accounts.length === 0))) {
       generateQrcode();
       setPolling(true);
     }
     return () => {
       setPolling(false);
     };
-  }, [open, mode, generateQrcode]);
+  }, [accounts.length, accountsLoaded, open, mode, isLoggedIn, addingAccount, generateQrcode]);
 
   // ── Cookie 登录 ──────────────────────────────────────
   const handleCookieLogin = async () => {
@@ -251,7 +283,7 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
       const sessdata = extractSessdata(cookieInput);
       const cookie = cookieInput.includes("=") ? cookieInput.trim() : `SESSDATA=${sessdata}`;
       await completeLogin(sessdata, cookie);
-      onClose();
+      handleClose();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -271,7 +303,7 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
         throw new Error("未能从浏览器窗口获取 SESSDATA");
       }
       await completeLogin(sessdata, result.cookie);
-      onClose();
+      handleClose();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -290,17 +322,15 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
-      // 直接清空 config 中的 sessdata，watch hook 会自动清除 userInfo
-      if (config) {
-        // 同时保存到后端配置文件
-        const currentConfig = await invoke<{ sessdata: string; [key: string]: unknown }>("get_config");
-        await invoke("save_config", { newConfig: { ...currentConfig, sessdata: "", cookie: "" } });
-        await invoke("clear_user_info");
-        // 更新本地状态
-        setConfig({ ...config, sessdata: "", cookie: "" });
-        setUserInfo(null);
-      }
-      onClose();
+      await invoke("clear_user_info");
+      const guestConfig = await invoke<BackendConfig>("get_config");
+      setConfig({ ...guestConfig, sessdata: "", cookie: "" });
+      setUserInfo(null);
+      resetAccountScopedState();
+      setAddingAccount(false);
+      setAccountListOpen(false);
+      await loadAccounts();
+      window.dispatchEvent(new CustomEvent("bilibili-box:account-switched"));
     } catch (e) {
       console.error("登出失败:", e);
     } finally {
@@ -315,8 +345,7 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
     }
     setError("");
     try {
-      const savedAccounts = await invoke<SavedAccountProfile[]>("list_saved_accounts");
-      setAccounts(savedAccounts);
+      await loadAccounts();
       setAccountListOpen(true);
     } catch (err) {
       setError(String(err));
@@ -335,15 +364,26 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
         loginTime: "--",
         deviceName: "Windows 桌面端",
       } : null);
-      resetSearchPageState();
-      resetRecommendPageState();
+      resetAccountScopedState();
       setAccountListOpen(false);
+      setAddingAccount(false);
+      void loadAccounts();
       window.dispatchEvent(new CustomEvent("bilibili-box:account-switched"));
     } catch (err) {
       setError(String(err));
     } finally {
       setSwitchingProfile("");
     }
+  };
+
+  const handleAddAccount = () => {
+    setError("");
+    setCookieInput("");
+    setAccountListOpen(false);
+    setAddingAccount(true);
+    setMode("qrcode");
+    void generateQrcode();
+    setPolling(true);
   };
 
   return (
@@ -357,9 +397,9 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
           transition={{ duration: 0.2 }}
           className="fixed inset-0 z-50 flex items-center justify-center"
           style={{ background: "rgba(0,0,0,0.45)" }}
-          onClick={onClose}
+          onClick={handleClose}
         >
-          {isLoggedIn ? (
+          {isLoggedIn && !addingAccount ? (
             <LoggedInPanel
               key="logged-in-panel"
               username={username}
@@ -368,9 +408,18 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
               accounts={accounts}
               accountListOpen={accountListOpen}
               switchingProfile={switchingProfile}
-              onClose={onClose}
+              onClose={handleClose}
               onLogout={handleLogout}
               onToggleAccountList={() => void handleToggleAccountList()}
+              onAddAccount={handleAddAccount}
+              onSwitchAccount={(profile) => void handleSwitchAccount(profile)}
+            />
+          ) : shouldShowSavedAccounts ? (
+            <LoggedOutAccountPanel
+              accounts={accounts}
+              switchingProfile={switchingProfile}
+              onClose={handleClose}
+              onAddAccount={handleAddAccount}
               onSwitchAccount={(profile) => void handleSwitchAccount(profile)}
             />
           ) : (
@@ -383,7 +432,7 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
               error={error}
               cookieInput={cookieInput}
               setCookieInput={setCookieInput}
-              onClose={onClose}
+              onClose={handleClose}
               onRefresh={handleRefresh}
               onCookieLogin={handleCookieLogin}
               onBrowserLogin={handleBrowserLogin}
@@ -409,6 +458,7 @@ interface LoggedInPanelProps {
   onClose: () => void;
   onLogout: () => void;
   onToggleAccountList: () => void;
+  onAddAccount: () => void;
   onSwitchAccount: (profile: string) => void;
 }
 
@@ -422,6 +472,7 @@ function LoggedInPanel({
   onClose,
   onLogout,
   onToggleAccountList,
+  onAddAccount,
   onSwitchAccount,
 }: LoggedInPanelProps) {
   return (
@@ -434,6 +485,10 @@ function LoggedInPanel({
       className="relative"
       style={{
         width: "400px",
+        maxHeight: "calc(100vh - 48px)",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
         background: "#ffffff",
         borderRadius: "18px",
         boxShadow: "0 24px 64px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.08)",
@@ -556,7 +611,7 @@ function LoggedInPanel({
       </div>
 
       {/* ═══ 退出登录按钮 ═══ */}
-      <div style={{ padding: "4px 28px 18px" }}>
+      <div style={{ padding: "4px 28px 18px", display: "flex", flexWrap: "wrap", gap: "10px" }}>
         <motion.button
           type="button"
           onClick={onToggleAccountList}
@@ -577,14 +632,33 @@ function LoggedInPanel({
             justifyContent: "center",
             gap: "8px",
             transition: "all 0.15s",
-            marginBottom: "10px",
+            marginBottom: 0,
+            order: 2,
+            width: "calc(50% - 5px)",
           }}
         >
           <Users className="w-[15px] h-[15px]" />
           切换账号
         </motion.button>
         {accountListOpen ? (
-          <div style={{ display: "grid", gap: "8px", marginBottom: "12px" }}>
+          <div style={{ display: "grid", gap: "8px", marginBottom: "2px", maxHeight: "230px", overflowY: "auto", paddingRight: "4px", order: 1, flexBasis: "100%" }}>
+            <button
+              type="button"
+              onClick={onAddAccount}
+              disabled={loggingOut || Boolean(switchingProfile)}
+              style={{
+                height: "38px",
+                borderRadius: "10px",
+                border: "1.5px dashed #a5b4fc",
+                background: "#f8f7ff",
+                color: "#6366f1",
+                fontSize: "13px",
+                fontWeight: 800,
+                cursor: loggingOut || switchingProfile ? "not-allowed" : "pointer",
+              }}
+            >
+              添加账号
+            </button>
             {accounts.length ? accounts.map((account) => (
               <button
                 key={account.profile}
@@ -640,6 +714,8 @@ function LoggedInPanel({
             justifyContent: "center",
             gap: "8px",
             transition: "all 0.15s",
+            order: 2,
+            width: "calc(50% - 5px)",
           }}
         >
           {loggingOut ? (
@@ -680,6 +756,116 @@ function LoggedInPanel({
 // ════════════════════════════════════════════════════════
 //  未登录 → 登录表单
 // ════════════════════════════════════════════════════════
+
+function LoggedOutAccountPanel({
+  accounts,
+  switchingProfile,
+  onClose,
+  onAddAccount,
+  onSwitchAccount,
+}: {
+  accounts: SavedAccountProfile[];
+  switchingProfile: string;
+  onClose: () => void;
+  onAddAccount: () => void;
+  onSwitchAccount: (profile: string) => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.96, y: 16 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.96, y: 16 }}
+      transition={{ type: "spring", stiffness: 380, damping: 28 }}
+      onClick={(event) => event.stopPropagation()}
+      className="relative"
+      style={{
+        width: "400px",
+        maxHeight: "calc(100vh - 48px)",
+        overflow: "hidden",
+        background: "#ffffff",
+        borderRadius: "18px",
+        boxShadow: "0 24px 64px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.08)",
+      }}
+    >
+      <button
+        type="button"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }}
+        className="absolute top-4 right-4 flex items-center justify-center cursor-pointer z-10"
+        style={{ width: "30px", height: "30px", borderRadius: "8px", border: "none", background: "transparent", color: "#9999aa" }}
+      >
+        <X className="w-[16px] h-[16px]" />
+      </button>
+
+      <div style={{ padding: "34px 28px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
+          <div style={{ width: 46, height: 46, borderRadius: 14, display: "grid", placeItems: "center", background: "#f0efff", color: "#6366f1" }}>
+            <Users className="w-[22px] h-[22px]" />
+          </div>
+          <div>
+            <h2 style={{ color: "#1a1a2e", fontSize: "18px", fontWeight: 800 }}>选择本地账号</h2>
+            <p style={{ color: "#8b8b9a", fontSize: "12.5px", marginTop: "3px" }}>已保存的账号可直接切换，无需重新扫码</p>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gap: "8px", maxHeight: "300px", overflowY: "auto", paddingRight: "4px" }}>
+          {accounts.map((account) => (
+            <button
+              key={account.profile}
+              type="button"
+              disabled={Boolean(switchingProfile)}
+              onClick={() => onSwitchAccount(account.profile)}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "36px minmax(0, 1fr) auto",
+                alignItems: "center",
+                gap: "10px",
+                padding: "10px 11px",
+                borderRadius: "11px",
+                border: "1px solid #ececf2",
+                background: "#fff",
+                cursor: switchingProfile ? "wait" : "pointer",
+                textAlign: "left",
+              }}
+            >
+              <img src={account.face} alt={account.username} referrerPolicy="no-referrer" style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", background: "#eef2ff" }} />
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: "block", color: "#1a1a2e", fontSize: "13px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</span>
+                <span style={{ color: "#8b8b9a", fontSize: "11.5px" }}>UID {account.mid}</span>
+              </span>
+              <span style={{ color: "#6366f1", fontSize: "12px", fontWeight: 800 }}>
+                {switchingProfile === account.profile ? "切换中" : "进入"}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={onAddAccount}
+          disabled={Boolean(switchingProfile)}
+          style={{
+            width: "100%",
+            height: "42px",
+            marginTop: "14px",
+            borderRadius: "11px",
+            border: "1.5px dashed #a5b4fc",
+            background: "#f8f7ff",
+            color: "#6366f1",
+            fontSize: "14px",
+            fontWeight: 800,
+            cursor: switchingProfile ? "not-allowed" : "pointer",
+          }}
+        >
+          添加账号
+        </button>
+      </div>
+    </motion.div>
+  );
+}
 
 interface LoginFormProps {
   mode: LoginMode;

@@ -362,12 +362,21 @@ export interface CreateDownloadTaskParams {
   episode_title?: string;
   download_quality?: string;
   audio_only?: boolean;
+  group_id?: string;
+  group_title?: string;
+  group_total?: number;
+}
+
+export interface ArticleDownloadImage {
+  url: string;
+  title?: string;
 }
 
 export type DownloadStage =
   | "pending"
   | "downloading_video"
   | "downloading_audio"
+  | "downloading_article"
   | "converting_audio"
   | "merging"
   | "completed"
@@ -407,6 +416,12 @@ export interface DownloadProgress {
   collection_title?: string;
   episode_title?: string;
   created_at?: number;
+  media_kind?: string;
+  group_id?: string;
+  group_title?: string;
+  group_total?: number;
+  group_index?: number;
+  article_images?: ArticleDownloadImage[];
 }
 
 /** 前端 UI 使用的下载任务格式 */

@@ -3,7 +3,7 @@ use reqwest::{RequestBuilder as RawRequestBuilder, StatusCode};
 use reqwest_middleware::RequestBuilder;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 #[derive(Debug, Deserialize)]
@@ -174,6 +174,10 @@ pub struct LivePlayInfo {
     pub title: String,
     pub url: Option<String>,
     pub cover: String,
+    #[serde(default)]
+    pub quality: i64,
+    #[serde(default)]
+    pub accept_quality: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,11 +186,49 @@ pub struct ArticleDetailInfo {
     pub title: String,
     pub summary: String,
     pub content_text: String,
-    pub images: Vec<String>,
+    pub images: Vec<ArticleImageInfo>,
+    #[serde(default)]
+    pub collection: Option<ArticleCollectionSummary>,
     pub banner_url: String,
     pub author_mid: i64,
     pub author_name: String,
     pub author_face: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleImageInfo {
+    pub url: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ArticleCollectionSummary {
+    pub id: i64,
+    pub title: String,
+    pub count_text: String,
+    #[serde(default)]
+    pub cover: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ArticleCollectionInfo {
+    pub id: i64,
+    pub title: String,
+    pub count_text: String,
+    #[serde(default)]
+    pub cover: String,
+    pub articles: Vec<ArticleCollectionItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ArticleCollectionItem {
+    pub id: i64,
+    pub title: String,
+    pub summary: String,
+    pub cover: String,
+    pub pubdate: i64,
+    pub author_mid: i64,
+    pub author_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -324,8 +366,9 @@ impl super::BiliClient {
         serde_json::from_value(data).map_err(|e| format!("解析视频信息失败: {}", e))
     }
 
-    pub async fn get_live_play_info(&self, room_id: i64) -> Result<LivePlayInfo, String> {
+    pub async fn get_live_play_info(&self, room_id: i64, quality: Option<i64>) -> Result<LivePlayInfo, String> {
         let endpoint = "https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo";
+        let qn = quality.unwrap_or(10000).max(0);
         let data = self
             .request_bili_value(
                 self.api_client()
@@ -333,9 +376,9 @@ impl super::BiliClient {
                     .query(&[
                         ("room_id", room_id.to_string()),
                         ("protocol", "0,1".to_string()),
-                        ("format", "0,1,2".to_string()),
+                        ("format", "0,2".to_string()),
                         ("codec", "0,1".to_string()),
-                        ("qn", "10000".to_string()),
+                        ("qn", qn.to_string()),
                         ("platform", "web".to_string()),
                         ("ptype", "8".to_string()),
                     ])
@@ -360,6 +403,8 @@ impl super::BiliClient {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string(),
+            quality: qn,
+            accept_quality: extract_live_accept_quality(&data),
         })
     }
 
@@ -380,11 +425,24 @@ impl super::BiliClient {
         if let Some(content) = data.get("content").and_then(Value::as_str) {
             if let Ok(content_json) = serde_json::from_str::<Value>(content) {
                 extract_article_content(&content_json, &mut content_text, &mut images);
+            } else {
+                extract_article_html_content(content, &mut content_text, &mut images);
             }
         }
-        extract_article_images(&data, &mut images);
-        images.sort();
-        images.dedup();
+        if images.is_empty() {
+            extract_article_content_image_list(data.get("content_pic_list"), &mut images);
+        }
+        if images.is_empty() {
+            extract_article_content_image_list(data.get("origin_image_urls"), &mut images);
+            extract_article_content_image_list(data.get("image_urls"), &mut images);
+        }
+        let banner_url = data
+            .get("banner_url")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        images.retain(|image| image.url != banner_url);
+        images = dedupe_article_images(images);
 
         let author = data.get("author").unwrap_or(&Value::Null);
         Ok(ArticleDetailInfo {
@@ -401,11 +459,8 @@ impl super::BiliClient {
                 .to_string(),
             content_text: content_text.trim().to_string(),
             images,
-            banner_url: data
-                .get("banner_url")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
+            collection: extract_article_collection_summary(&data),
+            banner_url,
             author_mid: author
                 .get("mid")
                 .or_else(|| data.get("mid"))
@@ -424,6 +479,99 @@ impl super::BiliClient {
                 .unwrap_or("")
                 .to_string(),
         })
+    }
+
+    pub async fn get_article_collection(
+        &self,
+        collection_id: i64,
+    ) -> Result<ArticleCollectionInfo, String> {
+        if collection_id <= 0 {
+            return Err("无效的文集 ID".to_string());
+        }
+        let endpoint = "https://api.bilibili.com/x/article/list/web/articles";
+        let data = self
+            .request_bili_value(
+                self.api_client()
+                    .get(endpoint)
+                    .query(&[("id", collection_id.to_string())])
+                    .header("cookie", self.get_cookie_for_url(endpoint))
+                    .header(
+                        "referer",
+                        format!("https://www.bilibili.com/read/readlist/rl{}", collection_id),
+                    ),
+            )
+            .await?;
+        let mut collection = parse_article_collection(collection_id, &data);
+        self.enrich_article_collection_items(&mut collection).await;
+        if collection.cover.is_empty() {
+            collection.cover = collection
+                .articles
+                .iter()
+                .find_map(|item| (!item.cover.is_empty()).then(|| item.cover.clone()))
+                .unwrap_or_default();
+        }
+        Ok(collection)
+    }
+
+    async fn enrich_article_collection_items(&self, collection: &mut ArticleCollectionInfo) {
+        let missing_ids: Vec<i64> = collection
+            .articles
+            .iter()
+            .filter(|item| item.cover.trim().is_empty())
+            .map(|item| item.id)
+            .collect();
+        if missing_ids.is_empty() {
+            return;
+        }
+
+        let endpoint = "https://api.bilibili.com/x/article/cards";
+        let mut cover_by_id = std::collections::HashMap::<i64, String>::new();
+        for chunk in missing_ids.chunks(40) {
+            let ids = chunk
+                .iter()
+                .map(|id| format!("cv{id}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let Ok(data) = self
+                .request_bili_value(
+                    self.api_client()
+                        .get(endpoint)
+                        .query(&[("ids", ids), ("web_location", "333.1305".to_string())])
+                        .header("cookie", self.get_cookie_for_url(endpoint))
+                        .header("referer", "https://www.bilibili.com/"),
+                )
+                .await
+            else {
+                continue;
+            };
+            if let Some(map) = data.as_object() {
+                for (key, value) in map {
+                    let id = key
+                        .trim_start_matches("cv")
+                        .parse::<i64>()
+                        .ok()
+                        .or_else(|| value.get("id").and_then(parse_i64_value))
+                        .unwrap_or(0);
+                    if id <= 0 {
+                        continue;
+                    }
+                    if let Some(cover) = first_image_field(
+                        value,
+                        &["image_url", "banner_url", "cover", "pic", "thumbnail", "origin_image_urls", "image_urls", "covers"],
+                    ) {
+                        cover_by_id.insert(id, cover);
+                    }
+                }
+            }
+        }
+
+        for item in &mut collection.articles {
+            if item.cover.trim().is_empty() {
+                if let Some(cover) = cover_by_id.get(&item.id) {
+                    item.cover = cover.clone();
+                }
+            }
+        }
     }
 
     pub async fn get_video_interaction_state(
@@ -2044,11 +2192,14 @@ fn parse_keyword_generic_results(data: &Value, badge: &str) -> Vec<KeywordGeneri
                         item,
                         &["title", "uname", "name", "author", "roomname"],
                     ));
-                    let cover = first_string_field(
+                    let mut cover = first_string_field(
                         item,
-                        &["cover", "pic", "user_cover", "upic", "face", "cover_url"],
+                        &["cover", "pic", "user_cover", "upic", "face", "cover_url", "banner_url"],
                     )
                     .to_string();
+                    if cover.is_empty() {
+                        cover = first_image_url_in_value(item).unwrap_or_default();
+                    }
                     let description = clean_search_text(first_string_field(
                         item,
                         &["desc", "description", "content", "usign", "area_name"],
@@ -2199,6 +2350,7 @@ fn extract_live_play_url(data: &Value) -> Option<String> {
         .get("playurl")?
         .get("stream")?
         .as_array()?;
+    let mut fallback = None;
     for stream in streams {
         let formats = stream.get("format")?.as_array()?;
         for format in formats {
@@ -2214,20 +2366,48 @@ fn extract_live_play_url(data: &Value) -> Option<String> {
                         let extra = info.get("extra").and_then(Value::as_str).unwrap_or("");
                         let url = format!("{host}{base_url}{extra}");
                         if !url.is_empty() {
-                            return Some(url);
+                            if url.to_ascii_lowercase().contains(".m3u8") {
+                                return Some(url);
+                            }
+                            fallback.get_or_insert(url);
                         }
                     }
                 }
                 if base_url.starts_with("http") {
-                    return Some(base_url.to_string());
+                    if base_url.to_ascii_lowercase().contains(".m3u8") {
+                        return Some(base_url.to_string());
+                    }
+                    fallback.get_or_insert_with(|| base_url.to_string());
                 }
             }
         }
     }
-    None
+    fallback
 }
 
-fn extract_article_content(value: &Value, text: &mut String, images: &mut Vec<String>) {
+fn extract_live_accept_quality(data: &Value) -> Vec<i64> {
+    let mut qualities = Vec::new();
+    if let Some(items) = data
+        .get("playurl_info")
+        .and_then(|value| value.get("playurl"))
+        .and_then(|value| value.get("g_qn_desc"))
+        .and_then(Value::as_array)
+    {
+        for item in items {
+            if let Some(qn) = item.get("qn").and_then(parse_i64_value) {
+                qualities.push(qn);
+            }
+        }
+    }
+    if qualities.is_empty() {
+        qualities.extend([10000, 400, 250, 150, 80]);
+    }
+    qualities.sort_by(|left, right| right.cmp(left));
+    qualities.dedup();
+    qualities
+}
+
+fn extract_article_content(value: &Value, text: &mut String, images: &mut Vec<ArticleImageInfo>) {
     match value {
         Value::Object(map) => {
             if let Some(insert) = map.get("insert") {
@@ -2246,7 +2426,7 @@ fn extract_article_content(value: &Value, text: &mut String, images: &mut Vec<St
     }
 }
 
-fn extract_article_insert(value: &Value, text: &mut String, images: &mut Vec<String>) {
+fn extract_article_insert(value: &Value, text: &mut String, images: &mut Vec<ArticleImageInfo>) {
     match value {
         Value::String(raw) => {
             text.push_str(raw);
@@ -2255,7 +2435,7 @@ fn extract_article_insert(value: &Value, text: &mut String, images: &mut Vec<Str
             }
         }
         Value::Object(map) => {
-            for key in ["native-image", "image", "image-upload", "video-card", "article-card"] {
+            for key in ["native-image", "nativeImage", "image", "image-upload", "imageUpload", "image_upload"] {
                 if let Some(node) = map.get(key) {
                     extract_article_images(node, images);
                 }
@@ -2265,13 +2445,16 @@ fn extract_article_insert(value: &Value, text: &mut String, images: &mut Vec<Str
     }
 }
 
-fn extract_article_images(value: &Value, images: &mut Vec<String>) {
+fn extract_article_images(value: &Value, images: &mut Vec<ArticleImageInfo>) {
     match value {
         Value::Object(map) => {
             for key in ["url", "src", "img_src", "cover", "banner_url"] {
                 if let Some(url) = map.get(key).and_then(Value::as_str) {
                     if is_article_image_url(url) {
-                        images.push(url.to_string());
+                        images.push(ArticleImageInfo {
+                            url: url.to_string(),
+                            title: article_image_title(value),
+                        });
                     }
                 }
             }
@@ -2280,7 +2463,10 @@ fn extract_article_images(value: &Value, images: &mut Vec<String>) {
                     for item in items {
                         if let Some(url) = item.as_str() {
                             if is_article_image_url(url) {
-                                images.push(url.to_string());
+                                images.push(ArticleImageInfo {
+                                    url: url.to_string(),
+                                    title: article_image_title(value),
+                                });
                             }
                         }
                     }
@@ -2295,15 +2481,350 @@ fn extract_article_images(value: &Value, images: &mut Vec<String>) {
                 extract_article_images(item, images);
             }
         }
-        Value::String(url) if is_article_image_url(url) => images.push(url.to_string()),
+        Value::String(url) if is_article_image_url(url) => images.push(ArticleImageInfo {
+            url: url.to_string(),
+            title: String::new(),
+        }),
         _ => {}
     }
+}
+
+fn extract_article_html_content(html: &str, text: &mut String, images: &mut Vec<ArticleImageInfo>) {
+    if let Ok(figure_re) = regex::Regex::new(r#"(?is)<figure\b[^>]*>(.*?)</figure>"#) {
+        for capture in figure_re.captures_iter(html) {
+            let block = capture.get(0).map(|item| item.as_str()).unwrap_or("");
+            let title = extract_html_figcaption(block);
+            extract_article_html_images(block, &title, images);
+        }
+    }
+    extract_article_html_images(html, "", images);
+
+    let mut plain = html.to_string();
+    for pattern in [
+        r"(?i)<br\s*/?>",
+        r"(?i)</p\s*>",
+        r"(?i)</h[1-6]\s*>",
+        r"(?i)</li\s*>",
+        r"(?i)</blockquote\s*>",
+        r"(?i)</figcaption\s*>",
+    ] {
+        if let Ok(re) = regex::Regex::new(pattern) {
+            plain = re.replace_all(&plain, "\n").to_string();
+        }
+    }
+    if let Ok(re) = regex::Regex::new(r"(?is)<[^>]+>") {
+        plain = re.replace_all(&plain, "").to_string();
+    }
+    let cleaned = clean_html_text(&plain);
+    if !cleaned.is_empty() {
+        text.push_str(&cleaned);
+        if !cleaned.ends_with('\n') {
+            text.push('\n');
+        }
+    }
+}
+
+fn extract_article_html_images(html: &str, title: &str, images: &mut Vec<ArticleImageInfo>) {
+    let Ok(img_re) = regex::Regex::new(r#"(?is)<img\b[^>]*>"#) else {
+        return;
+    };
+    for image_tag in img_re.find_iter(html).map(|item| item.as_str()) {
+        let class_name = html_attr(image_tag, "class").unwrap_or_default();
+        let lower_class = class_name.to_ascii_lowercase();
+        if lower_class.contains("-card") || lower_class.contains("cut-off") || html_attr(image_tag, "aid").is_some() {
+            continue;
+        }
+        let Some(url) = ["data-src", "data-original", "src", "data-url"]
+            .iter()
+            .filter_map(|name| html_attr(image_tag, name))
+            .find(|url| is_article_image_url(url))
+        else {
+            continue;
+        };
+        let image_title = if !title.trim().is_empty() {
+            title.trim().to_string()
+        } else {
+            ["alt", "title"]
+                .iter()
+                .filter_map(|name| html_attr(image_tag, name))
+                .map(|value| clean_html_text(&value))
+                .find(|value| !value.is_empty() && !is_article_image_url(value))
+                .unwrap_or_default()
+        };
+        images.push(ArticleImageInfo {
+            url,
+            title: image_title,
+        });
+    }
+}
+
+fn extract_html_figcaption(html: &str) -> String {
+    let Ok(re) = regex::Regex::new(r#"(?is)<figcaption\b[^>]*>(.*?)</figcaption>"#) else {
+        return String::new();
+    };
+    let Some(raw) = re.captures(html).and_then(|capture| capture.get(1)).map(|item| item.as_str()) else {
+        return String::new();
+    };
+    let no_tags = regex::Regex::new(r"(?is)<[^>]+>")
+        .map(|tag_re| tag_re.replace_all(raw, "").to_string())
+        .unwrap_or_else(|_| raw.to_string());
+    clean_html_text(&no_tags)
+}
+
+fn html_attr(tag: &str, name: &str) -> Option<String> {
+    let pattern = format!(r#"(?is)\b{}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#, regex::escape(name));
+    let re = regex::Regex::new(&pattern).ok()?;
+    let capture = re.captures(tag)?;
+    for index in 1..=3 {
+        if let Some(value) = capture.get(index).map(|item| item.as_str()) {
+            return Some(html_unescape(value.trim()));
+        }
+    }
+    None
+}
+
+fn clean_html_text(value: &str) -> String {
+    html_unescape(value)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn html_unescape(value: &str) -> String {
+    value
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+}
+
+fn extract_article_content_image_list(value: Option<&Value>, images: &mut Vec<ArticleImageInfo>) {
+    if let Some(value) = value {
+        extract_article_images(value, images);
+    }
+}
+
+fn dedupe_article_images(images: Vec<ArticleImageInfo>) -> Vec<ArticleImageInfo> {
+    let mut seen = HashSet::new();
+    images
+        .into_iter()
+        .filter(|image| !image.url.trim().is_empty() && seen.insert(image.url.clone()))
+        .collect()
+}
+
+fn article_image_title(value: &Value) -> String {
+    for key in ["title", "caption", "desc", "description", "alt", "name"] {
+        if let Some(text) = value.get(key).and_then(Value::as_str) {
+            let cleaned = clean_search_text(text);
+            if !cleaned.is_empty() && !is_article_image_url(&cleaned) {
+                return cleaned;
+            }
+        }
+    }
+    String::new()
+}
+
+fn extract_article_collection_summary(value: &Value) -> Option<ArticleCollectionSummary> {
+    find_article_collection_node(value).and_then(parse_article_collection_summary)
+}
+
+fn find_article_collection_node(value: &Value) -> Option<&Value> {
+    match value {
+        Value::Object(map) => {
+            if let Some(collection) = map.get("module_collection") {
+                return Some(collection);
+            }
+            for key in ["readlist", "read_list", "collection", "list"] {
+                if let Some(node) = map.get(key) {
+                    if parse_article_collection_summary(node).is_some() {
+                        return Some(node);
+                    }
+                }
+            }
+            map.values().find_map(find_article_collection_node)
+        }
+        Value::Array(items) => items.iter().find_map(find_article_collection_node),
+        _ => None,
+    }
+}
+
+fn parse_article_collection_summary(value: &Value) -> Option<ArticleCollectionSummary> {
+    let id = value
+        .get("id")
+        .or_else(|| value.get("rlid"))
+        .or_else(|| value.get("readlist_id"))
+        .or_else(|| value.get("list_id"))
+        .and_then(parse_i64_value)
+        .unwrap_or(0);
+    if id <= 0 {
+        return None;
+    }
+    let title = first_string_field(value, &["name", "title", "list_name", "readlist_name"]).trim();
+    let title = if title == "收录于文集" || title.is_empty() {
+        first_string_field(value, &["name", "list_name", "readlist_name"]).trim()
+    } else {
+        title
+    };
+    let count_text = first_string_field(value, &["count", "count_text", "total_text"]).trim();
+    Some(ArticleCollectionSummary {
+        id,
+        title: if title.is_empty() { format!("文集 rl{id}") } else { title.to_string() },
+        count_text: count_text.to_string(),
+        cover: first_image_field(value, &["cover", "image_url", "pic", "banner_url", "head_img", "cover_url"])
+            .unwrap_or_default(),
+    })
+}
+
+fn parse_article_collection(collection_id: i64, data: &Value) -> ArticleCollectionInfo {
+    let summary = parse_article_collection_summary(data)
+        .or_else(|| find_article_collection_node(data).and_then(parse_article_collection_summary))
+        .unwrap_or_else(|| ArticleCollectionSummary {
+            id: collection_id,
+            title: format!("文集 rl{collection_id}"),
+            count_text: String::new(),
+            cover: String::new(),
+        });
+    ArticleCollectionInfo {
+        id: summary.id,
+        title: summary.title,
+        count_text: summary.count_text,
+        cover: summary.cover,
+        articles: collect_article_collection_items(data),
+    }
+}
+
+fn collect_article_collection_items(value: &Value) -> Vec<ArticleCollectionItem> {
+    let mut items = Vec::new();
+    collect_article_collection_items_inner(value, &mut items);
+    let mut seen = HashSet::new();
+    items
+        .into_iter()
+        .filter(|item| item.id > 0 && seen.insert(item.id))
+        .collect()
+}
+
+fn collect_article_collection_items_inner(value: &Value, items: &mut Vec<ArticleCollectionItem>) {
+    match value {
+        Value::Object(map) => {
+            if let Some(item) = parse_article_collection_item(value) {
+                items.push(item);
+                return;
+            }
+            for child in map.values() {
+                collect_article_collection_items_inner(child, items);
+            }
+        }
+        Value::Array(list) => {
+            for child in list {
+                collect_article_collection_items_inner(child, items);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parse_article_collection_item(value: &Value) -> Option<ArticleCollectionItem> {
+    let has_article_marker = value.get("cvid").is_some()
+        || value.get("cv_id").is_some()
+        || value.get("article_id").is_some()
+        || (value.get("id").is_some()
+            && ["summary", "desc", "description", "image_url", "banner_url", "cover", "pic", "publish_time", "pubdate", "ctime"]
+                .iter()
+                .any(|key| value.get(*key).is_some()));
+    if !has_article_marker {
+        return None;
+    }
+    let id = value
+        .get("id")
+        .or_else(|| value.get("cvid"))
+        .or_else(|| value.get("cv_id"))
+        .or_else(|| value.get("article_id"))
+        .and_then(parse_i64_value)
+        .unwrap_or(0);
+    if id <= 0 {
+        return None;
+    }
+    let title = first_string_field(value, &["title", "name"]).trim();
+    if title.is_empty() {
+        return None;
+    }
+    let cover = first_image_field(
+        value,
+        &["image_url", "banner_url", "cover", "pic", "thumbnail", "origin_image_urls", "image_urls", "covers"],
+    )
+    .unwrap_or_default();
+    Some(ArticleCollectionItem {
+        id,
+        title: title.to_string(),
+        summary: first_string_field(value, &["summary", "desc", "description"]).to_string(),
+        cover,
+        pubdate: value
+            .get("publish_time")
+            .or_else(|| value.get("pubdate"))
+            .or_else(|| value.get("ctime"))
+            .and_then(parse_i64_value)
+            .unwrap_or(0),
+        author_mid: value
+            .get("mid")
+            .or_else(|| value.get("author_mid"))
+            .or_else(|| value.get("author").and_then(|author| author.get("mid")))
+            .and_then(parse_i64_value)
+            .unwrap_or(0),
+        author_name: first_string_field(value, &["author_name", "uname", "name"]).to_string(),
+    })
+}
+
+fn first_image_url_in_value(value: &Value) -> Option<String> {
+    match value {
+        Value::Object(map) => {
+            for key in ["cover", "pic", "user_cover", "upic", "face", "cover_url", "banner_url", "url", "src", "img_src"] {
+                if let Some(url) = map.get(key).and_then(Value::as_str).filter(|url| is_article_image_url(url)) {
+                    return Some(url.to_string());
+                }
+            }
+            for key in ["image_urls", "origin_image_urls"] {
+                if let Some(items) = map.get(key).and_then(Value::as_array) {
+                    if let Some(url) = items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .find(|url| is_article_image_url(url))
+                    {
+                        return Some(url.to_string());
+                    }
+                }
+            }
+            map.values().find_map(first_image_url_in_value)
+        }
+        Value::Array(items) => items.iter().find_map(first_image_url_in_value),
+        Value::String(url) if is_article_image_url(url) => Some(url.to_string()),
+        _ => None,
+    }
+}
+
+fn first_image_field(value: &Value, names: &[&str]) -> Option<String> {
+    for name in names {
+        let Some(node) = value.get(*name) else {
+            continue;
+        };
+        if let Some(url) = node.as_str().filter(|url| is_article_image_url(url)) {
+            return Some(url.to_string());
+        }
+        if let Some(url) = first_image_url_in_value(node) {
+            return Some(url);
+        }
+    }
+    None
 }
 
 fn is_article_image_url(url: &str) -> bool {
     let lower = url.to_ascii_lowercase();
     (lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("//"))
-        && (lower.contains(".jpg")
+        && (lower.contains("/bfs/")
+            || lower.contains(".jpg")
             || lower.contains(".jpeg")
             || lower.contains(".png")
             || lower.contains(".webp")

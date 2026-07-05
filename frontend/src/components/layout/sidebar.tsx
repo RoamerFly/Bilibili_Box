@@ -28,7 +28,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: "home", label: "首页", icon: Home },
-  { id: "search", label: "搜索视频", icon: Search },
+  { id: "search", label: "搜索内容", icon: Search },
   { id: "recommend", label: "推荐/关注动态", icon: Flame },
   { id: "favorites", label: "我的点赞/收藏", icon: Star },
   { id: "watchlater", label: "稍后再看", icon: Clock },

@@ -38,6 +38,12 @@ interface DownloadTask {
   cid: number;
   output_path?: string;
   created_at?: number;
+  media_kind?: string;
+  group_id?: string;
+  group_title?: string;
+  group_total?: number;
+  children?: DownloadTask[];
+  isGroup?: boolean;
 }
 
 // ============================================================
@@ -62,6 +68,10 @@ function transformToUITask(progress: DownloadProgress): DownloadTask {
     cid: progress.cid,
     output_path: progress.output_path,
     created_at: progress.created_at,
+    media_kind: progress.media_kind,
+    group_id: progress.group_id,
+    group_title: progress.group_title,
+    group_total: progress.group_total,
   };
 }
 
@@ -75,6 +85,56 @@ function calculateRemainingTime(progress: DownloadProgress): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+function groupDownloadTasks(tasks: DownloadTask[]): DownloadTask[] {
+  const groups = new Map<string, DownloadTask[]>();
+  const singles: DownloadTask[] = [];
+  for (const task of tasks) {
+    if (task.group_id) {
+      const group = groups.get(task.group_id) ?? [];
+      group.push(task);
+      groups.set(task.group_id, group);
+    } else {
+      singles.push(task);
+    }
+  }
+
+  const grouped = Array.from(groups.entries()).map(([groupId, children]) => {
+    const sorted = [...children].sort((left, right) => (right.created_at ?? 0) - (left.created_at ?? 0));
+    const representative = sorted[0];
+    const state = aggregateTaskState(sorted);
+    const totalSize = sorted.reduce((sum, task) => sum + (task.total_size || 0), 0);
+    const downloadedSize = sorted.reduce((sum, task) => sum + (task.downloaded_size || 0), 0);
+    const progress = totalSize > 0
+      ? (downloadedSize / totalSize) * 100
+      : sorted.reduce((sum, task) => sum + task.progress, 0) / Math.max(1, sorted.length);
+    return {
+      ...representative,
+      task_id: groupId,
+      title: representative.group_title || representative.title,
+      quality: "批量",
+      format: `${sorted.length} 项`,
+      state,
+      progress,
+      total_size: totalSize,
+      downloaded_size: downloadedSize,
+      speed: sorted.reduce((sum, task) => sum + task.speed, 0),
+      children: sorted,
+      isGroup: true,
+      error: sorted.find((task) => task.error)?.error,
+    } satisfies DownloadTask;
+  });
+
+  return [...grouped, ...singles].sort((left, right) => (right.created_at ?? 0) - (left.created_at ?? 0));
+}
+
+function aggregateTaskState(tasks: DownloadTask[]): TaskState {
+  if (tasks.some((task) => task.state === "Downloading" || task.state === "Merging")) return "Downloading";
+  if (tasks.some((task) => task.state === "Pending")) return "Pending";
+  if (tasks.some((task) => task.state === "Failed")) return "Failed";
+  if (tasks.some((task) => task.state === "Paused")) return "Paused";
+  return "Completed";
+}
+
 // ============================================================
 //  主组件
 // ============================================================
@@ -86,6 +146,7 @@ export function DownloadsView() {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
+  const [detailTask, setDetailTask] = useState<DownloadTask | null>(null);
   const setView = useAppStore((s) => s.setView);
   const openPlayer = useAppStore((s) => s.openPlayer);
   const { pageSize } = useCardLayout();
@@ -111,24 +172,27 @@ export function DownloadsView() {
   }, [fetchTasks]);
 
   useEffect(() => {
-    const existingIds = new Set(tasks.map((task) => task.task_id));
+    const existingIds = new Set(groupDownloadTasks(tasks).map((task) => task.task_id));
     setSelectedTaskIds((selected) => new Set([...selected].filter((id) => existingIds.has(id))));
   }, [tasks]);
 
   // 统计
   const stats = useMemo(() => {
+    const display = groupDownloadTasks(tasks);
     return {
-      all: tasks.length,
-      downloading: tasks.filter((t) => t.state === "Downloading" || t.state === "Merging" || t.state === "Pending").length,
-      completed: tasks.filter((t) => t.state === "Completed").length,
-      paused: tasks.filter((t) => t.state === "Paused").length,
-      failed: tasks.filter((t) => t.state === "Failed").length,
+      all: display.length,
+      downloading: display.filter((t) => t.state === "Downloading" || t.state === "Merging" || t.state === "Pending").length,
+      completed: display.filter((t) => t.state === "Completed").length,
+      paused: display.filter((t) => t.state === "Paused").length,
+      failed: display.filter((t) => t.state === "Failed").length,
     };
   }, [tasks]);
 
+  const displayTasks = useMemo(() => groupDownloadTasks(tasks), [tasks]);
+
   // 筛选
   const filteredTasks = useMemo(() => {
-    let result = tasks;
+    let result = displayTasks;
     if (activeTab !== "all") {
       const stateMap: Record<Exclude<FilterTab, "all">, TaskState[]> = {
         downloading: ["Downloading", "Merging", "Pending"],
@@ -143,7 +207,7 @@ export function DownloadsView() {
       result = result.filter((t) => t.title.toLowerCase().includes(kw));
     }
     return result;
-  }, [tasks, activeTab, searchKeyword]);
+  }, [displayTasks, activeTab, searchKeyword]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -159,17 +223,22 @@ export function DownloadsView() {
   }, [currentPage, filteredTasks, pageSize]);
 
   // 操作
-  const handlePause = async (taskId: string) => {
+  const taskIdsOf = (taskOrId: string | DownloadTask) => {
+    if (typeof taskOrId === "string") return [taskOrId];
+    return taskOrId.children?.map((child) => child.task_id) ?? [taskOrId.task_id];
+  };
+
+  const handlePause = async (task: string | DownloadTask) => {
     try {
-      await invoke("pause_download_tasks", { taskIds: [taskId] });
+      await invoke("pause_download_tasks", { taskIds: taskIdsOf(task) });
       fetchTasks();
     } catch (e) {
       console.error("暂停失败:", e);
     }
   };
-  const handleResume = async (taskId: string) => {
+  const handleResume = async (task: string | DownloadTask) => {
     try {
-      await invoke("resume_download_tasks", { taskIds: [taskId] });
+      await invoke("resume_download_tasks", { taskIds: taskIdsOf(task) });
       fetchTasks();
     } catch (e) {
       console.error("恢复失败:", e);
@@ -190,9 +259,9 @@ export function DownloadsView() {
       console.error("删除失败:", e);
     }
   };
-  const handleRestart = async (taskId: string) => {
+  const handleRestart = async (task: string | DownloadTask) => {
     try {
-      await invoke("restart_download_tasks", { taskIds: [taskId] });
+      await invoke("restart_download_tasks", { taskIds: taskIdsOf(task) });
       fetchTasks();
     } catch (e) {
       console.error("重启失败:", e);
@@ -206,8 +275,10 @@ export function DownloadsView() {
     }
   };
   const handleStartAll = async () => {
-    const ids = tasks
-      .filter((task) => selectedTaskIds.size === 0 || selectedTaskIds.has(task.task_id))
+    const source = selectedTaskIds.size === 0
+      ? tasks
+      : displayTasks.filter((task) => selectedTaskIds.has(task.task_id)).flatMap((task) => task.children ?? [task]);
+    const ids = source
       .filter((task) => task.state === "Paused")
       .map((task) => task.task_id);
     if (ids.length) {
@@ -220,8 +291,10 @@ export function DownloadsView() {
     }
   };
   const handlePauseAll = async () => {
-    const ids = tasks
-      .filter((task) => selectedTaskIds.size === 0 || selectedTaskIds.has(task.task_id))
+    const source = selectedTaskIds.size === 0
+      ? tasks
+      : displayTasks.filter((task) => selectedTaskIds.has(task.task_id)).flatMap((task) => task.children ?? [task]);
+    const ids = source
       .filter((task) => task.state === "Downloading" || task.state === "Pending")
       .map((task) => task.task_id);
     if (ids.length) {
@@ -237,7 +310,7 @@ export function DownloadsView() {
     const ids = tasks.map((t) => t.task_id);
     requestDelete(ids);
   };
-  const handleDeleteSelected = () => requestDelete([...selectedTaskIds]);
+  const handleDeleteSelected = () => requestDelete(displayTasks.filter((task) => selectedTaskIds.has(task.task_id)).flatMap(taskIdsOf));
   const toggleTask = (taskId: string) =>
     setSelectedTaskIds((selected) => {
       const next = new Set(selected);
@@ -257,6 +330,14 @@ export function DownloadsView() {
       return next;
     });
   const handlePlayDownloaded = (task: DownloadTask) => {
+    if (task.isGroup) {
+      setDetailTask(task);
+      return;
+    }
+    if (task.media_kind === "article") {
+      void handleOpenFolder(task.task_id);
+      return;
+    }
     if (task.state !== "Completed") return;
     openPlayer({
       kind: "video",
@@ -558,7 +639,7 @@ export function DownloadsView() {
                     index={index}
                     onPause={handlePause}
                     onResume={handleResume}
-                    onDelete={(id) => requestDelete([id])}
+                    onDelete={(task) => requestDelete(taskIdsOf(task))}
                     onRestart={handleRestart}
                     onOpenFolder={handleOpenFolder}
                     onPlay={handlePlayDownloaded}
@@ -620,6 +701,14 @@ export function DownloadsView() {
           onCancel={() => setPendingDeleteIds(null)}
         />
       ) : null}
+      {detailTask ? (
+        <TaskDetailDialog
+          task={detailTask}
+          onClose={() => setDetailTask(null)}
+          onOpenFolder={handleOpenFolder}
+          onDelete={(taskId) => requestDelete([taskId])}
+        />
+      ) : null}
     </div>
   );
 }
@@ -641,10 +730,10 @@ function DownloadRow({
 }: {
   task: DownloadTask;
   index: number;
-  onPause: (id: string) => void;
-  onResume: (id: string) => void;
-  onDelete: (id: string) => void;
-  onRestart: (id: string) => void;
+  onPause: (task: DownloadTask) => void;
+  onResume: (task: DownloadTask) => void;
+  onDelete: (task: DownloadTask) => void;
+  onRestart: (task: DownloadTask) => void;
   onOpenFolder: (id?: string) => void;
   onPlay: (task: DownloadTask) => void;
   selected: boolean;
@@ -673,7 +762,7 @@ function DownloadRow({
         borderBottom: "1px solid #f5f5f8",
         transition: "background-color 0.12s ease",
         backgroundColor: selected ? "#f5f3ff" : "transparent",
-        cursor: task.state === "Completed" ? "pointer" : "default",
+        cursor: task.isGroup || task.state === "Completed" ? "pointer" : "default",
       }}
       onClick={() => onPlay(task)}
       onMouseEnter={(e) => {
@@ -729,10 +818,15 @@ function DownloadRow({
             }}
             title={task.title}
           >
-            {task.title}
+          {task.title}
+          {task.isGroup && task.children?.length ? (
+            <span style={{ marginLeft: 8, color: "#8b8b9a", fontSize: "12px", fontWeight: 700 }}>
+              共 {task.children.length} 项
+            </span>
+          ) : null}
           </p>
           <span style={{ fontSize: "12px", color: "#8b8b9a" }}>
-            {task.quality} · {task.format}
+            {task.quality} · {task.format}{task.isGroup ? " · 点击查看详情" : ""}
           </span>
           <span style={{ fontSize: "11.5px", color: "#a0a0ae" }}>{sizeText}</span>
         </div>
@@ -829,27 +923,27 @@ function DownloadRow({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "4px" }}>
         {/* 主要操作按钮 */}
         {task.state === "Downloading" && (
-          <IconButton onClick={() => onPause(task.task_id)} title="暂停">
+          <IconButton onClick={() => onPause(task)} title="暂停">
             <Pause style={{ width: "15px", height: "15px" }} />
           </IconButton>
         )}
         {task.state === "Paused" && (
-          <IconButton onClick={() => onResume(task.task_id)} title="继续">
+          <IconButton onClick={() => onResume(task)} title="继续">
             <Play style={{ width: "15px", height: "15px" }} />
           </IconButton>
         )}
         {task.state === "Failed" && (
-          <IconButton onClick={() => onRestart(task.task_id)} title="重试">
+          <IconButton onClick={() => onRestart(task)} title="重试">
             <RotateCcw style={{ width: "15px", height: "15px" }} />
           </IconButton>
         )}
 
         {/* 删除 */}
-        <IconButton onClick={() => onDelete(task.task_id)} title="删除" danger>
+        <IconButton onClick={() => onDelete(task)} title="删除" danger>
           <Trash2 style={{ width: "15px", height: "15px" }} />
         </IconButton>
 
-        <IconButton onClick={() => onOpenFolder(task.task_id)} title="打开所在目录">
+        <IconButton onClick={() => onOpenFolder((task.children?.[0] ?? task).task_id)} title="打开所在目录">
           <FolderOpen style={{ width: "15px", height: "15px" }} />
         </IconButton>
       </div>
@@ -1019,6 +1113,84 @@ function EmptyState({ message }: { message: string }) {
   );
 }
 
+function TaskDetailDialog({
+  task,
+  onClose,
+  onOpenFolder,
+  onDelete,
+}: {
+  task: DownloadTask;
+  onClose: () => void;
+  onOpenFolder: (id?: string) => void;
+  onDelete: (taskId: string) => void;
+}) {
+  const children = task.children ?? [];
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 900, display: "grid", placeItems: "center", padding: "34px", backgroundColor: "rgba(15,23,42,0.42)" }}
+    >
+      <div
+        onClick={(event) => event.stopPropagation()}
+        style={{ width: "min(760px, 94vw)", maxHeight: "84vh", overflow: "hidden", display: "flex", flexDirection: "column", borderRadius: "16px", backgroundColor: "#fff", boxShadow: "0 24px 70px rgba(15,23,42,0.25)" }}
+      >
+        <div style={{ padding: "18px 20px", borderBottom: "1px solid #ececf2", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={{ color: "#1a1a2e", fontSize: "18px", fontWeight: 850, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</h2>
+            <p style={{ marginTop: "4px", color: "#8b8b9a", fontSize: "13px" }}>共 {children.length} 个子任务</p>
+          </div>
+          <button type="button" onClick={onClose} style={{ ...iconButtonPlainStyle, width: 34, height: 34 }}>×</button>
+        </div>
+        <div style={{ padding: "14px 18px", overflowY: "auto", display: "grid", gap: "10px" }}>
+          {children.map((child, index) => (
+            <div key={child.task_id} style={{ display: "grid", gridTemplateColumns: "36px minmax(0, 1fr) 92px 76px", gap: "10px", alignItems: "center", padding: "10px", borderRadius: "10px", border: "1px solid #f0f0f5" }}>
+              <span style={{ color: "#8b8b9a", fontSize: "12px", fontWeight: 800 }}>{index + 1}</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ color: "#242432", fontSize: "13.5px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{child.title}</div>
+                <div style={{ marginTop: "4px", color: "#8b8b9a", fontSize: "12px" }}>{child.media_kind === "article" ? "专栏图片" : "视频"} · {child.progress.toFixed(0)}%</div>
+              </div>
+              <span style={{ justifySelf: "end", color: getStateConfig(child.state).style.color, fontSize: "12px", fontWeight: 800 }}>{getStateConfig(child.state).text}</span>
+              <span style={{ justifySelf: "end", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                <button type="button" onClick={() => onOpenFolder(child.task_id)} style={childTaskButtonStyle} title="打开所在目录">
+                  <FolderOpen style={{ width: 14, height: 14 }} />
+                </button>
+                <button type="button" onClick={() => onDelete(child.task_id)} style={{ ...childTaskButtonStyle, color: "#dc2626" }} title="删除子任务">
+                  <Trash2 style={{ width: 14, height: 14 }} />
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const iconButtonPlainStyle = {
+  border: "none",
+  borderRadius: "9px",
+  backgroundColor: "#f3f4f8",
+  color: "#505065",
+  fontSize: "20px",
+  fontWeight: 800,
+  cursor: "pointer",
+} as const;
+
+const childTaskButtonStyle = {
+  width: "30px",
+  height: "30px",
+  border: "none",
+  borderRadius: "8px",
+  backgroundColor: "#f3f4f8",
+  color: "#505065",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+} as const;
+
 // ============================================================
 //  工具函数
 // ============================================================
@@ -1079,6 +1251,8 @@ function getStageText(stage?: DownloadStage, state?: TaskState): string {
       return "正在下载视频分片";
     case "downloading_audio":
       return "正在下载音频分片";
+    case "downloading_article":
+      return "正在下载专栏图片";
     case "converting_audio":
       return "正在转换 MP3";
     case "merging":

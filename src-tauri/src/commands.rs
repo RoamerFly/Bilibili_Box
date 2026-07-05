@@ -13,20 +13,23 @@ use url::Url;
 
 use crate::api::auth::{BrowserLoginResult, QrcodeData, QrcodeStatus, UserInfo};
 use crate::api::bangumi::{BangumiFollowInfo, BangumiInfo};
-use crate::api::comment::CommentPage;
+use crate::api::comment::{CommentItem, CommentPage};
 use crate::api::danmaku::DanmakuData;
 use crate::api::favorite::{FavFolders, FavInfo, LikedVideoPage};
 use crate::api::history::{GetHistoryInfoParams, HistoryInfo};
 use crate::api::subtitle::{Subtitle, SubtitleInfo};
 use crate::api::up::{UpDynamicPage, UpProfile, UpVideoPage};
 use crate::api::video::{
-    ArticleDetailInfo, LivePlayInfo, PlayUrlInfo, PlayableUrlInfo, SearchResult,
-    SearchVideoOptions, VideoActionResult, VideoFavoriteFolder, VideoInfo, VideoInteractionState,
+    ArticleCollectionInfo, ArticleDetailInfo, LivePlayInfo, PlayUrlInfo, PlayableUrlInfo,
+    SearchResult, SearchVideoOptions, VideoActionResult, VideoFavoriteFolder, VideoInfo,
+    VideoInteractionState,
 };
 use crate::api::watchlater::WatchLaterInfo;
 use crate::api::BiliClient;
 use crate::config::Config;
-use crate::download::{CreateDownloadTaskParams, DownloadManager, DownloadProgress};
+use crate::download::{
+    CreateArticleDownloadTaskParams, CreateDownloadTaskParams, DownloadManager, DownloadProgress,
+};
 use crate::media_proxy::{MediaProxyServer, RegisteredPlayable};
 use crate::plugin::{PluginInfo, PluginManager};
 
@@ -280,6 +283,23 @@ pub fn clear_page_cache(app: AppHandle) -> Result<CacheOverview, String> {
     get_cache_overview(app)
 }
 
+#[tauri::command]
+pub fn clear_download_cache(app: AppHandle) -> Result<CacheOverview, String> {
+    let cache_dir = Config::user_cache_dir(&app)?;
+    for name in ["download", "download_tasks"] {
+        let path = cache_dir.join(name);
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path)
+                .map_err(|e| format!("娓呯悊涓嬭浇缂撳瓨澶辫触 ({}): {e}", path.display()))?;
+        } else if path.exists() {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("娓呯悊涓嬭浇缂撳瓨澶辫触 ({}): {e}", path.display()))?;
+        }
+    }
+    Config::ensure_user_dirs(&app)?;
+    get_cache_overview(app)
+}
+
 enum CacheStatsMode {
     Page,
     Download,
@@ -365,6 +385,7 @@ pub async fn get_user_info(
 pub fn save_user_info(
     app: AppHandle,
     config: State<'_, Arc<RwLock<Config>>>,
+    bili_client: State<'_, Arc<BiliClient>>,
     download_manager: State<'_, Arc<DownloadManager>>,
     user_info: UserInfo,
 ) -> Result<(), String> {
@@ -389,6 +410,7 @@ pub fn save_user_info(
         previous_profile == "guest",
     )?;
     Config::clear_guest_account_data(&app)?;
+    bili_client.reload_client()?;
     download_manager.reload_current_profile_tasks();
     Ok(())
 }
@@ -412,14 +434,16 @@ pub fn get_saved_user_info(app: AppHandle) -> Result<Option<UserInfo>, String> {
 #[tauri::command]
 pub fn clear_user_info(
     app: AppHandle,
+    config: State<'_, Arc<RwLock<Config>>>,
+    bili_client: State<'_, Arc<BiliClient>>,
     download_manager: State<'_, Arc<DownloadManager>>,
 ) -> Result<(), String> {
-    let user_path = Config::user_info_path(&app)?;
-    if user_path.exists() {
-        std::fs::remove_file(&user_path).map_err(|e| format!("删除用户信息失败: {e}"))?;
-    }
     Config::set_current_profile(&app, "guest")?;
     Config::ensure_user_dirs(&app)?;
+    Config::clear_guest_account_data(&app)?;
+    let guest_config = Config::load(&app)?;
+    *config.write() = guest_config;
+    bili_client.reload_client()?;
     download_manager.reload_current_profile_tasks();
     Ok(())
 }
@@ -1233,8 +1257,9 @@ pub async fn get_normal_info(
 pub async fn get_live_play_info(
     bili_client: State<'_, Arc<BiliClient>>,
     room_id: i64,
+    quality: Option<i64>,
 ) -> Result<LivePlayInfo, String> {
-    bili_client.get_live_play_info(room_id).await
+    bili_client.get_live_play_info(room_id, quality).await
 }
 
 #[tauri::command]
@@ -1243,6 +1268,14 @@ pub async fn get_article_detail(
     article_id: i64,
 ) -> Result<ArticleDetailInfo, String> {
     bili_client.get_article_detail(article_id).await
+}
+
+#[tauri::command]
+pub async fn get_article_collection(
+    bili_client: State<'_, Arc<BiliClient>>,
+    collection_id: i64,
+) -> Result<ArticleCollectionInfo, String> {
+    bili_client.get_article_collection(collection_id).await
 }
 
 /// 获取普通视频播放地址
@@ -1402,7 +1435,7 @@ pub async fn get_following_dynamics(
 #[tauri::command]
 pub async fn get_comments(
     bili_client: State<'_, Arc<BiliClient>>,
-    oid: i64,
+    oid: String,
     type_id: i64,
     page: Option<i64>,
     page_size: Option<i64>,
@@ -1415,7 +1448,7 @@ pub async fn get_comments(
 #[tauri::command]
 pub async fn get_comment_replies(
     bili_client: State<'_, Arc<BiliClient>>,
-    oid: i64,
+    oid: String,
     type_id: i64,
     root: i64,
     page: Option<i64>,
@@ -1424,6 +1457,60 @@ pub async fn get_comment_replies(
     bili_client
         .get_comment_replies(oid, type_id, root, page.unwrap_or(1), page_size.unwrap_or(10))
         .await
+}
+
+#[tauri::command]
+pub async fn add_comment_reply(
+    bili_client: State<'_, Arc<BiliClient>>,
+    oid: String,
+    type_id: i64,
+    root: i64,
+    parent: i64,
+    message: String,
+) -> Result<CommentItem, String> {
+    bili_client
+        .add_comment_reply(oid, type_id, root, parent, message)
+        .await
+}
+
+#[tauri::command]
+pub async fn delete_comment(
+    bili_client: State<'_, Arc<BiliClient>>,
+    oid: String,
+    type_id: i64,
+    rpid: i64,
+) -> Result<(), String> {
+    bili_client.delete_comment(oid, type_id, rpid).await
+}
+
+#[tauri::command]
+pub async fn report_comment(
+    bili_client: State<'_, Arc<BiliClient>>,
+    oid: String,
+    type_id: i64,
+    rpid: i64,
+    reason: i64,
+    content: Option<String>,
+) -> Result<(), String> {
+    bili_client
+        .report_comment(oid, type_id, rpid, reason, content)
+        .await
+}
+
+#[tauri::command]
+pub async fn block_user(
+    bili_client: State<'_, Arc<BiliClient>>,
+    mid: i64,
+) -> Result<(), String> {
+    bili_client.block_user(mid).await
+}
+
+#[tauri::command]
+pub async fn unblock_user(
+    bili_client: State<'_, Arc<BiliClient>>,
+    mid: i64,
+) -> Result<(), String> {
+    bili_client.unblock_user(mid).await
 }
 
 #[tauri::command]
@@ -1458,7 +1545,7 @@ pub async fn check_api_health(
     );
     items.push(
         probe_api(
-            "搜索视频",
+            "搜索内容",
             "GET /x/web-interface/wbi/search/type",
             bili_client.search_video_with_options(
                 "bilibili",
@@ -1553,6 +1640,14 @@ pub async fn create_download_task(
     params: CreateDownloadTaskParams,
 ) -> Result<Vec<String>, String> {
     download_manager.create_download_tasks(params).await
+}
+
+#[tauri::command]
+pub async fn create_article_download_task(
+    download_manager: State<'_, Arc<DownloadManager>>,
+    params: CreateArticleDownloadTaskParams,
+) -> Result<Vec<String>, String> {
+    download_manager.create_article_download_task(params).await
 }
 
 /// 获取所有下载任务
