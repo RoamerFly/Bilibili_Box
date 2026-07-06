@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import {
   Bell,
@@ -81,6 +81,10 @@ export function HomeView() {
     watchLater: "--",
     history: "--",
   });
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+  const config = useAppStore((s) => s.config);
   const [refreshingStats, setRefreshingStats] = useState(false);
   const downloadTasks = useMemo(
     () => Object.values(taskMap).sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0)),
@@ -161,7 +165,7 @@ export function HomeView() {
 
   useEffect(() => {
     void fetchHomeData();
-  }, [fetchHomeData]);
+  }, [fetchHomeData, config?.sessdata]);
 
   const handleRefreshStats = async () => {
     setRefreshingStats(true);

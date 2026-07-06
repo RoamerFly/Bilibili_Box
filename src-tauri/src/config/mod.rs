@@ -75,6 +75,7 @@ pub enum CodecType {
 }
 
 impl CodecType {
+    #[allow(dead_code)]
     pub fn name(&self) -> &'static str {
         match self {
             Self::AVC => "AVC/H.264",
@@ -408,6 +409,9 @@ impl Config {
             if had_guest_credentials {
                 let _ = std::fs::remove_dir_all(user_data_dir.join("cache").join("download_tasks"));
             }
+        } else if Self::profile_cookie_mismatches(&user_data_dir, &config) {
+            config.sessdata.clear();
+            config.cookie.clear();
         }
 
         let config = Self::normalize_loaded_config(app, config);
@@ -456,10 +460,44 @@ impl Config {
         serde_json::from_value(json_value).unwrap_or_else(|_| Self::default_with_dir(user_data_dir))
     }
 
+    fn profile_cookie_mismatches(user_data_dir: &Path, config: &Config) -> bool {
+        let Some(cookie_mid) = Self::cookie_mid(&config.cookie) else {
+            return false;
+        };
+        let user_path = user_data_dir.join("user.json");
+        let Ok(user_json) = std::fs::read_to_string(user_path) else {
+            return false;
+        };
+        let Ok(user_value) = serde_json::from_str::<serde_json::Value>(&user_json) else {
+            return false;
+        };
+        let user_mid = user_value
+            .get("mid")
+            .and_then(|value| value.as_i64())
+            .or_else(|| {
+                user_value
+                    .get("mid")
+                    .and_then(|value| value.as_str())
+                    .and_then(|value| value.parse::<i64>().ok())
+            });
+        matches!(user_mid, Some(user_mid) if user_mid > 0 && user_mid != cookie_mid)
+    }
+
+    fn cookie_mid(cookie: &str) -> Option<i64> {
+        cookie.split(';').find_map(|part| {
+            let (name, value) = part.trim().split_once('=')?;
+            if name.eq_ignore_ascii_case("DedeUserID") {
+                value.trim().parse::<i64>().ok()
+            } else {
+                None
+            }
+        })
+    }
+
     fn default_with_dir(_user_data_dir: &Path) -> Self {
         Self {
             download_dir: Self::default_download_dir(),
-            start_maximized: false,
+            start_maximized: true,
             card_scale: 1.0,
             card_page_size: 6,
             card_page_rows: 3,

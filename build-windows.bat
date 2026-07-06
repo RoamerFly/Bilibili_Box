@@ -1,8 +1,23 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
+if /I not "%~1"=="__run" (
+    cmd /d /c ""%~f0" __run %*"
+    set "BUILD_EXIT_CODE=%ERRORLEVEL%"
+    if not "%BUILD_EXIT_CODE%"=="0" (
+        echo.
+        echo Build failed with exit code %BUILD_EXIT_CODE%.
+        echo Press any key to close this window...
+        pause >nul
+    )
+    exit /b %BUILD_EXIT_CODE%
+)
+shift
+
 set "PROJECT_ROOT=%~dp0"
 cd /d "%PROJECT_ROOT%"
+
+set "PATH=%APPDATA%\npm;%USERPROFILE%\.cargo\bin;%ProgramFiles%\nodejs;%ProgramFiles(x86)%\nodejs;%PATH%"
 
 set "OUTPUT_DIR=dist_windows"
 set "TAURI_RELEASE_DIR=src-tauri\target\release"
@@ -24,6 +39,16 @@ echo ============================================
 echo.
 
 echo [1/5] Installing locked dependencies...
+where npm >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: npm was not found. Install Node.js or add npm to PATH.
+    exit /b 1
+)
+where cargo >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: cargo was not found. Install Rust or add %%USERPROFILE%%\.cargo\bin to PATH.
+    exit /b 1
+)
 if not exist "package-lock.json" (
     echo ERROR: package-lock.json was not found.
     exit /b 1

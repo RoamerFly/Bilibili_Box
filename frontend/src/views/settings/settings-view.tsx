@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Cookie,
   Database,
@@ -81,6 +81,7 @@ interface AccountSwitchResult {
   user_info: {
     uname: string;
     face: string;
+    login_time?: string | null;
     isLogin?: boolean;
     is_login?: boolean;
   } | null;
@@ -141,6 +142,7 @@ export function SettingsView() {
   const [accountDialogOpen, setAccountDialogOpen] = useState(false);
   const [addAccountDialogOpen, setAddAccountDialogOpen] = useState(false);
   const [accountSwitching, setAccountSwitching] = useState("");
+  const [accountDeleting, setAccountDeleting] = useState("");
   const [feedback, setFeedback] = useState("");
   const [backendConfig, setBackendConfig] = useState<BackendConfig | null>(null);
   const [unifiedCardLayoutDraft, setUnifiedCardLayoutDraft] = useState<{ rows: number; columns: number }>({
@@ -222,26 +224,55 @@ export function SettingsView() {
   }, [unifiedCardLayout.columns, unifiedCardLayout.isUniform, unifiedCardLayout.rows]);
   const feedbackIsError = feedback.includes("失败") || feedback.includes("错误");
 
-  const handleLogout = async () => {
-    const currentConfig = await invoke<BackendConfig>("get_config");
-    const nextConfig = { ...currentConfig, sessdata: "", cookie: "" };
-    await invoke("save_config", { newConfig: nextConfig });
-    await invoke("clear_user_info");
-    setBackendConfig(nextConfig);
-    setConfig(nextConfig);
-    setUserInfo(null);
+  const notifyAccountChanged = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("bilibili-box:account-switched"));
+    window.dispatchEvent(new CustomEvent("bilibili-box:page-cache-cleared"));
+  }, []);
+
+  const applyAccountResult = useCallback((result: AccountSwitchResult) => {
+    setBackendConfig(result.config);
+    setConfig(result.config);
+    setUserInfo(result.user_info ? {
+      username: result.user_info.uname,
+      avatar: result.user_info.face || "",
+      loginTime: result.user_info.login_time || "--",
+      deviceName: "Windows 桌面端",
+    } : null);
     resetAccountScopedState();
+    notifyAccountChanged();
+  }, [notifyAccountChanged, resetAccountScopedState, setConfig, setUserInfo]);
+
+  const handleLogout = async () => {
+    setFeedback("");
+    try {
+      await invoke("clear_user_info");
+      const guestConfig = await invoke<BackendConfig>("get_config");
+      setBackendConfig(guestConfig);
+      setConfig(guestConfig);
+      setUserInfo(null);
+      resetAccountScopedState();
+      notifyAccountChanged();
+      setFeedback("已退出登录，本地账号数据已保留");
+    } catch (err) {
+      setFeedback(`退出登录失败：${String(err)}`);
+    }
   };
 
   const handleBrowseFolder = async () => {
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: "选择下载目录",
-    });
-    if (selected && typeof selected === "string") {
-      await saveConfig({ download_dir: selected });
+    setFeedback("");
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "选择下载目录",
+      });
+      if (selected && typeof selected === "string") {
+        await saveConfig({ download_dir: selected });
+        setFeedback("下载目录已更新");
+      }
+    } catch (err) {
+      setFeedback(`选择下载目录失败：${String(err)}`);
     }
   };
 
@@ -363,22 +394,46 @@ export function SettingsView() {
     setFeedback("");
     try {
       const result = await invoke<AccountSwitchResult>("switch_account_profile", { profile });
-      setBackendConfig(result.config);
-      setConfig(result.config);
-      setUserInfo(result.user_info ? {
-        username: result.user_info.uname,
-        avatar: result.user_info.face || "",
-        loginTime: "--",
-        deviceName: "Windows 桌面端",
-      } : null);
-      resetAccountScopedState();
+      applyAccountResult(result);
       setAccountDialogOpen(false);
-      window.dispatchEvent(new CustomEvent("bilibili-box:account-switched"));
       setFeedback(`已切换到账号：${result.user_info?.uname || profile}`);
     } catch (err) {
       setFeedback(`切换账号失败：${String(err)}`);
     } finally {
       setAccountSwitching("");
+    }
+  };
+
+  const handleDeleteAccount = async (profile: string, accountName?: string) => {
+    if (!window.confirm(`确定删除本地账号数据「${accountName || profile}」吗？这会删除该账号的配置、缓存和下载目录。`)) {
+      return;
+    }
+    setAccountDeleting(profile);
+    setFeedback("");
+    try {
+      const result = await invoke<AccountSwitchResult>("delete_saved_account_data", { profile });
+      applyAccountResult(result);
+      await loadAccounts();
+      setFeedback("账号数据已删除");
+    } catch (err) {
+      setFeedback(`删除账号数据失败：${String(err)}`);
+    } finally {
+      setAccountDeleting("");
+    }
+  };
+
+  const handleLogoutAndDelete = async () => {
+    setFeedback("");
+    try {
+      const savedAccounts = await invoke<SavedAccountProfile[]>("list_saved_accounts");
+      const activeAccount = savedAccounts.find((account) => account.active);
+      if (!activeAccount) {
+        setFeedback("未找到当前账号的本地数据");
+        return;
+      }
+      await handleDeleteAccount(activeAccount.profile, activeAccount.username);
+    } catch (err) {
+      setFeedback(`删除当前账号数据失败：${String(err)}`);
     }
   };
 
@@ -517,6 +572,12 @@ export function SettingsView() {
               {isLoggedIn ? (
                 <button onClick={() => void handleLogout()} style={secondaryButtonStyle}>
                   退出登录
+                </button>
+              ) : null}
+              {isLoggedIn ? (
+                <button onClick={() => void handleLogoutAndDelete()} style={{ ...secondaryButtonStyle, color: "#ea580c", borderColor: "#fed7aa" }}>
+                  <Trash2 style={{ width: 15, height: 15, marginRight: "6px" }} />
+                  退出账号并删除数据
                 </button>
               ) : null}
             </div>
@@ -712,8 +773,10 @@ export function SettingsView() {
         <AccountSwitcherDialog
           accounts={accounts}
           switchingProfile={accountSwitching}
+          deletingProfile={accountDeleting}
           onAddAccount={() => setAddAccountDialogOpen(true)}
           onSwitch={(profile) => void handleSwitchAccount(profile)}
+          onDelete={(profile, username) => void handleDeleteAccount(profile, username)}
           onClose={() => setAccountDialogOpen(false)}
         />
       ) : null}
@@ -1047,14 +1110,18 @@ function CacheBucketCard({ bucket, actionLabel, onAction }: { bucket: CacheBucke
 function AccountSwitcherDialog({
   accounts,
   switchingProfile,
+  deletingProfile,
   onAddAccount,
   onSwitch,
+  onDelete,
   onClose,
 }: {
   accounts: SavedAccountProfile[];
   switchingProfile: string;
+  deletingProfile: string;
   onAddAccount: () => void;
   onSwitch: (profile: string) => void;
+  onDelete: (profile: string, username?: string) => void;
   onClose: () => void;
 }) {
   return (
@@ -1067,6 +1134,7 @@ function AccountSwitcherDialog({
         <button
           type="button"
           onClick={onAddAccount}
+          disabled={Boolean(switchingProfile) || Boolean(deletingProfile)}
           style={{
             ...secondaryButtonStyle,
             width: "100%",
@@ -1081,21 +1149,17 @@ function AccountSwitcherDialog({
         {accounts.length ? (
           <div style={{ display: "grid", gap: "10px" }}>
             {accounts.map((account) => (
-              <button
+              <div
                 key={account.profile}
-                type="button"
-                disabled={account.active || Boolean(switchingProfile)}
-                onClick={() => onSwitch(account.profile)}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "42px minmax(0, 1fr) auto",
+                  gridTemplateColumns: "42px minmax(0, 1fr) auto auto",
                   alignItems: "center",
                   gap: "12px",
                   padding: "12px",
                   borderRadius: "12px",
                   border: account.active ? "1.5px solid #6366f1" : "1px solid #ececf2",
                   backgroundColor: account.active ? "#f5f3ff" : "#fff",
-                  cursor: account.active || switchingProfile ? "default" : "pointer",
                   textAlign: "left",
                 }}
               >
@@ -1109,10 +1173,39 @@ function AccountSwitcherDialog({
                   <strong style={{ display: "block", color: "#1a1a2e", fontSize: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</strong>
                   <span style={{ color: "#8b8b9a", fontSize: "12.5px" }}>UID {account.mid}</span>
                 </span>
-                <span style={{ color: account.active ? "#6366f1" : "#505065", fontSize: "13px", fontWeight: 800 }}>
+                <button
+                  type="button"
+                  disabled={account.active || Boolean(switchingProfile) || Boolean(deletingProfile)}
+                  onClick={() => onSwitch(account.profile)}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: account.active ? "#6366f1" : "#505065",
+                    fontSize: "13px",
+                    fontWeight: 800,
+                    cursor: account.active || switchingProfile || deletingProfile ? "default" : "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
                   {account.active ? "当前账号" : switchingProfile === account.profile ? "切换中" : "切换"}
-                </span>
-              </button>
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(switchingProfile) || Boolean(deletingProfile)}
+                  onClick={() => onDelete(account.profile, account.username)}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: deletingProfile === account.profile ? "#bbb" : "#ef4444",
+                    fontSize: "13px",
+                    fontWeight: 800,
+                    cursor: switchingProfile || deletingProfile ? "default" : "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {deletingProfile === account.profile ? "删除中" : "删除数据"}
+                </button>
+              </div>
             ))}
           </div>
         ) : (

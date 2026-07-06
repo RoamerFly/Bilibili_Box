@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronDown,
@@ -156,6 +156,7 @@ export function RecommendView() {
   const [selectedDynamicIds, setSelectedDynamicIds] = useState<Set<string>>(new Set());
   const [batchDownloading, setBatchDownloading] = useState(false);
   const [error, setError] = useState("");
+  const config = useAppStore((s) => s.config);
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const batchIndexesRef = useRef<Record<string, number>>(recommendPageState.batchIndexes);
   const paginationMountedRef = useRef(false);
@@ -285,7 +286,7 @@ export function RecommendView() {
     if (loadedCategory === activeCategoryInfo.label) return;
     setRecommendPageState({ currentPage: 1 });
     void fetchVideos(activeCategoryInfo);
-  }, [activeCategoryInfo, fetchVideos, loadedCategory, setRecommendPageState]);
+  }, [activeCategoryInfo, fetchVideos, loadedCategory, setRecommendPageState, config?.sessdata]);
 
   useEffect(() => {
     if (!searchComposingRef.current) {
@@ -296,7 +297,7 @@ export function RecommendView() {
   useEffect(() => {
     if (activeTab !== "dynamic" || dynamicItems.length > 0 || dynamicLoading) return;
     void fetchFollowingDynamics("replace");
-  }, [activeTab, dynamicItems.length, dynamicLoading, fetchFollowingDynamics]);
+  }, [activeTab, dynamicItems.length, dynamicLoading, fetchFollowingDynamics, config?.sessdata]);
 
   useEffect(() => {
     const handleRecommendTab = (event: Event) => {

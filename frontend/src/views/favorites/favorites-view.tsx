@@ -122,6 +122,7 @@ export function FavoritesView() {
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
   const openUpProfile = useAppStore((s) => s.openUpProfile);
+  const config = useAppStore((s) => s.config);
   const activeSection = useAppStore((s) => s.favoritesPageState.activeTab);
   const setFavoritesPageState = useAppStore((s) => s.setFavoritesPageState);
   const viewMode = useAppStore((s) => s.cardViewModes.favorites ?? "grid");
@@ -264,7 +265,7 @@ export function FavoritesView() {
 
   useEffect(() => {
     void fetchFolders();
-  }, [fetchFolders]);
+  }, [fetchFolders, config?.sessdata]);
 
   const fetchLikedVideos = useCallback(async (page: number, mode: "replace" | "append" = "replace", forceRefresh = false) => {
     setLikedLoading(true);

@@ -140,6 +140,9 @@ export interface SearchPageState {
   pageSize: number;
   loadedPages: number;
   hasMore: boolean;
+  loadedTypes: Array<"all" | "video" | "bangumi" | "film" | "live" | "article" | "user">;
+  /** 当前搜索范围: "all" = 搜索全部类型, 其他 = 单类型搜索 */
+  searchScope: "all" | "video" | "bangumi" | "film" | "live" | "article" | "user";
 }
 
 export interface RecommendPageVideo {
@@ -224,6 +227,8 @@ const defaultSearchPageState: SearchPageState = {
   pageSize: 6,
   loadedPages: 0,
   hasMore: false,
+  loadedTypes: [],
+  searchScope: "all",
 };
 
 const defaultRecommendPageState: RecommendPageState = {
@@ -550,7 +555,7 @@ export const useAppStore = create<AppState>()(
     {
       name: "bilibili-box-app-storage",
       storage: createJSONStorage(() => localStorage),
-      version: 3,
+      version: 4,
       migrate: (persisted) => {
         const persistedState = (persisted ?? {}) as Partial<AppState>;
         return {
@@ -558,6 +563,8 @@ export const useAppStore = create<AppState>()(
           currentView: "home",
           previousView: null,
           viewStack: [],
+          config: null,
+          userInfo: null,
           playerState: null,
           contentDetailState: null,
           recommendPageState: {
@@ -572,7 +579,6 @@ export const useAppStore = create<AppState>()(
       },
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,
-        config: state.config,
         cardViewModes: state.cardViewModes,
         cardLayouts: state.cardLayouts,
         cardScales: state.cardScales,

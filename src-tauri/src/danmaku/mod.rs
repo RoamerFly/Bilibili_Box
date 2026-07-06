@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports)]
+
 pub mod ass_converter;
 pub mod canvas;
 pub mod xml_parser;

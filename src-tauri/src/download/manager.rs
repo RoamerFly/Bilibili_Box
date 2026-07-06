@@ -322,7 +322,10 @@ impl DownloadManager {
             bvid: String::new(),
             cid: 0,
             title: params.title.trim().to_string(),
-            cover: images.first().map(|image| image.url.clone()).unwrap_or_default(),
+            cover: images
+                .first()
+                .map(|image| image.url.clone())
+                .unwrap_or_default(),
             duration: 0,
             quality: "原图".to_string(),
             audio_only: false,
@@ -922,8 +925,10 @@ impl DownloadManager {
             let title = Self::trimmed_string(Some(&image.title))
                 .unwrap_or_else(|| format!("图片{:02}", index + 1));
             let safe_title = Self::sanitize_path_component(&title);
-            let expected = output_dir.join(format!("{:02}-{}.{}", index + 1, safe_title, extension));
-            let Some(path) = Self::resolve_existing_file(expected.clone(), &file_exist_action)? else {
+            let expected =
+                output_dir.join(format!("{:02}-{}.{}", index + 1, safe_title, extension));
+            let Some(path) = Self::resolve_existing_file(expected.clone(), &file_exist_action)?
+            else {
                 let mut progress = task.write();
                 progress.downloaded_size = (index + 1) as u64;
                 progress.progress = ((index + 1) as f64 / images.len() as f64) * 100.0;
@@ -955,7 +960,11 @@ impl DownloadManager {
                 progress.downloaded_size = (index + 1) as u64;
                 progress.progress = ((index + 1) as f64 / images.len() as f64) * 100.0;
                 let elapsed = started.elapsed().as_secs_f64();
-                progress.speed = if elapsed > 0.0 { bytes.len() as f64 / elapsed } else { 0.0 };
+                progress.speed = if elapsed > 0.0 {
+                    bytes.len() as f64 / elapsed
+                } else {
+                    0.0
+                };
                 progress.output_path = Some(output_dir.to_string_lossy().to_string());
             }
             Self::emit_progress_snapshot(app, task_id, task, TaskState::Downloading);

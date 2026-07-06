@@ -70,6 +70,36 @@ const EMPTY_SEARCH_PAGE_INFO: SearchPageInfo = {
   has_more: false,
 };
 
+/** 前端 tab 值 → 后端 search_type API 值 */
+const TAB_TO_SEARCH_TYPE: Partial<Record<SearchResultType, string>> = {
+  video: "video",
+  bangumi: "media_bangumi",
+  film: "media_ft",
+  live: "live",
+  article: "article",
+  user: "bili_user",
+};
+
+/** 后端 search_type API 值 → 前端 tab 值 */
+const SEARCH_TYPE_TO_TAB: Record<string, SearchResultType> = {
+  video: "video",
+  media_bangumi: "bangumi",
+  media_ft: "film",
+  live: "live",
+  article: "article",
+  bili_user: "user",
+};
+
+const searchScopeOptions: Array<{ value: string; label: string }> = [
+  { value: "all", label: "综合" },
+  { value: "video", label: "视频" },
+  { value: "bangumi", label: "番剧" },
+  { value: "film", label: "影视" },
+  { value: "live", label: "直播" },
+  { value: "article", label: "专栏" },
+  { value: "user", label: "用户" },
+];
+
 function mergeAggregateSearchResult(
   base: AggregateSearchResult | null,
   incoming: AggregateSearchResult
@@ -85,6 +115,14 @@ function mergeAggregateSearchResult(
   const articles = Array.from(new Map([...(base?.articles ?? []), ...(incoming.articles ?? [])].map((item) => [item.id, item])).values());
   const users = Array.from(new Map([...(base?.users ?? []), ...(incoming.users ?? [])].map((item) => [item.id, item])).values());
 
+  // 仅更新有实际结果的类型的分页信息，避免单类型搜索覆盖其他类型已有的 page info
+  const video_page = incoming.videos.length > 0 ? incoming.video_page : (base?.video_page ?? incoming.video_page);
+  const bangumi_page = incoming.bangumi.length > 0 ? incoming.bangumi_page : (base?.bangumi_page ?? incoming.bangumi_page);
+  const film_page = (incoming.films ?? []).length > 0 ? (incoming.film_page ?? EMPTY_SEARCH_PAGE_INFO) : (base?.film_page ?? incoming.film_page ?? EMPTY_SEARCH_PAGE_INFO);
+  const live_page = (incoming.lives ?? []).length > 0 ? (incoming.live_page ?? EMPTY_SEARCH_PAGE_INFO) : (base?.live_page ?? incoming.live_page ?? EMPTY_SEARCH_PAGE_INFO);
+  const article_page = (incoming.articles ?? []).length > 0 ? (incoming.article_page ?? EMPTY_SEARCH_PAGE_INFO) : (base?.article_page ?? incoming.article_page ?? EMPTY_SEARCH_PAGE_INFO);
+  const user_page = (incoming.users ?? []).length > 0 ? (incoming.user_page ?? EMPTY_SEARCH_PAGE_INFO) : (base?.user_page ?? incoming.user_page ?? EMPTY_SEARCH_PAGE_INFO);
+
   return {
     ...incoming,
     videos,
@@ -93,12 +131,12 @@ function mergeAggregateSearchResult(
     lives,
     articles,
     users,
-    video_page: incoming.video_page,
-    bangumi_page: incoming.bangumi_page,
-    film_page: incoming.film_page,
-    live_page: incoming.live_page,
-    article_page: incoming.article_page,
-    user_page: incoming.user_page,
+    video_page,
+    bangumi_page,
+    film_page,
+    live_page,
+    article_page,
+    user_page,
   };
 }
 
@@ -124,6 +162,8 @@ export function SearchView() {
     result,
     currentPage,
     loadedPages,
+    loadedTypes,
+    searchScope = "all",
   } = searchPageState;
   const { pageSize, cardScale, columns } = cardLayout;
 
@@ -142,7 +182,7 @@ export function SearchView() {
   const runSearch = useCallback(async (
     rawInput: string,
     filters: SearchFilters,
-    options: { mode?: "replace" | "append"; targetPage?: number; pageCount?: number } = {}
+    options: { mode?: "replace" | "append" | "merge"; targetPage?: number; pageCount?: number; searchType?: string } = {}
   ) => {
     const input = rawInput.trim();
     if (!input) {
@@ -152,19 +192,36 @@ export function SearchView() {
 
     const mode = options.mode ?? "replace";
     const pageCount = options.pageCount ?? SEARCH_PREFETCH_PAGES;
+    const searchType = options.searchType;
     const currentSearchState = useAppStore.getState().searchPageState;
     const currentAggregate: AggregateSearchResult | null = currentSearchState.result?.type === "Aggregate"
       ? currentSearchState.result
       : null;
-    const startPage = mode === "append"
-      ? Math.max(1, currentSearchState.loadedPages + 1)
-      : 1;
+
+    // 计算起始页：append 模式需要根据具体搜索类型推算已加载页数
+    let startPage = 1;
+    if (mode === "append" && currentAggregate) {
+      const resultTab: SearchResultType = searchType
+        ? SEARCH_TYPE_TO_TAB[searchType] ?? currentSearchState.activeResultType
+        : currentSearchState.activeResultType;
+      const loadedItems = resultTab === "video" ? currentAggregate.videos.length
+        : resultTab === "bangumi" ? currentAggregate.bangumi.length
+        : resultTab === "film" ? (currentAggregate.films ?? []).length
+        : resultTab === "live" ? (currentAggregate.lives ?? []).length
+        : resultTab === "article" ? (currentAggregate.articles ?? []).length
+        : resultTab === "user" ? (currentAggregate.users ?? []).length
+        : Math.max(currentAggregate.videos.length, currentAggregate.bangumi.length,
+            (currentAggregate.films ?? []).length, (currentAggregate.lives ?? []).length,
+            (currentAggregate.articles ?? []).length, (currentAggregate.users ?? []).length);
+      startPage = Math.max(1, Math.ceil(loadedItems / pageSize) + 1);
+    }
+
     const requestId = searchRequestIdRef.current + 1;
     searchRequestIdRef.current = requestId;
     setLoading(true);
     setError("");
     try {
-      let mergedAggregate = mode === "append" ? currentAggregate : null;
+      let mergedAggregate = (mode === "append" || mode === "merge") ? currentAggregate : null;
       let directResult: SearchResponse | null = null;
       let lastAggregatePage = 0;
       let lastHasMore = false;
@@ -178,6 +235,7 @@ export function SearchView() {
           duration: filters.duration,
           page,
           pageSize,
+          searchType: searchType ?? undefined,
         });
         if (requestId !== searchRequestIdRef.current) return;
 
@@ -202,11 +260,24 @@ export function SearchView() {
           loadedPages: 0,
           hasMore: false,
           lastAggregateInput: currentSearchState.lastAggregateInput,
+          loadedTypes: [],
         });
         return;
       }
 
       if (mergedAggregate) {
+        // 追踪已加载的搜索类型
+        const newLoadedTypes: SearchResultType[] = mode === "merge" && searchType
+          ? Array.from(new Set([...(currentSearchState.loadedTypes ?? []), SEARCH_TYPE_TO_TAB[searchType] ?? "video"]))
+          : mode === "replace"
+            ? searchType && searchType !== "all" ? [SEARCH_TYPE_TO_TAB[searchType] ?? "video"] : []
+            : currentSearchState.loadedTypes ?? [];
+
+        // replace 模式下自动切换 activeResultType 到搜索的类型
+        const newActiveResultType: SearchResultType = mode === "replace"
+          ? (searchType && searchType !== "all" ? (SEARCH_TYPE_TO_TAB[searchType] ?? "video") : "all")
+          : currentSearchState.activeResultType;
+
         const loadedPageCount = Math.max(
           1,
           Math.ceil(Math.max(
@@ -227,13 +298,31 @@ export function SearchView() {
           loadedPages: loadedPageCount,
           hasMore: lastHasMore,
           lastAggregateInput: input,
+          loadedTypes: newLoadedTypes,
+          activeResultType: newActiveResultType,
         });
       }
     } catch (err) {
       if (requestId !== searchRequestIdRef.current) return;
-      setError(String(err));
+      const errStr = String(err);
+      
+      if (errStr.includes("WIND_CONTROL_REQUIRED:")) {
+        const url = errStr.split("WIND_CONTROL_REQUIRED:")[1];
+        setError("触发风控，请在弹出的浏览器中完成验证...");
+        try {
+          await invoke("verify_search_wind_control", { url });
+          // 验证完成，重试搜索，由于重试是异步的，不恢复 loading=false
+          runSearch(rawInput, filters, options);
+          return;
+        } catch (verifyErr) {
+          setError(`风控验证失败或取消: ${verifyErr}`);
+        }
+      } else {
+        setError(errStr);
+      }
+
       if (mode === "replace") {
-        setSearchPageState({ result: null, loadedPages: 0, hasMore: false });
+        setSearchPageState({ result: null, loadedPages: 0, hasMore: false, loadedTypes: [] });
       }
     } finally {
       if (requestId === searchRequestIdRef.current) {
@@ -243,10 +332,13 @@ export function SearchView() {
   }, [pageSize, setSearchPageState]);
 
   const handleSearch = useCallback(
-    async (rawInput = searchInput) => {
-      await runSearch(rawInput, currentFilters, { mode: "replace" });
+    async (rawInput = searchInput, scope?: "all" | "video" | "bangumi" | "film" | "live" | "article" | "user") => {
+      const activeScope = scope ?? searchScope;
+      // "all" = 搜索全部类型（6次请求）; 其他 = 单类型搜索（1次请求）
+      const searchType = activeScope === "all" ? "all" : (TAB_TO_SEARCH_TYPE[activeScope] ?? "video");
+      await runSearch(rawInput, currentFilters, { mode: "replace", searchType });
     },
-    [currentFilters, runSearch, searchInput]
+    [currentFilters, runSearch, searchInput, searchScope]
   );
 
   const updateFilters = useCallback(
@@ -254,10 +346,11 @@ export function SearchView() {
       setSearchPageState({ filters: nextFilters });
 
       if (result?.type === "Aggregate" && lastAggregateInput) {
-        void runSearch(lastAggregateInput, nextFilters, { mode: "replace" });
+        const searchType = searchScope === "all" ? "all" : (TAB_TO_SEARCH_TYPE[searchScope] ?? "video");
+        void runSearch(lastAggregateInput, nextFilters, { mode: "replace", searchType });
       }
     },
-    [lastAggregateInput, result?.type, runSearch, setSearchPageState]
+    [lastAggregateInput, result?.type, runSearch, searchScope, setSearchPageState]
   );
 
   const handlePageChange = useCallback(
@@ -270,9 +363,21 @@ export function SearchView() {
   const handleLoadMore = useCallback(
     (targetPage?: number) => {
       if (!lastAggregateInput) return;
-      void runSearch(lastAggregateInput, currentFilters, { mode: "append", targetPage });
+      // 搜索全部时按当前激活 tab 的类型加载更多；单类型搜索时用该类型
+      const searchType = searchScope === "all"
+        ? (TAB_TO_SEARCH_TYPE[activeResultType] ?? "video")
+        : (TAB_TO_SEARCH_TYPE[searchScope] ?? "video");
+      void runSearch(lastAggregateInput, currentFilters, { mode: "append", targetPage, searchType });
     },
-    [currentFilters, lastAggregateInput, runSearch]
+    [activeResultType, currentFilters, lastAggregateInput, runSearch, searchScope]
+  );
+
+  const handleTabClick = useCallback(
+    (value: SearchResultType) => {
+      // 搜索全部时，标签仅做结果切换，不再自动触发搜索
+      setSearchPageState({ activeResultType: value, currentPage: 1 });
+    },
+    [setSearchPageState]
   );
 
   useEffect(() => {
@@ -347,26 +452,27 @@ export function SearchView() {
   const searchTypeTabs = useMemo(() => {
     if (result?.type !== "Aggregate") {
       return [
-        { value: "all" as const, label: "综合", count: 0 },
-        { value: "video" as const, label: "视频", count: 0 },
-        { value: "bangumi" as const, label: "番剧", count: 0 },
-        { value: "film" as const, label: "影视", count: 0 },
-        { value: "live" as const, label: "直播", count: 0 },
-        { value: "article" as const, label: "专栏", count: 0 },
-        { value: "user" as const, label: "用户", count: 0 },
+        { value: "all" as const, label: "综合", count: 0, loaded: true },
+        { value: "video" as const, label: "视频", count: 0, loaded: false },
+        { value: "bangumi" as const, label: "番剧", count: 0, loaded: false },
+        { value: "film" as const, label: "影视", count: 0, loaded: false },
+        { value: "live" as const, label: "直播", count: 0, loaded: false },
+        { value: "article" as const, label: "专栏", count: 0, loaded: false },
+        { value: "user" as const, label: "用户", count: 0, loaded: false },
       ];
     }
+    const loadedSet = new Set(loadedTypes ?? []);
     const totalLoaded = result.videos.length + result.bangumi.length + (result.films ?? []).length + (result.lives ?? []).length + (result.articles ?? []).length + (result.users ?? []).length;
     return [
-      { value: "all" as const, label: "综合", count: totalLoaded },
-      { value: "video" as const, label: "视频", count: result.video_page.total || result.videos.length },
-      { value: "bangumi" as const, label: "番剧", count: result.bangumi_page.total || result.bangumi.length },
-      { value: "film" as const, label: "影视", count: result.film_page?.total || (result.films ?? []).length },
-      { value: "live" as const, label: "直播", count: result.live_page?.total || (result.lives ?? []).length },
-      { value: "article" as const, label: "专栏", count: result.article_page?.total || (result.articles ?? []).length },
-      { value: "user" as const, label: "用户", count: result.user_page?.total || (result.users ?? []).length },
+      { value: "all" as const, label: "综合", count: totalLoaded, loaded: true },
+      { value: "video" as const, label: "视频", count: result.video_page.total || result.videos.length, loaded: loadedSet.has("video") || result.videos.length > 0 },
+      { value: "bangumi" as const, label: "番剧", count: result.bangumi_page.total || result.bangumi.length, loaded: loadedSet.has("bangumi") || result.bangumi.length > 0 },
+      { value: "film" as const, label: "影视", count: result.film_page?.total || (result.films ?? []).length, loaded: loadedSet.has("film") || (result.films ?? []).length > 0 },
+      { value: "live" as const, label: "直播", count: result.live_page?.total || (result.lives ?? []).length, loaded: loadedSet.has("live") || (result.lives ?? []).length > 0 },
+      { value: "article" as const, label: "专栏", count: result.article_page?.total || (result.articles ?? []).length, loaded: loadedSet.has("article") || (result.articles ?? []).length > 0 },
+      { value: "user" as const, label: "用户", count: result.user_page?.total || (result.users ?? []).length, loaded: loadedSet.has("user") || (result.users ?? []).length > 0 },
     ];
-  }, [result]);
+  }, [loadedTypes, result]);
 
   const visibleAggregateResult = useMemo(() => {
     if (result?.type !== "Aggregate") return null;
@@ -552,7 +658,7 @@ export function SearchView() {
           display: "flex",
           alignItems: "center",
           gap: "14px",
-          marginBottom: "20px",
+          marginBottom: "12px",
         }}
       >
         <div style={{ flex: 1, position: "relative", display: "flex", alignItems: "center" }}>
@@ -588,6 +694,19 @@ export function SearchView() {
           />
         </div>
 
+        <FilterSelect
+          label="类型"
+          value={searchScope}
+          options={searchScopeOptions}
+          onChange={(value) => {
+            const newScope = value as SearchResultType;
+            setSearchPageState({ 
+              searchScope: newScope,
+              ...(result?.type === "Aggregate" ? { activeResultType: newScope, currentPage: 1 } : {})
+            });
+          }}
+        />
+
         <motion.button
           onClick={() => void handleSearch()}
           disabled={loading || !searchInput.trim()}
@@ -598,9 +717,9 @@ export function SearchView() {
             alignItems: "center",
             justifyContent: "center",
             gap: "7px",
-            height: "48px",
-            padding: "0 24px",
-            borderRadius: "12px",
+            height: "44px",
+            padding: "0 18px",
+            borderRadius: "11px",
             fontSize: "14.5px",
             fontWeight: 600,
             color: "#fff",
@@ -620,7 +739,7 @@ export function SearchView() {
         </motion.button>
       </motion.div>
 
-      {result?.type === "Aggregate" ? (
+      {result?.type === "Aggregate" && searchScope === "all" ? (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -628,11 +747,11 @@ export function SearchView() {
           style={{ display: "grid", gap: "10px", marginBottom: "20px" }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "5px", padding: "4px", borderRadius: "11px", backgroundColor: "#f1f1f7", overflowX: "auto", width: "fit-content", maxWidth: "100%" }}>
-            {searchTypeTabs.map(({ value, label, count }) => (
+            {searchTypeTabs.map(({ value, label, count, loaded }) => (
               <button
                 key={value}
                 type="button"
-                onClick={() => setSearchPageState({ activeResultType: value, currentPage: 1 })}
+                onClick={() => handleTabClick(value)}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -650,7 +769,11 @@ export function SearchView() {
                 }}
               >
                 {label}
-                <span style={tabCountBadgeStyle}>{formatSearchTabCount(count)}</span>
+                {loaded ? (
+                  <span style={tabCountBadgeStyle}>{formatSearchTabCount(count)}</span>
+                ) : (
+                  <span style={{ ...tabCountBadgeStyle, backgroundColor: "transparent", color: activeResultType === value ? "#a5a5c8" : "#b0b0c0", minWidth: "auto", padding: "0 4px" }}>·</span>
+                )}
               </button>
             ))}
           </div>

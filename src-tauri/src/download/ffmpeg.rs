@@ -1,8 +1,10 @@
 use ffmpeg_sidecar::command::FfmpegCommand;
 use ffmpeg_sidecar::event::{FfmpegEvent, FfmpegProgress};
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[allow(dead_code)]
 pub struct FfmpegExecutor {
     ffmpeg_path: Option<PathBuf>,
     ffprobe_path: Option<PathBuf>,
@@ -10,6 +12,7 @@ pub struct FfmpegExecutor {
 
 pub type ProgressCallback = Box<dyn Fn(f64) + Send + Sync>;
 
+#[allow(dead_code)]
 impl FfmpegExecutor {
     pub fn new() -> Result<Self, String> {
         let executor = Self::default();

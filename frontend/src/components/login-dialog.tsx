@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect, useCallback } from "react";
 import { useAppStore } from "@/stores/app-store";
 import {
   X,
@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Globe2,
   Users,
+  Trash2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { QRCodeSVG } from "qrcode.react";
@@ -52,6 +53,7 @@ type BackendUserInfo = {
   uname: string;
   face: string;
   mid: number;
+  login_time?: string | null;
 };
 
 type SavedAccountProfile = {
@@ -120,6 +122,7 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
   const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [accountListOpen, setAccountListOpen] = useState(false);
   const [switchingProfile, setSwitchingProfile] = useState("");
+  const [deletingProfile, setDeletingProfile] = useState("");
   const [addingAccount, setAddingAccount] = useState(false);
 
   const config = useAppStore((s) => s.config);
@@ -136,21 +139,19 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
     try {
       const savedAccounts = await invoke<SavedAccountProfile[]>("list_saved_accounts");
       setAccounts(savedAccounts);
+      return savedAccounts;
+    } catch (err) {
+      setAccounts([]);
+      throw err;
     } finally {
       setAccountsLoaded(true);
     }
   }, []);
 
-  const saveSessdata = useCallback(async (sessdata: string, cookie?: string | null) => {
-    const currentConfig = await invoke<BackendConfig>("get_config");
-    const nextConfig = {
-      ...currentConfig,
-      sessdata,
-      cookie: cookie?.trim() || `SESSDATA=${sessdata}`,
-    };
-    await invoke("save_config", { newConfig: nextConfig });
-    setConfig(nextConfig);
-  }, [setConfig]);
+  const notifyAccountChanged = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("bilibili-box:account-switched"));
+    window.dispatchEvent(new CustomEvent("bilibili-box:page-cache-cleared"));
+  }, []);
 
   const completeLogin = useCallback(async (sessdata: string, cookie?: string | null) => {
     const userInfo = await invoke<BackendUserInfo>("get_user_info", { sessdata });
@@ -158,23 +159,26 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
       throw new Error("登录校验失败，请重新登录");
     }
 
-    await saveSessdata(sessdata, cookie);
-    await invoke("save_user_info", { userInfo });
+    const result = await invoke<AccountSwitchResult>("save_login_session", {
+      params: { userInfo, sessdata, cookie },
+    });
+    setConfig(result.config);
 
     const now = new Date();
     const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const savedUser = result.user_info ?? userInfo;
     setUserInfo({
-      username: userInfo.uname,
-      avatar: userInfo.face,
-      loginTime: timeStr,
+      username: savedUser.uname,
+      avatar: savedUser.face,
+      loginTime: savedUser.login_time || timeStr,
       deviceName: "Windows 桌面端",
     });
     resetAccountScopedState();
     setAddingAccount(false);
     setAccountListOpen(false);
     await loadAccounts();
-    window.dispatchEvent(new CustomEvent("bilibili-box:account-switched"));
-  }, [loadAccounts, resetAccountScopedState, saveSessdata, setUserInfo]);
+    notifyAccountChanged();
+  }, [loadAccounts, notifyAccountChanged, resetAccountScopedState, setConfig, setUserInfo]);
 
   const handleClose = useCallback(() => {
     setAddingAccount(false);
@@ -330,7 +334,7 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
       setAddingAccount(false);
       setAccountListOpen(false);
       await loadAccounts();
-      window.dispatchEvent(new CustomEvent("bilibili-box:account-switched"));
+      notifyAccountChanged();
     } catch (e) {
       console.error("登出失败:", e);
     } finally {
@@ -361,14 +365,14 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
       setUserInfo(result.user_info ? {
         username: result.user_info.uname,
         avatar: result.user_info.face,
-        loginTime: "--",
+        loginTime: result.user_info.login_time || "--",
         deviceName: "Windows 桌面端",
       } : null);
       resetAccountScopedState();
       setAccountListOpen(false);
       setAddingAccount(false);
       void loadAccounts();
-      window.dispatchEvent(new CustomEvent("bilibili-box:account-switched"));
+      notifyAccountChanged();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -384,6 +388,47 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
     setMode("qrcode");
     void generateQrcode();
     setPolling(true);
+  };
+
+  const applyAccountResult = useCallback((result: AccountSwitchResult) => {
+    setConfig(result.config);
+    setUserInfo(result.user_info ? {
+      username: result.user_info.uname,
+      avatar: result.user_info.face,
+      loginTime: result.user_info.login_time || "--",
+      deviceName: "Windows 桌面端",
+    } : null);
+    resetAccountScopedState();
+    notifyAccountChanged();
+  }, [notifyAccountChanged, resetAccountScopedState, setConfig, setUserInfo]);
+
+  const handleDeleteAccount = async (profile: string, accountName?: string) => {
+    if (!window.confirm(`确定删除本地账号数据「${accountName || profile}」吗？这会删除该账号的配置、缓存和下载目录。`)) {
+      return;
+    }
+    setDeletingProfile(profile);
+    setError("");
+    try {
+      const result = await invoke<AccountSwitchResult>("delete_saved_account_data", { profile });
+      applyAccountResult(result);
+      setAddingAccount(false);
+      setAccountListOpen(false);
+      await loadAccounts();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setDeletingProfile("");
+    }
+  };
+
+  const handleLogoutAndDelete = async () => {
+    const savedAccounts = await loadAccounts();
+    const activeAccount = savedAccounts.find((account) => account.active);
+    if (!activeAccount) {
+      setError("未找到当前账号的本地数据");
+      return;
+    }
+    await handleDeleteAccount(activeAccount.profile, activeAccount.username);
   };
 
   return (
@@ -408,8 +453,10 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
               accounts={accounts}
               accountListOpen={accountListOpen}
               switchingProfile={switchingProfile}
+              deletingProfile={deletingProfile}
               onClose={handleClose}
               onLogout={handleLogout}
+              onLogoutAndDelete={() => void handleLogoutAndDelete()}
               onToggleAccountList={() => void handleToggleAccountList()}
               onAddAccount={handleAddAccount}
               onSwitchAccount={(profile) => void handleSwitchAccount(profile)}
@@ -418,9 +465,11 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
             <LoggedOutAccountPanel
               accounts={accounts}
               switchingProfile={switchingProfile}
+              deletingProfile={deletingProfile}
               onClose={handleClose}
               onAddAccount={handleAddAccount}
               onSwitchAccount={(profile) => void handleSwitchAccount(profile)}
+              onDeleteAccount={(profile, username) => void handleDeleteAccount(profile, username)}
             />
           ) : (
             <LoginForm
@@ -455,8 +504,10 @@ interface LoggedInPanelProps {
   accounts: SavedAccountProfile[];
   accountListOpen: boolean;
   switchingProfile: string;
+  deletingProfile: string;
   onClose: () => void;
   onLogout: () => void;
+  onLogoutAndDelete: () => void;
   onToggleAccountList: () => void;
   onAddAccount: () => void;
   onSwitchAccount: (profile: string) => void;
@@ -469,8 +520,10 @@ function LoggedInPanel({
   accounts,
   accountListOpen,
   switchingProfile,
+  deletingProfile,
   onClose,
   onLogout,
+  onLogoutAndDelete,
   onToggleAccountList,
   onAddAccount,
   onSwitchAccount,
@@ -615,9 +668,9 @@ function LoggedInPanel({
         <motion.button
           type="button"
           onClick={onToggleAccountList}
-          disabled={loggingOut || Boolean(switchingProfile)}
-          whileHover={!loggingOut && !switchingProfile ? { backgroundColor: "#f7f7ff", borderColor: "#a5b4fc" } : {}}
-          whileTap={!loggingOut && !switchingProfile ? { scale: 0.985 } : {}}
+          disabled={loggingOut || Boolean(switchingProfile) || Boolean(deletingProfile)}
+          whileHover={!loggingOut && !switchingProfile && !deletingProfile ? { backgroundColor: "#f7f7ff", borderColor: "#a5b4fc" } : {}}
+          whileTap={!loggingOut && !switchingProfile && !deletingProfile ? { scale: 0.985 } : {}}
           className="cursor-pointer w-full"
           style={{
             height: "42px",
@@ -663,7 +716,7 @@ function LoggedInPanel({
               <button
                 key={account.profile}
                 type="button"
-                disabled={account.active || Boolean(switchingProfile)}
+                disabled={account.active || Boolean(switchingProfile) || Boolean(deletingProfile)}
                 onClick={() => onSwitchAccount(account.profile)}
                 style={{
                   display: "grid",
@@ -674,7 +727,7 @@ function LoggedInPanel({
                   borderRadius: "10px",
                   border: account.active ? "1.5px solid #6366f1" : "1px solid #ececf2",
                   background: account.active ? "#f5f3ff" : "#fff",
-                  cursor: account.active || switchingProfile ? "default" : "pointer",
+                  cursor: account.active || switchingProfile || deletingProfile ? "default" : "pointer",
                   textAlign: "left",
                 }}
               >
@@ -697,9 +750,9 @@ function LoggedInPanel({
         <motion.button
           type="button"
           onClick={onLogout}
-          disabled={loggingOut}
-          whileHover={!loggingOut ? { backgroundColor: "#fef2f2", borderColor: "#f87171" } : {}}
-          whileTap={!loggingOut ? { scale: 0.985 } : {}}
+          disabled={loggingOut || Boolean(deletingProfile)}
+          whileHover={!loggingOut && !deletingProfile ? { backgroundColor: "#fef2f2", borderColor: "#f87171" } : {}}
+          whileTap={!loggingOut && !deletingProfile ? { scale: 0.985 } : {}}
           className="cursor-pointer w-full"
           style={{
             height: "42px",
@@ -733,6 +786,42 @@ function LoggedInPanel({
             </>
           )}
         </motion.button>
+        <motion.button
+          type="button"
+          onClick={onLogoutAndDelete}
+          disabled={loggingOut || Boolean(switchingProfile) || Boolean(deletingProfile)}
+          whileHover={!loggingOut && !switchingProfile && !deletingProfile ? { backgroundColor: "#fff7ed", borderColor: "#fb923c" } : {}}
+          whileTap={!loggingOut && !switchingProfile && !deletingProfile ? { scale: 0.985 } : {}}
+          className="cursor-pointer w-full"
+          style={{
+            height: "40px",
+            borderRadius: "11px",
+            border: "1.5px solid #fed7aa",
+            background: "#ffffff",
+            color: deletingProfile ? "#bbb" : "#ea580c",
+            fontSize: "13.5px",
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "8px",
+            transition: "all 0.15s",
+            order: 3,
+            flexBasis: "100%",
+          }}
+        >
+          {deletingProfile ? (
+            <>
+              <Loader2 className="w-[15px] h-[15px]" style={{ animation: "spin 1s linear infinite" }} />
+              删除中...
+            </>
+          ) : (
+            <>
+              <Trash2 className="w-[15px] h-[15px]" />
+              退出账号并删除数据
+            </>
+          )}
+        </motion.button>
       </div>
 
       {/* ═══ 底部安全提示 ═══ */}
@@ -760,15 +849,19 @@ function LoggedInPanel({
 function LoggedOutAccountPanel({
   accounts,
   switchingProfile,
+  deletingProfile,
   onClose,
   onAddAccount,
   onSwitchAccount,
+  onDeleteAccount,
 }: {
   accounts: SavedAccountProfile[];
   switchingProfile: string;
+  deletingProfile: string;
   onClose: () => void;
   onAddAccount: () => void;
   onSwitchAccount: (profile: string) => void;
+  onDeleteAccount: (profile: string, username?: string) => void;
 }) {
   return (
     <motion.div
@@ -813,21 +906,17 @@ function LoggedOutAccountPanel({
 
         <div style={{ display: "grid", gap: "8px", maxHeight: "300px", overflowY: "auto", paddingRight: "4px" }}>
           {accounts.map((account) => (
-            <button
+            <div
               key={account.profile}
-              type="button"
-              disabled={Boolean(switchingProfile)}
-              onClick={() => onSwitchAccount(account.profile)}
               style={{
                 display: "grid",
-                gridTemplateColumns: "36px minmax(0, 1fr) auto",
+                gridTemplateColumns: "36px minmax(0, 1fr) auto auto",
                 alignItems: "center",
                 gap: "10px",
                 padding: "10px 11px",
                 borderRadius: "11px",
                 border: "1px solid #ececf2",
                 background: "#fff",
-                cursor: switchingProfile ? "wait" : "pointer",
                 textAlign: "left",
               }}
             >
@@ -836,17 +925,48 @@ function LoggedOutAccountPanel({
                 <span style={{ display: "block", color: "#1a1a2e", fontSize: "13px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</span>
                 <span style={{ color: "#8b8b9a", fontSize: "11.5px" }}>UID {account.mid}</span>
               </span>
-              <span style={{ color: "#6366f1", fontSize: "12px", fontWeight: 800 }}>
+              <button
+                type="button"
+                disabled={Boolean(switchingProfile) || Boolean(deletingProfile)}
+                onClick={() => onSwitchAccount(account.profile)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "#6366f1",
+                  fontSize: "12px",
+                  fontWeight: 800,
+                  cursor: switchingProfile || deletingProfile ? "wait" : "pointer",
+                  padding: "6px 4px",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {switchingProfile === account.profile ? "切换中" : "进入"}
-              </span>
-            </button>
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(switchingProfile) || Boolean(deletingProfile)}
+                onClick={() => onDeleteAccount(account.profile, account.username)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: deletingProfile === account.profile ? "#bbb" : "#ef4444",
+                  fontSize: "12px",
+                  fontWeight: 800,
+                  cursor: switchingProfile || deletingProfile ? "wait" : "pointer",
+                  padding: "6px 0",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {deletingProfile === account.profile ? "删除中" : "删除数据"}
+              </button>
+            </div>
           ))}
         </div>
 
         <button
           type="button"
           onClick={onAddAccount}
-          disabled={Boolean(switchingProfile)}
+          disabled={Boolean(switchingProfile) || Boolean(deletingProfile)}
           style={{
             width: "100%",
             height: "42px",
@@ -857,7 +977,7 @@ function LoggedOutAccountPanel({
             color: "#6366f1",
             fontSize: "14px",
             fontWeight: 800,
-            cursor: switchingProfile ? "not-allowed" : "pointer",
+            cursor: switchingProfile || deletingProfile ? "not-allowed" : "pointer",
           }}
         >
           添加账号

@@ -89,28 +89,10 @@ pub enum DownloadEvent {
 }
 
 /// 日志事件
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEvent {
     pub level: String,
     pub message: String,
     pub timestamp: String,
-}
-
-/// 插件信息
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginInfo {
-    pub id: String,
-    pub name: String,
-    pub version: String,
-    pub enabled: bool,
-    pub priority: i32,
-}
-
-/// 插件事件
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "event", content = "data")]
-pub enum PluginEvent {
-    Loaded { info: PluginInfo },
-    Unloaded { plugin_id: String },
-    Error { plugin_id: String, error: String },
 }

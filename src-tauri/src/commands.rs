@@ -31,7 +31,6 @@ use crate::download::{
     CreateArticleDownloadTaskParams, CreateDownloadTaskParams, DownloadManager, DownloadProgress,
 };
 use crate::media_proxy::{MediaProxyServer, RegisteredPlayable};
-use crate::plugin::{PluginInfo, PluginManager};
 
 const GITHUB_API_LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/RoamerFly/Bilibili_Box/releases/latest";
@@ -103,6 +102,14 @@ pub struct AccountSwitchResult {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveLoginSessionParams {
+    pub user_info: UserInfo,
+    pub sessdata: String,
+    pub cookie: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct GithubRelease {
     tag_name: String,
     name: Option<String>,
@@ -153,6 +160,16 @@ pub fn save_config(
     config: State<'_, Arc<RwLock<Config>>>,
     new_config: Config,
 ) -> Result<(), String> {
+    if let Some(cookie_owner_mid) = cookie_mid(&new_config.cookie) {
+        if let Some(saved_user) = get_saved_user_info(app.clone())? {
+            if saved_user.mid > 0 && saved_user.mid != cookie_owner_mid {
+                return Err(format!(
+                    "拒绝保存错配账号配置：当前账号 mid 为 {}，cookie 属于 mid {}",
+                    saved_user.mid, cookie_owner_mid
+                ));
+            }
+        }
+    }
     // 更新内存中的配置
     *config.write() = new_config.clone();
     // 持久化到文件
@@ -267,7 +284,10 @@ pub fn clear_page_cache(app: AppHandle) -> Result<CacheOverview, String> {
             .filter_map(Result::ok)
         {
             let path = entry.path();
-            let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
             if name == "download" || name == "download_tasks" {
                 continue;
             }
@@ -380,6 +400,132 @@ pub async fn get_user_info(
     bili_client.get_user_info(&sessdata).await
 }
 
+fn current_login_time() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
+}
+
+fn ensure_login_time(user_info: &mut UserInfo) {
+    if user_info
+        .login_time
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
+        user_info.login_time = Some(current_login_time());
+    }
+}
+
+fn cookie_mid(cookie: &str) -> Option<i64> {
+    crate::api::video::extract_cookie_value(cookie, "DedeUserID")
+        .and_then(|value| value.parse::<i64>().ok())
+}
+
+fn clear_profile_login_credentials(profile_dir: &std::path::Path) -> Result<(), String> {
+    let config_path = profile_dir.join("config.json");
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    let content =
+        std::fs::read_to_string(&config_path).map_err(|e| format!("读取账号配置失败: {e}"))?;
+    let mut value = serde_json::from_str::<serde_json::Value>(&content)
+        .map_err(|e| format!("解析账号配置失败: {e}"))?;
+    if let Some(map) = value.as_object_mut() {
+        map.insert(
+            "sessdata".to_string(),
+            serde_json::Value::String(String::new()),
+        );
+        map.insert(
+            "cookie".to_string(),
+            serde_json::Value::String(String::new()),
+        );
+    }
+    let content =
+        serde_json::to_string_pretty(&value).map_err(|e| format!("序列化账号配置失败: {e}"))?;
+    std::fs::write(config_path, content).map_err(|e| format!("清理错配登录凭据失败: {e}"))
+}
+
+fn validate_cookie_owner(cookie: &str, expected_mid: i64) -> Result<(), String> {
+    if let Some(actual_mid) = cookie_mid(cookie) {
+        if actual_mid != expected_mid {
+            return Err(format!(
+                "账号登录凭据与本地账号不匹配：本地账号 mid 为 {}，cookie 属于 mid {}。请重新登录该账号。",
+                expected_mid, actual_mid
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn save_login_session(
+    app: AppHandle,
+    config: State<'_, Arc<RwLock<Config>>>,
+    bili_client: State<'_, Arc<BiliClient>>,
+    download_manager: State<'_, Arc<DownloadManager>>,
+    params: SaveLoginSessionParams,
+) -> Result<AccountSwitchResult, String> {
+    let mut user_info = params.user_info;
+    if !user_info.is_login {
+        return Err("登录校验失败，请重新登录".to_string());
+    }
+
+    let sessdata = params.sessdata.trim().to_string();
+    if sessdata.is_empty() {
+        return Err("登录凭据缺少 SESSDATA".to_string());
+    }
+    let cookie = params
+        .cookie
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("SESSDATA={}", sessdata));
+    validate_cookie_owner(&cookie, user_info.mid)?;
+    ensure_login_time(&mut user_info);
+
+    let profile = Config::profile_name_from_user(&user_info.uname, user_info.mid);
+    let previous_profile =
+        Config::current_profile_name(&app).unwrap_or_else(|_| "guest".to_string());
+    let should_migrate_legacy = Config::legacy_profile_matches(&app, user_info.mid);
+
+    Config::set_current_profile(&app, &profile)?;
+    Config::ensure_user_dirs(&app)?;
+    let mut next_config = Config::load(&app)?;
+    if should_migrate_legacy {
+        let mut session_config = next_config.clone();
+        session_config.sessdata = sessdata.clone();
+        session_config.cookie = cookie.clone();
+        next_config =
+            Config::migrate_legacy_config_for_profile(&app, user_info.mid, &session_config)?;
+    }
+    next_config.sessdata = sessdata;
+    next_config.cookie = cookie;
+    *config.write() = next_config.clone();
+    next_config.save(&app)?;
+
+    let user_dir = Config::user_data_dir(&app)?;
+    std::fs::create_dir_all(&user_dir).map_err(|e| format!("创建用户数据目录失败: {}", e))?;
+    let user_path = Config::user_info_path(&app)?;
+    let user_json =
+        serde_json::to_string_pretty(&user_info).map_err(|e| format!("序列化用户信息失败: {e}"))?;
+    std::fs::write(&user_path, user_json).map_err(|e| format!("写入用户信息失败: {e}"))?;
+
+    download_manager.migrate_legacy_tasks_to_current_profile(
+        should_migrate_legacy,
+        previous_profile == "guest",
+    )?;
+    Config::clear_guest_account_data(&app)?;
+    bili_client.reload_client()?;
+    download_manager.reload_current_profile_tasks();
+
+    Ok(AccountSwitchResult {
+        config: next_config,
+        user_info: Some(user_info),
+    })
+}
+
 /// 保存已登录用户信息到当前用户的 data/{profile}/user.json。
 #[tauri::command]
 pub fn save_user_info(
@@ -387,8 +533,13 @@ pub fn save_user_info(
     config: State<'_, Arc<RwLock<Config>>>,
     bili_client: State<'_, Arc<BiliClient>>,
     download_manager: State<'_, Arc<DownloadManager>>,
-    user_info: UserInfo,
+    mut user_info: UserInfo,
 ) -> Result<(), String> {
+    {
+        let current_config = config.read();
+        validate_cookie_owner(&current_config.cookie, user_info.mid)?;
+    }
+    ensure_login_time(&mut user_info);
     let profile = Config::profile_name_from_user(&user_info.uname, user_info.mid);
     let previous_profile =
         Config::current_profile_name(&app).unwrap_or_else(|_| "guest".to_string());
@@ -465,7 +616,11 @@ pub fn list_saved_accounts(app: AppHandle) -> Result<Vec<SavedAccountProfile>, S
         if !path.is_dir() {
             continue;
         }
-        let Some(profile) = path.file_name().and_then(|value| value.to_str()).map(str::to_string) else {
+        let Some(profile) = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(str::to_string)
+        else {
             continue;
         };
         if profile == "guest" {
@@ -490,7 +645,12 @@ pub fn list_saved_accounts(app: AppHandle) -> Result<Vec<SavedAccountProfile>, S
         });
     }
 
-    accounts.sort_by(|left, right| right.active.cmp(&left.active).then_with(|| left.username.cmp(&right.username)));
+    accounts.sort_by(|left, right| {
+        right
+            .active
+            .cmp(&left.active)
+            .then_with(|| left.username.cmp(&right.username))
+    });
     Ok(accounts)
 }
 
@@ -508,9 +668,31 @@ pub fn switch_account_profile(
     }
     let data_root = Config::data_root_dir(&app)?;
     let profile_dir = data_root.join(&profile);
-    if !profile_dir.join("user.json").exists() {
+    let user_path = profile_dir.join("user.json");
+    if !user_path.exists() {
         return Err("账号数据不存在，无法切换".to_string());
     }
+    let user_json =
+        std::fs::read_to_string(&user_path).map_err(|e| format!("读取账号信息失败: {e}"))?;
+    let mut user_info = serde_json::from_str::<UserInfo>(&user_json)
+        .map_err(|e| format!("解析账号信息失败: {e}"))?;
+
+    let config_path = profile_dir.join("config.json");
+    if config_path.exists() {
+        let config_json =
+            std::fs::read_to_string(&config_path).map_err(|e| format!("读取账号配置失败: {e}"))?;
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&config_json) {
+            let cookie = value
+                .get("cookie")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            if let Err(err) = validate_cookie_owner(cookie, user_info.mid) {
+                clear_profile_login_credentials(&profile_dir)?;
+                return Err(format!("{} 已清理该账号的错配登录凭据，请重新登录。", err));
+            }
+        }
+    }
+    ensure_login_time(&mut user_info);
 
     Config::set_current_profile(&app, &profile)?;
     Config::ensure_user_dirs(&app)?;
@@ -518,11 +700,72 @@ pub fn switch_account_profile(
     *config.write() = next_config.clone();
     bili_client.reload_client()?;
     download_manager.reload_current_profile_tasks();
-    let user_info = get_saved_user_info(app)?;
+    let user_json =
+        serde_json::to_string_pretty(&user_info).map_err(|e| format!("序列化账号信息失败: {e}"))?;
+    std::fs::write(&user_path, user_json).map_err(|e| format!("写入账号信息失败: {e}"))?;
     Ok(AccountSwitchResult {
         config: next_config,
-        user_info,
+        user_info: Some(user_info),
     })
+}
+
+#[tauri::command]
+pub fn delete_saved_account_data(
+    app: AppHandle,
+    config: State<'_, Arc<RwLock<Config>>>,
+    bili_client: State<'_, Arc<BiliClient>>,
+    download_manager: State<'_, Arc<DownloadManager>>,
+    profile: String,
+) -> Result<AccountSwitchResult, String> {
+    let profile = Config::sanitize_path_component(&profile);
+    if profile == "guest" {
+        return Err("不能删除 guest 工作区".to_string());
+    }
+
+    let data_root = Config::data_root_dir(&app)?;
+    let profile_dir = data_root.join(&profile);
+    if !profile_dir.exists() {
+        return Err("账号数据不存在或已被删除".to_string());
+    }
+    if !profile_dir.is_dir() {
+        return Err("账号数据路径异常，拒绝删除".to_string());
+    }
+
+    let root = data_root
+        .canonicalize()
+        .map_err(|e| format!("读取数据根目录失败: {e}"))?;
+    let target = profile_dir
+        .canonicalize()
+        .map_err(|e| format!("读取账号目录失败: {e}"))?;
+    if target == root || !target.starts_with(&root) {
+        return Err("账号数据路径越界，拒绝删除".to_string());
+    }
+
+    let active_profile = Config::current_profile_name(&app)?;
+    std::fs::remove_dir_all(&target)
+        .map_err(|e| format!("删除账号数据失败 ({}): {e}", target.display()))?;
+
+    if active_profile == profile {
+        Config::set_current_profile(&app, "guest")?;
+        Config::ensure_user_dirs(&app)?;
+        Config::clear_guest_account_data(&app)?;
+        let guest_config = Config::load(&app)?;
+        *config.write() = guest_config.clone();
+        bili_client.reload_client()?;
+        download_manager.reload_current_profile_tasks();
+        Ok(AccountSwitchResult {
+            config: guest_config,
+            user_info: None,
+        })
+    } else {
+        let current_config = Config::load(&app)?;
+        *config.write() = current_config.clone();
+        let user_info = get_saved_user_info(app).unwrap_or(None);
+        Ok(AccountSwitchResult {
+            config: current_config,
+            user_info,
+        })
+    }
 }
 
 #[tauri::command]
@@ -1198,6 +1441,106 @@ pub async fn browser_login(
     }
 }
 
+/// 打开弹窗以通过 B 站搜索风控验证
+#[tauri::command]
+pub async fn verify_search_wind_control(
+    app: AppHandle,
+    bili_client: State<'_, Arc<BiliClient>>,
+    url: String,
+) -> Result<(), String> {
+    let label = "search-wind-control";
+    let verify_url = Url::parse(&url).map_err(|e| format!("验证 URL 无效: {e}"))?;
+
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.close();
+    }
+
+    tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::External(verify_url.clone()))
+        .title("请完成风控验证后关闭此窗口")
+        .inner_size(800.0, 600.0)
+        .resizable(true)
+        .focused(true)
+        .build()
+        .map_err(|e| format!("无法打开风控验证窗口: {e}"))?;
+
+    let started_at = Instant::now();
+    let timeout = Duration::from_secs(300); // 5 分钟超时
+    let mut last_cookies = String::new();
+    let mut check_timer = Instant::now();
+
+    loop {
+        if started_at.elapsed() >= timeout {
+            if let Some(window) = app.get_webview_window(label) {
+                let _ = window.close();
+            }
+            return Err("风控验证超时，请重试".to_string());
+        }
+
+        if let Some(window) = app.get_webview_window(label) {
+            if let Ok(cookies) = window.cookies() {
+                let bili_cookies: Vec<String> = cookies
+                    .iter()
+                    .filter(|cookie| {
+                        cookie
+                            .domain()
+                            .map(|domain| domain.contains("bilibili.com"))
+                            .unwrap_or(true)
+                    })
+                    .map(|cookie| format!("{}={}", cookie.name(), cookie.value()))
+                    .collect();
+                last_cookies = bili_cookies.join("; ");
+            }
+
+            // 每 3 秒检测一次搜索接口是否恢复正常
+            if check_timer.elapsed() >= Duration::from_secs(3) && !last_cookies.is_empty() {
+                check_timer = Instant::now();
+                let req = bili_client.api_client()
+                    .get("https://api.bilibili.com/x/web-interface/wbi/search/type")
+                    .query(&[("search_type", "video"), ("keyword", "测试")])
+                    .header("cookie", &last_cookies)
+                    .header("referer", "https://search.bilibili.com/all?keyword=%E6%B5%8B%E8%AF%95")
+                    .header("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+
+                if let Ok(res) = req.send().await {
+                    if res.status() == reqwest::StatusCode::OK {
+                        if let Ok(body) = res.text().await {
+                            if body.contains("\"code\":0") && body.contains("\"data\":") {
+                                // 验证通过，自动关闭窗口
+                                let _ = window.close();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // 窗口已被用户关闭
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    // 将最终获取到的 Cookie 合并到 Rust 客户端中
+    let bili_url = Url::parse("https://www.bilibili.com/").unwrap();
+    bili_client.merge_cookies(&bili_url, &last_cookies);
+
+    // 如果包含 SESSDATA，意味着用户可能在里面进行了登录。为了保险起见，将新的 Cookie 写回到配置中。
+    if last_cookies.contains("SESSDATA=") {
+        let app_state = app.state::<Arc<RwLock<Config>>>();
+        let mut config_write = app_state.write();
+        config_write.cookie = last_cookies.clone();
+        
+        if let Some(sessdata) = last_cookies.split(';').find(|s| s.trim().starts_with("SESSDATA=")) {
+            config_write.sessdata = sessdata.trim().replace("SESSDATA=", "");
+        }
+        
+        let _ = config_write.save(&app);
+    }
+
+    Ok(())
+}
+
 fn normalize_cookie_header(cookie: &str) -> String {
     let mut names: Vec<String> = Vec::new();
     let mut parts: Vec<String> = Vec::new();
@@ -1210,7 +1553,11 @@ fn normalize_cookie_header(cookie: &str) -> String {
             .split_once('=')
             .map(|(name, _)| name.trim())
             .unwrap_or(trimmed);
-        if name.is_empty() || names.iter().any(|existing| existing.eq_ignore_ascii_case(name)) {
+        if name.is_empty()
+            || names
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(name))
+        {
             continue;
         }
         names.push(name.to_string());
@@ -1229,6 +1576,7 @@ pub async fn search_video(
     duration: Option<String>,
     page: Option<i64>,
     page_size: Option<i64>,
+    search_type: Option<String>,
 ) -> Result<SearchResult, String> {
     bili_client
         .search_video_with_options(
@@ -1239,6 +1587,7 @@ pub async fn search_video(
                 duration,
                 page,
                 page_size,
+                search_type,
             },
         )
         .await
@@ -1455,7 +1804,13 @@ pub async fn get_comment_replies(
     page_size: Option<i64>,
 ) -> Result<CommentPage, String> {
     bili_client
-        .get_comment_replies(oid, type_id, root, page.unwrap_or(1), page_size.unwrap_or(10))
+        .get_comment_replies(
+            oid,
+            type_id,
+            root,
+            page.unwrap_or(1),
+            page_size.unwrap_or(10),
+        )
         .await
 }
 
@@ -1498,18 +1853,12 @@ pub async fn report_comment(
 }
 
 #[tauri::command]
-pub async fn block_user(
-    bili_client: State<'_, Arc<BiliClient>>,
-    mid: i64,
-) -> Result<(), String> {
+pub async fn block_user(bili_client: State<'_, Arc<BiliClient>>, mid: i64) -> Result<(), String> {
     bili_client.block_user(mid).await
 }
 
 #[tauri::command]
-pub async fn unblock_user(
-    bili_client: State<'_, Arc<BiliClient>>,
-    mid: i64,
-) -> Result<(), String> {
+pub async fn unblock_user(bili_client: State<'_, Arc<BiliClient>>, mid: i64) -> Result<(), String> {
     bili_client.unblock_user(mid).await
 }
 
@@ -1741,7 +2090,11 @@ pub async fn get_liked_videos(
     source: Option<String>,
 ) -> Result<LikedVideoPage, String> {
     bili_client
-        .get_liked_videos(page.unwrap_or(1), page_size.unwrap_or(20), source.as_deref())
+        .get_liked_videos(
+            page.unwrap_or(1),
+            page_size.unwrap_or(20),
+            source.as_deref(),
+        )
         .await
 }
 
@@ -1843,44 +2196,6 @@ pub async fn get_all_subtitles_srt(
     cid: i64,
 ) -> Result<Vec<(String, String)>, String> {
     bili_client.get_all_subtitles_srt(aid, cid).await
-}
-
-// ========== 插件相关命令 ==========
-
-/// 获取插件列表
-#[tauri::command]
-pub fn get_plugins(plugin_manager: State<'_, Arc<PluginManager>>) -> Vec<PluginInfo> {
-    plugin_manager.get_plugins()
-}
-
-/// 刷新插件列表
-#[tauri::command]
-pub fn refresh_plugins(plugin_manager: State<'_, Arc<PluginManager>>) -> Result<(), String> {
-    plugin_manager.refresh()
-}
-
-/// 启用插件
-#[tauri::command]
-pub fn enable_plugin(
-    plugin_manager: State<'_, Arc<PluginManager>>,
-    plugin_id: String,
-) -> Result<(), String> {
-    plugin_manager.enable_plugin(&plugin_id)
-}
-
-/// 禁用插件
-#[tauri::command]
-pub fn disable_plugin(
-    plugin_manager: State<'_, Arc<PluginManager>>,
-    plugin_id: String,
-) -> Result<(), String> {
-    plugin_manager.disable_plugin(&plugin_id)
-}
-
-/// 获取插件目录路径
-#[tauri::command]
-pub fn get_plugin_dir(plugin_manager: State<'_, Arc<PluginManager>>) -> String {
-    plugin_manager.plugin_dir().to_string_lossy().to_string()
 }
 
 /// 打开下载目录

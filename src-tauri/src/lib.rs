@@ -6,9 +6,9 @@ mod download;
 mod errors;
 mod events;
 mod media_proxy;
-mod plugin;
 
 use parking_lot::RwLock;
+use std::borrow::Cow;
 use std::sync::Arc;
 use tauri::http::{Response, StatusCode};
 use tauri::{LogicalSize, Manager, PhysicalPosition, Position, Size};
@@ -18,7 +18,6 @@ use api::BiliClient;
 use config::Config;
 use download::DownloadManager;
 use media_proxy::MediaProxyServer;
-use plugin::PluginManager;
 
 fn fit_window_to_work_area(window: &tauri::WebviewWindow) {
     let Ok(Some(monitor)) = window.current_monitor() else {
@@ -56,11 +55,23 @@ pub fn run() {
                     let response = if let Some(media_proxy) = media_proxy {
                         media_proxy.handle_protocol_request(request).await
                     } else {
-                        Response::builder()
+                        match Response::builder()
                             .status(StatusCode::SERVICE_UNAVAILABLE)
                             .header("Content-Type", "text/plain; charset=utf-8")
-                            .body("Media proxy is not ready".as_bytes().to_vec().into())
-                            .expect("failed to build media proxy unavailable response")
+                            .body(Cow::Owned("Media proxy is not ready".as_bytes().to_vec()))
+                        {
+                            Ok(response) => response,
+                            Err(err) => {
+                                log::error!(
+                                    "failed to build media proxy unavailable response: {err}"
+                                );
+                                let mut response = Response::new(Cow::Owned(
+                                    "Media proxy is not ready".as_bytes().to_vec(),
+                                ));
+                                *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+                                response
+                            }
+                        }
                     };
                     responder.respond(response);
                 });
@@ -99,12 +110,6 @@ pub fn run() {
                 DownloadManager::new(app.handle().clone(), task_concurrency, chunk_concurrency);
             app.manage(Arc::new(download_manager));
 
-            let plugin_manager = PluginManager::new(app.handle().clone());
-            if let Err(err) = plugin_manager.load_plugins() {
-                log::warn!("Failed to load plugins: {}", err);
-            }
-            app.manage(Arc::new(plugin_manager));
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -119,11 +124,13 @@ pub fn run() {
             commands::generate_qrcode,
             commands::get_qrcode_status,
             commands::get_user_info,
+            commands::save_login_session,
             commands::save_user_info,
             commands::get_saved_user_info,
             commands::clear_user_info,
             commands::list_saved_accounts,
             commands::switch_account_profile,
+            commands::delete_saved_account_data,
             commands::open_external_url,
             commands::check_update,
             commands::download_and_install_update,
@@ -133,6 +140,7 @@ pub fn run() {
             commands::window_start_dragging,
             commands::browser_login,
             commands::search_video,
+            commands::verify_search_wind_control,
             commands::get_normal_info,
             commands::get_live_play_info,
             commands::get_article_detail,
@@ -182,11 +190,6 @@ pub fn run() {
             commands::get_subtitle_info,
             commands::get_subtitle,
             commands::get_all_subtitles_srt,
-            commands::get_plugins,
-            commands::refresh_plugins,
-            commands::enable_plugin,
-            commands::disable_plugin,
-            commands::get_plugin_dir,
             commands::open_download_folder,
             commands::open_download_task_folder,
         ])

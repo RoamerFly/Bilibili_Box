@@ -303,7 +303,12 @@ impl super::BiliClient {
             .get("list")
             .or_else(|| resp.get("data"))
             .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(parse_liked_video_item).collect::<Vec<_>>())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(parse_liked_video_item)
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         let total = all_items.len() as i64;
         let start = ((page - 1) * ps).max(0) as usize;
@@ -364,7 +369,12 @@ impl super::BiliClient {
             .get("item")
             .or_else(|| data.get("list"))
             .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(parse_liked_video_item).collect::<Vec<_>>())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(parse_liked_video_item)
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         let total = data
             .get("count")
@@ -397,7 +407,10 @@ impl super::BiliClient {
         let resp: Value =
             serde_json::from_str(&body).map_err(|e| format!("解析登录用户响应失败: {}", e))?;
         if resp["code"].as_i64().unwrap_or(-1) != 0 {
-            return Err(format!("登录用户 API 错误: {}", resp["message"].as_str().unwrap_or("未知错误")));
+            return Err(format!(
+                "登录用户 API 错误: {}",
+                resp["message"].as_str().unwrap_or("未知错误")
+            ));
         }
         resp["data"]["mid"]
             .as_i64()
@@ -407,23 +420,41 @@ impl super::BiliClient {
 }
 
 fn parse_liked_video_item(item: &Value) -> Option<LikedVideoItem> {
-    let owner = item.get("owner").or_else(|| item.get("author")).unwrap_or(&Value::Null);
+    let owner = item
+        .get("owner")
+        .or_else(|| item.get("author"))
+        .unwrap_or(&Value::Null);
     Some(LikedVideoItem {
-        aid: item.get("aid").or_else(|| item.get("id")).and_then(parse_i64_value)?,
-        bvid: item.get("bvid").and_then(Value::as_str).unwrap_or("").to_string(),
+        aid: item
+            .get("aid")
+            .or_else(|| item.get("id"))
+            .and_then(parse_i64_value)?,
+        bvid: item
+            .get("bvid")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
         cid: item
             .get("cid")
             .or_else(|| item.get("first_cid"))
             .and_then(parse_i64_value)
             .unwrap_or(0),
-        title: item.get("title").and_then(Value::as_str).unwrap_or("").to_string(),
+        title: item
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
         cover: item
             .get("pic")
             .or_else(|| item.get("cover"))
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
-        duration: item.get("duration").and_then(parse_i64_value).unwrap_or(0).max(0) as u64,
+        duration: item
+            .get("duration")
+            .and_then(parse_i64_value)
+            .unwrap_or(0)
+            .max(0) as u64,
         pubdate: item
             .get("pubdate")
             .or_else(|| item.get("ctime"))
@@ -468,5 +499,9 @@ fn parse_i64_value(value: &Value) -> Option<i64> {
     value
         .as_i64()
         .or_else(|| value.as_u64().and_then(|number| i64::try_from(number).ok()))
-        .or_else(|| value.as_str().and_then(|text| text.trim().parse::<i64>().ok()))
+        .or_else(|| {
+            value
+                .as_str()
+                .and_then(|text| text.trim().parse::<i64>().ok())
+        })
 }

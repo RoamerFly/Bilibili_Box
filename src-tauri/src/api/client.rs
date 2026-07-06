@@ -55,11 +55,9 @@ impl BiliClient {
     pub fn reload_client(&self) -> Result<(), String> {
         let shared_cookie_jar = Arc::new(Jar::default());
         *self.shared_cookie_jar.write() = shared_cookie_jar.clone();
-        *self.api_client.write() =
-            Self::create_api_client(&self.app, shared_cookie_jar.clone())?;
+        *self.api_client.write() = Self::create_api_client(&self.app, shared_cookie_jar.clone())?;
         *self.action_client.write() = Self::create_action_client(&self.app)?;
-        *self.media_client.write() =
-            Self::create_media_client(&self.app, shared_cookie_jar)?;
+        *self.media_client.write() = Self::create_media_client(&self.app, shared_cookie_jar)?;
         *self.content_length_client.write() = Self::create_content_length_client(&self.app)?;
         Ok(())
     }
@@ -76,6 +74,7 @@ impl BiliClient {
         self.media_client.read().clone()
     }
 
+    #[allow(dead_code)]
     pub fn content_length_client(&self) -> Client {
         self.content_length_client.read().clone()
     }
@@ -125,8 +124,7 @@ impl BiliClient {
         let url: reqwest::Url = url.parse().ok()?;
         let cookies = self.shared_cookie_jar.read().cookies(&url)?;
         let cookie_str = cookies.to_str().ok()?;
-        crate::api::video::extract_cookie_value(cookie_str, name)
-            .filter(|v| !v.is_empty())
+        crate::api::video::extract_cookie_value(cookie_str, name).filter(|v| !v.is_empty())
     }
 
     fn get_jar_cookie_header(&self, url: &str) -> String {
@@ -172,6 +170,14 @@ impl BiliClient {
             .header("accept-language", ACCEPT_LANGUAGE)
             .header("cache-control", "no-cache")
             .header("pragma", "no-cache")
+            .header("sec-ch-ua", "\"Chromium\";v=\"136\", \"Google Chrome\";v=\"136\", \"Not.A/Brand\";v=\"99\"")
+            .header("sec-ch-ua-mobile", "?0")
+            .header("sec-ch-ua-platform", "\"Windows\"")
+            .header("sec-fetch-dest", "document")
+            .header("sec-fetch-mode", "navigate")
+            .header("sec-fetch-site", "none")
+            .header("sec-fetch-user", "?1")
+            .header("upgrade-insecure-requests", "1")
             .send()
             .await
             .map_err(|e| format!("预热首页失败: {}", e))?;
@@ -190,6 +196,14 @@ impl BiliClient {
                 .header("accept-language", ACCEPT_LANGUAGE)
                 .header("cache-control", "no-cache")
                 .header("pragma", "no-cache")
+                .header("sec-ch-ua", "\"Chromium\";v=\"136\", \"Google Chrome\";v=\"136\", \"Not.A/Brand\";v=\"99\"")
+                .header("sec-ch-ua-mobile", "?0")
+                .header("sec-ch-ua-platform", "\"Windows\"")
+                .header("sec-fetch-dest", "document")
+                .header("sec-fetch-mode", "navigate")
+                .header("sec-fetch-site", "same-origin")
+                .header("sec-fetch-user", "?1")
+                .header("upgrade-insecure-requests", "1")
                 .send()
                 .await
                 .map_err(|e| format!("预热搜索页失败: {}", e))?;
@@ -226,10 +240,16 @@ impl BiliClient {
                 ));
             }
 
-            if let Some(buvid3) = resp["data"]["b_3"].as_str().filter(|value| !value.is_empty()) {
+            if let Some(buvid3) = resp["data"]["b_3"]
+                .as_str()
+                .filter(|value| !value.is_empty())
+            {
                 self.add_runtime_cookie(&bili_url, "buvid3", buvid3, Some(31_536_000));
             }
-            if let Some(buvid4) = resp["data"]["b_4"].as_str().filter(|value| !value.is_empty()) {
+            if let Some(buvid4) = resp["data"]["b_4"]
+                .as_str()
+                .filter(|value| !value.is_empty())
+            {
                 self.add_runtime_cookie(&bili_url, "buvid4", buvid4, Some(31_536_000));
             }
         }
@@ -270,14 +290,32 @@ impl BiliClient {
         );
     }
 
+    pub fn merge_cookies(&self, url: &Url, cookies_str: &str) {
+        for cookie in cookies_str.split(';') {
+            let cookie = cookie.trim();
+            if !cookie.is_empty() {
+                self.shared_cookie_jar.read().add_cookie_str(
+                    &format!("{cookie}; Domain=.bilibili.com; Path=/"),
+                    url,
+                );
+            }
+        }
+        if let Err(err) = self.persist_runtime_cookies() {
+            log::warn!("保存合并后的 Cookie 失败: {}", err);
+        }
+    }
+
     async fn ensure_bili_ticket(&self, bili_url: &Url) -> Result<(), String> {
         let ts = chrono::Utc::now().timestamp();
         let mut mac = HmacSha256::new_from_slice(b"XgwSnGZ1p")
             .map_err(|e| format!("初始化 bili_ticket 签名失败: {e}"))?;
         mac.update(format!("ts{ts}").as_bytes());
         let hexsign = bytes_to_hex(&mac.finalize().into_bytes());
-        let csrf = cookie_value(&self.get_cookie_for_url("https://api.bilibili.com/"), "bili_jct")
-            .unwrap_or_default();
+        let csrf = cookie_value(
+            &self.get_cookie_for_url("https://api.bilibili.com/"),
+            "bili_jct",
+        )
+        .unwrap_or_default();
         let endpoint = "https://api.bilibili.com/bapis/bilibili.api.ticket.v1.Ticket/GenWebTicket";
         let response = self
             .api_client()
@@ -327,7 +365,9 @@ impl BiliClient {
         if runtime_cookie.trim().is_empty() {
             return Ok(());
         }
-        let config_state = self.app.state::<std::sync::Arc<parking_lot::RwLock<Config>>>();
+        let config_state = self
+            .app
+            .state::<std::sync::Arc<parking_lot::RwLock<Config>>>();
         let mut config = config_state.write();
         let base_cookie = if config.cookie.trim().is_empty() && !config.sessdata.trim().is_empty() {
             format!("SESSDATA={}", config.sessdata.trim())
@@ -500,7 +540,10 @@ fn deduplicate_cookie_names(cookie: &str) -> String {
         if name.is_empty() {
             continue;
         }
-        if names.iter().any(|existing| existing.eq_ignore_ascii_case(name)) {
+        if names
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(name))
+        {
             continue;
         }
         names.push(name.to_string());
@@ -575,7 +618,11 @@ fn generate_bili_uuid() -> String {
     while suffix.len() < 5 {
         suffix.push('0');
     }
-    format!("{}{}infoc", Uuid::new_v4().to_string().to_uppercase(), suffix)
+    format!(
+        "{}{}infoc",
+        Uuid::new_v4().to_string().to_uppercase(),
+        suffix
+    )
 }
 
 fn generate_b_lsid() -> String {

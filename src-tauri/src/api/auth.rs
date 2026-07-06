@@ -42,6 +42,8 @@ pub struct UserInfo {
     pub face: String,
     pub mid: i64,
     pub uname: String,
+    #[serde(default)]
+    pub login_time: Option<String>,
     pub level_info: LevelInfo,
     pub vip: VipInfo,
     pub wbi_img: WbiImg,
@@ -260,7 +262,11 @@ fn normalize_cookie_header(cookie: &str) -> String {
             .split_once('=')
             .map(|(name, _)| name.trim())
             .unwrap_or(trimmed);
-        if name.is_empty() || names.iter().any(|existing| existing.eq_ignore_ascii_case(name)) {
+        if name.is_empty()
+            || names
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(name))
+        {
             continue;
         }
         names.push(name.to_string());

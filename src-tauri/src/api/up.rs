@@ -852,7 +852,11 @@ fn parse_i64_value(value: &Value) -> Option<i64> {
 }
 
 fn value_to_id_string(value: &Value) -> Option<String> {
-    if let Some(text) = value.as_str().map(str::trim).filter(|text| !text.is_empty()) {
+    if let Some(text) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
         return Some(text.to_string());
     }
     value

@@ -659,12 +659,20 @@ fn clamp_range_header(range: Option<&str>, default_chunk_size: u64, max_chunk_si
 }
 
 fn build_text_response(status: StatusCode, body: String) -> Response<Cow<'static, [u8]>> {
-    Response::builder()
+    match Response::builder()
         .status(status)
         .header(CONTENT_TYPE, "text/plain; charset=utf-8")
         .header("Access-Control-Allow-Origin", "*")
-        .body(Cow::Owned(body.into_bytes()))
-        .expect("failed to build text response")
+        .body(Cow::Owned(body.clone().into_bytes()))
+    {
+        Ok(response) => response,
+        Err(err) => {
+            log::error!("failed to build text response: {err}");
+            let mut response = Response::new(Cow::Owned(body.into_bytes()));
+            *response.status_mut() = status;
+            response
+        }
+    }
 }
 
 fn summarize_url_host(url: &str) -> String {

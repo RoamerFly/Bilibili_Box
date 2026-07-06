@@ -30,6 +30,7 @@ interface UserInfo {
   is_login?: boolean;
   uname: string;
   face?: string;
+  login_time?: string | null;
   [key: string]: unknown;
 }
 
@@ -43,6 +44,7 @@ export function AppShell() {
   const previousViewRef = useRef(currentView);
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [noticeText, setNoticeText] = useState("正在实现中，敬请期待");
+  const [accountViewVersion, setAccountViewVersion] = useState(0);
 
   // 启用 config watch - 监听 sessdata 变化自动获取/清除用户信息
   useConfigWatch();
@@ -81,7 +83,7 @@ export function AppShell() {
             setUserInfo({
               username: savedUser.uname,
               avatar: savedUser.face || "",
-              loginTime: "--",
+              loginTime: savedUser.login_time || "--",
               deviceName: "Windows 桌面端",
             });
           }
@@ -109,6 +111,15 @@ export function AppShell() {
     };
   }, []);
 
+  useEffect(() => {
+    const handleAccountSwitched = () => {
+      setAccountViewVersion((version) => version + 1);
+      scrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
+    };
+    window.addEventListener("bilibili-box:account-switched", handleAccountSwitched);
+    return () => window.removeEventListener("bilibili-box:account-switched", handleAccountSwitched);
+  }, []);
+
   return (
     <div className="bb-app-frame flex h-screen w-screen overflow-hidden">
       {/* Sidebar */}
@@ -127,7 +138,7 @@ export function AppShell() {
           transition={{ type: "spring", stiffness: 350, damping: 30 }}
         >
           <AnimatePresence initial={false} mode="wait">
-            {renderView(currentView)}
+            {renderView(currentView, accountViewVersion)}
           </AnimatePresence>
         </motion.div>
         <div className="absolute bottom-0 left-0 z-30" style={{ right: 12 }}>
@@ -218,7 +229,7 @@ function WindowControls() {
   );
 }
 
-function renderView(view: string) {
+function renderView(view: string, accountViewVersion: number) {
   const variants = {
     initial: { opacity: 0, y: 8, scale: 0.985 },
     animate: { opacity: 1, y: 0, scale: 1 },
@@ -230,83 +241,84 @@ function renderView(view: string) {
     ease: easeConfig,
     opacity: { duration: 0.15 },
   };
+  const viewKey = (name: string) => `${name}:${accountViewVersion}`;
 
   switch (view) {
     case "home":
       return (
-        <motion.div key="home" {...variants} transition={transition}>
+        <motion.div key={viewKey("home")} {...variants} transition={transition}>
           <HomeView />
         </motion.div>
       );
     case "recommend":
       return (
-        <motion.div key="recommend" {...variants} transition={transition}>
+        <motion.div key={viewKey("recommend")} {...variants} transition={transition}>
           <RecommendView />
         </motion.div>
       );
     case "search":
       return (
-        <motion.div key="search" {...variants} transition={transition}>
+        <motion.div key={viewKey("search")} {...variants} transition={transition}>
           <SearchView />
         </motion.div>
       );
     case "player":
       return (
-        <motion.div key="player" {...variants} transition={transition}>
+        <motion.div key={viewKey("player")} {...variants} transition={transition}>
           <PlayerView />
         </motion.div>
       );
     case "favorites":
       return (
-        <motion.div key="favorites" {...variants} transition={transition}>
+        <motion.div key={viewKey("favorites")} {...variants} transition={transition}>
           <FavoritesView />
         </motion.div>
       );
     case "watchlater":
       return (
-        <motion.div key="watchlater" {...variants} transition={transition}>
+        <motion.div key={viewKey("watchlater")} {...variants} transition={transition}>
           <WatchLaterView />
         </motion.div>
       );
     case "history":
       return (
-        <motion.div key="history" {...variants} transition={transition}>
+        <motion.div key={viewKey("history")} {...variants} transition={transition}>
           <HistoryView />
         </motion.div>
       );
     case "bangumi":
       return (
-        <motion.div key="bangumi" {...variants} transition={transition}>
+        <motion.div key={viewKey("bangumi")} {...variants} transition={transition}>
           <BangumiView />
         </motion.div>
       );
     case "up":
       return (
-        <motion.div key="up" {...variants} transition={transition}>
+        <motion.div key={viewKey("up")} {...variants} transition={transition}>
           <UpProfileView />
         </motion.div>
       );
     case "content":
       return (
-        <motion.div key="content" {...variants} transition={transition}>
+        <motion.div key={viewKey("content")} {...variants} transition={transition}>
           <ContentDetailView />
         </motion.div>
       );
     case "downloads":
       return (
-        <motion.div key="downloads" {...variants} transition={transition}>
+        <motion.div key={viewKey("downloads")} {...variants} transition={transition}>
           <DownloadsView />
         </motion.div>
       );
     case "settings":
       return (
-        <motion.div key="settings" {...variants} transition={transition}>
+        <motion.div key={viewKey("settings")} {...variants} transition={transition}>
           <SettingsView />
         </motion.div>
       );
     default:
       return (
-        <motion.div key="home" {...variants} transition={transition}>
+        <motion.div key={viewKey("home")} {...variants} transition={transition}>
           <HomeView />
         </motion.div>
       );

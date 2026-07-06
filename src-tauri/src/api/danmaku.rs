@@ -118,12 +118,14 @@ pub struct ProtoDmSegReply {
 }
 
 #[derive(Clone, PartialEq, Message)]
+#[allow(dead_code)]
 pub struct ProtoDmWebViewReply {
     #[prost(message, optional, tag = "1")]
     pub dm_sge: Option<ProtoDmSegConfig>,
 }
 
 #[derive(Clone, PartialEq, Message)]
+#[allow(dead_code)]
 pub struct ProtoDmSegConfig {
     #[prost(int64, tag = "1")]
     pub page_size: i64,
@@ -162,6 +164,7 @@ impl super::BiliClient {
     }
 
     /// 获取弹幕分段信息
+    #[allow(dead_code)]
     pub async fn get_danmaku_view(
         &self,
         _aid: i64,

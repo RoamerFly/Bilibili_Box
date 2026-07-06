@@ -57,10 +57,13 @@ pub fn sign_params(params: &mut std::collections::HashMap<String, String>, mixin
     let query: String = sorted_keys
         .iter()
         .filter(|k| !k.contains("w_rid"))
-        .map(|k| {
-            url::form_urlencoded::Serializer::new(String::new())
-                .append_pair(k, params.get(*k).unwrap())
-                .finish()
+        .filter_map(|k| {
+            let value = params.get(*k)?;
+            Some(
+                url::form_urlencoded::Serializer::new(String::new())
+                    .append_pair(k, value)
+                    .finish(),
+            )
         })
         .collect::<Vec<_>>()
         .join("&");
@@ -132,10 +135,13 @@ impl super::BiliClient {
     /// 从 API 获取 WBI 密钥
     async fn fetch_wbi_keys(&self) -> Result<(String, String), String> {
         // 调用 Bilibili nav 接口获取 wbi_img 信息
+        let _ = self.ensure_buvid_cookie().await;
+        let endpoint = "https://api.bilibili.com/x/web-interface/nav";
         let response = self
             .api_client()
-            .get("https://api.bilibili.com/x/web-interface/nav")
-            .header("cookie", self.get_cookie())
+            .get(endpoint)
+            .header("cookie", self.get_cookie_for_url(endpoint))
+            .header("referer", "https://www.bilibili.com/")
             .send()
             .await
             .map_err(|e| format!("请求 WBI 密钥失败: {}", e))?;
@@ -148,20 +154,18 @@ impl super::BiliClient {
         let json: serde_json::Value =
             serde_json::from_str(&body).map_err(|e| format!("解析 WBI 密钥响应失败: {}", e))?;
 
-        // 检查返回码
-        let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
-        if code != 0 {
-            let message = json
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("未知错误");
-            return Err(format!("获取 WBI 密钥失败: {} (code: {})", message, code));
-        }
-
         // 提取 wbi_img
-        let wbi_img = json
-            .pointer("/data/wbi_img")
-            .ok_or_else(|| "响应中没有 wbi_img 字段".to_string())?;
+        let wbi_img = match json.pointer("/data/wbi_img") {
+            Some(wbi_img) => wbi_img,
+            None => {
+                let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
+                let message = json
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("未知错误");
+                return Err(format!("获取 WBI 密钥失败: {} (code: {})", message, code));
+            }
+        };
 
         let img_url = wbi_img
             .get("img_url")

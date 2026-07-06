@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   Clock,
@@ -105,6 +105,7 @@ export function WatchLaterView() {
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
   const openUpProfile = useAppStore((s) => s.openUpProfile);
+  const config = useAppStore((s) => s.config);
   const viewMode = useAppStore((s) => s.cardViewModes.watchlater ?? "list");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
   const { pageSize, cardScale, columns } = useCardLayout("watchlater", viewMode);
@@ -154,7 +155,7 @@ export function WatchLaterView() {
 
   useEffect(() => {
     void fetchWatchLater();
-  }, [fetchWatchLater]);
+  }, [fetchWatchLater, config?.sessdata]);
 
   const filteredItems = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();

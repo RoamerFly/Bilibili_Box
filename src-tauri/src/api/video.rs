@@ -246,6 +246,7 @@ pub struct SearchVideoOptions {
     pub duration: Option<String>,
     pub page: Option<i64>,
     pub page_size: Option<i64>,
+    pub search_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1003,7 +1004,29 @@ impl super::BiliClient {
         input: &str,
         options: SearchVideoOptions,
     ) -> Result<SearchResult, String> {
-        let input = input.trim();
+        let mut actual_input = input.trim().to_string();
+
+        if actual_input.contains("opus/") {
+            let re_opus = regex::Regex::new(r"opus/(\d+)").map_err(|e| format!("正则表达式错误: {}", e))?;
+            if let Some(captures) = re_opus.captures(&actual_input) {
+                let opus_id = captures[1].to_string();
+                if let Ok(resolved) = self.resolve_opus_to_bvid_or_cvid(&opus_id).await {
+                    actual_input = resolved;
+                }
+            }
+        } else if actual_input.contains("space.bilibili.com/") {
+            let re_space = regex::Regex::new(r"space\.bilibili\.com/(\d+)").map_err(|e| format!("正则表达式错误: {}", e))?;
+            if let Some(captures) = re_space.captures(&actual_input) {
+                actual_input = captures[1].to_string();
+            }
+        } else if actual_input.contains("live.bilibili.com/") {
+            let re_live = regex::Regex::new(r"live\.bilibili\.com/(\d+)").map_err(|e| format!("正则表达式错误: {}", e))?;
+            if let Some(captures) = re_live.captures(&actual_input) {
+                actual_input = captures[1].to_string();
+            }
+        }
+
+        let input = actual_input.as_str();
 
         let bvid = if input.starts_with("BV") || input.starts_with("bv") {
             input.to_string()
@@ -1011,10 +1034,29 @@ impl super::BiliClient {
             let aid = input[2..].parse::<i64>().map_err(|_| "无效的 AV 号")?;
             return self.search_by_aid(aid).await;
         } else if input.contains("bilibili.com") {
-            self.extract_bvid_from_url(input)?
-        } else if input.contains("ep") || input.contains("ss") {
-            return self.search_bangumi_from_url(input).await;
+            match self.extract_bvid_from_url(input) {
+                Ok(bvid) => bvid,
+                Err(_) => {
+                    if let Ok(res) = self.search_bangumi_from_url(input).await {
+                        return Ok(res);
+                    }
+                    if let Ok(res) = self.search_article_from_url(input).await {
+                        return Ok(res);
+                    }
+                    return self.search_by_keyword(input, &options).await;
+                }
+            }
         } else {
+            if (input.contains("ep") || input.contains("ss")) && input.len() < 20 {
+                if let Ok(res) = self.search_bangumi_from_url(input).await {
+                    return Ok(res);
+                }
+            }
+            if input.contains("cv") && input.len() < 30 {
+                if let Ok(res) = self.search_article_from_url(input).await {
+                    return Ok(res);
+                }
+            }
             return self.search_by_keyword(input, &options).await;
         };
 
@@ -1064,6 +1106,78 @@ impl super::BiliClient {
         }
 
         Err("无法从 URL 中提取番剧 ID".to_string())
+    }
+
+    async fn search_article_from_url(&self, url: &str) -> Result<SearchResult, String> {
+        let re_cv = regex::Regex::new(r"cv(\d+)").map_err(|e| format!("正则表达式错误: {}", e))?;
+
+        let id_str = if let Some(captures) = re_cv.captures(url) {
+            captures[1].to_string()
+        } else {
+            return Err("无法从 URL 中提取专栏 ID".to_string());
+        };
+
+        let article_id = id_str.parse::<i64>().map_err(|_| "无效的专栏 ID")?;
+        
+        // Fetch article detail
+        let article = self.get_article_detail(article_id).await?;
+        
+        let cover = article.images.first().map(|img| img.url.clone()).unwrap_or_default();
+        
+        let mut article_page = SearchPageInfo::default();
+        article_page.total = 1;
+        article_page.page = 1;
+        article_page.page_count = 1;
+        article_page.page_size = 1;
+
+        Ok(SearchResult::Aggregate(AggregateSearchResult {
+            keyword: url.to_string(),
+            videos: vec![],
+            bangumi: vec![],
+            films: vec![],
+            lives: vec![],
+            articles: vec![KeywordGenericSearchResult {
+                id: article.id.to_string(),
+                title: article.title,
+                cover,
+                description: article.summary,
+                url: format!("https://www.bilibili.com/read/cv{}", article.id),
+                author: article.author_name,
+                author_face: article.author_face,
+                mid: article.author_mid,
+                badge: "专栏".to_string(),
+                stats: vec![],
+            }],
+            users: vec![],
+            video_page: SearchPageInfo::default(),
+            bangumi_page: SearchPageInfo::default(),
+            film_page: SearchPageInfo::default(),
+            live_page: SearchPageInfo::default(),
+            article_page,
+            user_page: SearchPageInfo::default(),
+        }))
+    }
+
+    async fn resolve_opus_to_bvid_or_cvid(&self, opus_id: &str) -> Result<String, String> {
+        let url = format!("https://www.bilibili.com/opus/{}", opus_id);
+        let html = self
+            .request_bili_text(
+                self.api_client()
+                    .get(&url)
+                    .header("cookie", self.get_cookie_for_url(&url)),
+            )
+            .await?;
+        
+        let re_cv = regex::Regex::new(r"cv(\d+)").unwrap();
+        let re_bv = regex::Regex::new(r"BV[a-zA-Z0-9]+").unwrap();
+
+        if let Some(captures) = re_cv.captures(&html) {
+            return Ok(captures[0].to_string());
+        } else if let Some(captures) = re_bv.captures(&html) {
+            return Ok(captures[0].to_string());
+        }
+        
+        Err("无法在动态中找到视频或专栏".to_string())
     }
 
     async fn get_bangumi_by_ep(&self, ep_id: i64) -> Result<SearchResult, String> {
@@ -1141,7 +1255,10 @@ impl super::BiliClient {
             encoded_keyword, order, duration, pubtime_begin_s, pubtime_end_s
         );
 
-        let video_data = match self
+        let search_type_str = options.search_type.as_deref().unwrap_or("all");
+
+        let video_data = if search_type_str == "all" || search_type_str == "video" {
+            match self
             .request_search_value(apply_search_headers(
                 self.api_client()
                     .get("https://api.bilibili.com/x/web-interface/wbi/search/type")
@@ -1154,7 +1271,7 @@ impl super::BiliClient {
                     )
                     .header("origin", "https://search.bilibili.com"),
                 &search_referer,
-            ))
+            ), &search_referer)
             .await
         {
             Ok(data) => data,
@@ -1184,15 +1301,30 @@ impl super::BiliClient {
                         )
                         .header("origin", "https://search.bilibili.com"),
                     &search_referer,
-                ))
+                ), &search_referer)
                 .await
-                .map_err(|fallback_error| format!("{error}; fallback search/type: {fallback_error}"))?
+                .map_err(|fallback_error| {
+                    if fallback_error.contains("412") || fallback_error.contains("风控") || fallback_error.contains("椋庢帶") {
+                        format!("WIND_CONTROL_REQUIRED:{}", search_referer)
+                    } else {
+                        format!("{error}; fallback search/type: {fallback_error}")
+                    }
+                })?
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                if error.contains("412") || error.contains("风控") || error.contains("椋庢帶") {
+                    return Err(format!("WIND_CONTROL_REQUIRED:{}", search_referer));
+                }
+                return Err(error);
+            }
+        }
+        } else {
+            json!({ "result": [], "numResults": 0, "numPages": 1 })
         };
 
-        let bangumi_data = self
-            .request_search_value(
+        let bangumi_data = if search_type_str == "all" || search_type_str == "media_bangumi" {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            self.request_search_value(
                 apply_search_headers(
                     self.api_client()
                     .get("https://api.bilibili.com/x/web-interface/search/type")
@@ -1210,11 +1342,15 @@ impl super::BiliClient {
                     )
                     .header("origin", "https://search.bilibili.com"),
                     &search_referer,
-                ),
+                ), &search_referer
             )
-            .await?;
-        let film_data = self
-            .request_search_value(apply_search_headers(
+            .await?
+        } else {
+            json!({ "result": [], "numResults": 0, "numPages": 1 })
+        };
+        let film_data = if search_type_str == "all" || search_type_str == "media_ft" {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            self.request_search_value(apply_search_headers(
                 self.api_client()
                     .get("https://api.bilibili.com/x/web-interface/search/type")
                     .query(&[
@@ -1231,11 +1367,15 @@ impl super::BiliClient {
                     )
                     .header("origin", "https://search.bilibili.com"),
                 &search_referer,
-            ))
+            ), &search_referer)
             .await
-            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }));
-        let live_data = self
-            .request_search_value(apply_search_headers(
+            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }))
+        } else {
+            json!({ "result": [], "numResults": 0, "numPages": 1 })
+        };
+        let live_data = if search_type_str == "all" || search_type_str == "live" {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            self.request_search_value(apply_search_headers(
                 self.api_client()
                     .get("https://api.bilibili.com/x/web-interface/search/type")
                     .query(&[
@@ -1252,11 +1392,15 @@ impl super::BiliClient {
                     )
                     .header("origin", "https://search.bilibili.com"),
                 &search_referer,
-            ))
+            ), &search_referer)
             .await
-            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }));
-        let article_data = self
-            .request_search_value(apply_search_headers(
+            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }))
+        } else {
+            json!({ "result": [], "numResults": 0, "numPages": 1 })
+        };
+        let article_data = if search_type_str == "all" || search_type_str == "article" {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            self.request_search_value(apply_search_headers(
                 self.api_client()
                     .get("https://api.bilibili.com/x/web-interface/search/type")
                     .query(&[
@@ -1273,11 +1417,15 @@ impl super::BiliClient {
                     )
                     .header("origin", "https://search.bilibili.com"),
                 &search_referer,
-            ))
+            ), &search_referer)
             .await
-            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }));
-        let user_data = self
-            .request_search_value(apply_search_headers(
+            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }))
+        } else {
+            json!({ "result": [], "numResults": 0, "numPages": 1 })
+        };
+        let user_data = if search_type_str == "all" || search_type_str == "bili_user" {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            self.request_search_value(apply_search_headers(
                 self.api_client()
                     .get("https://api.bilibili.com/x/web-interface/search/type")
                     .query(&[
@@ -1294,9 +1442,12 @@ impl super::BiliClient {
                     )
                     .header("origin", "https://search.bilibili.com"),
                 &search_referer,
-            ))
+            ), &search_referer)
             .await
-            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }));
+            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }))
+        } else {
+            json!({ "result": [], "numResults": 0, "numPages": 1 })
+        };
 
         Ok(SearchResult::Aggregate(AggregateSearchResult {
             keyword: keyword.to_string(),
@@ -1507,7 +1658,7 @@ impl super::BiliClient {
         )
     }
 
-    async fn request_search_value(&self, request: RequestBuilder) -> Result<Value, String> {
+    async fn request_search_value(&self, request: RequestBuilder, referer: &str) -> Result<Value, String> {
         let retry_request = request.try_clone();
         let response = request
             .send()
@@ -1535,7 +1686,7 @@ impl super::BiliClient {
                     .map_err(|e| format!("读取重试响应失败: {}", e))?;
 
                 if retry_status == StatusCode::PRECONDITION_FAILED {
-                    return Err("触发 Bilibili 风控(412)。已自动预热并重试一次，但仍被拦截。建议稍后重试，或先使用浏览器登录完成站点校验。".to_string());
+                    return Err(format!("WIND_CONTROL_REQUIRED:{}", referer));
                 }
 
                 if retry_status != StatusCode::OK {
@@ -1557,7 +1708,7 @@ impl super::BiliClient {
                     .ok_or_else(|| "响应中没有 data 字段".to_string());
             }
 
-            return Err("触发 Bilibili 风控(412)，请求被站点拦截。建议稍后重试，或先使用浏览器登录完成站点校验。".to_string());
+            return Err(format!("WIND_CONTROL_REQUIRED:{}", referer));
         }
 
         if status != StatusCode::OK {
@@ -1577,6 +1728,24 @@ impl super::BiliClient {
         bili_resp
             .data
             .ok_or_else(|| "响应中没有 data 字段".to_string())
+    }
+
+    async fn request_bili_text(&self, request: RequestBuilder) -> Result<String, String> {
+        let response = request
+            .send()
+            .await
+            .map_err(|e| format!("请求失败: {}", e))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|e| format!("读取响应失败: {}", e))?;
+
+        if status != StatusCode::OK {
+            return Err(format!("意外的状态码({}): {}", status, body));
+        }
+
+        Ok(body)
     }
 
     async fn request_bili_value(&self, request: RequestBuilder) -> Result<Value, String> {

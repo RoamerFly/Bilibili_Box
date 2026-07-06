@@ -80,7 +80,7 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 
 ![Home Preview](./docs/screenshots/home.png)
 
-### 搜索视频
+### 搜索内容
 
 ![Search Preview](./docs/screenshots/search.png)
 
@@ -88,7 +88,7 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 
 ![Recommend Preview](./docs/screenshots/recommend.png)
 
-![Dynamic Preview](./docs/screenshots/dynamic.png))
+![Dynamic Preview](./docs/screenshots/dynamic.png)
 
 ### 我的点赞/收藏
 
@@ -100,8 +100,6 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 
 ![Toplay Preview](./docs/screenshots/toplay.png)
 
-
-
 ### 播放页面
 
 ![Player Preview](./docs/screenshots/player.png)
@@ -112,13 +110,25 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 
 ### 观看历史
 
-![Downloads Preview](./docs/screenshots/history.png)
+![History Preview](./docs/screenshots/history.png)
 
 ### 追番追剧
 
-![Downloads Preview](./docs/screenshots/zfzj1.png)
+![Bangumi Preview](./docs/screenshots/zfzj1.png)
 
-![Downloads Preview](./docs/screenshots/zfzj2.png)
+![Bangumi Preview](./docs/screenshots/zfzj2.png)
+
+### 设置
+
+![Settings Preview](./docs/screenshots/settings.png)
+
+### 专栏
+
+![Column Preview](./docs/screenshots/column.png)
+
+### 直播
+
+![Live Preview](./docs/screenshots/live.png)
 
 ## 技术栈
 

@@ -157,12 +157,7 @@ impl super::BiliClient {
         Ok(parse_comment_item(reply))
     }
 
-    pub async fn delete_comment(
-        &self,
-        oid: String,
-        type_id: i64,
-        rpid: i64,
-    ) -> Result<(), String> {
+    pub async fn delete_comment(&self, oid: String, type_id: i64, rpid: i64) -> Result<(), String> {
         let oid = normalize_comment_oid(oid)?;
         if type_id <= 0 || rpid <= 0 {
             return Err("无效的评论删除目标".to_string());

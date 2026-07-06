@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   Download,
@@ -157,6 +157,7 @@ export function HistoryView() {
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const openPlayer = useAppStore((s) => s.openPlayer);
   const openUpProfile = useAppStore((s) => s.openUpProfile);
+  const config = useAppStore((s) => s.config);
   const viewMode = useAppStore((s) => s.cardViewModes.history ?? "list");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
   const { pageSize, cardScale, columns } = useCardLayout("history", viewMode);
@@ -254,7 +255,7 @@ export function HistoryView() {
     setCurrentPage(1);
     setLoadedPages(0);
     void fetchHistory(1, "replace");
-  }, [fetchHistory]);
+  }, [fetchHistory, config?.sessdata]);
 
   const handleRefresh = async () => {
     setRefreshing(true);

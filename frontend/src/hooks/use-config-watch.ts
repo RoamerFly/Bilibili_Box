@@ -8,6 +8,7 @@ interface UserInfo {
   uname: string;
   mid: number;
   face: string;
+  login_time?: string | null;
 }
 
 /**
@@ -43,31 +44,49 @@ export function useConfigWatch() {
       return;
     }
 
-    // sessdata 不为空 -> 获取用户信息
+    // sessdata 不为空 -> 读取当前 profile 下的本地用户信息
     if (currentSessdata !== "") {
-      console.log("[ConfigWatch] SESSDATA 变化，获取用户信息...");
+      console.log("[ConfigWatch] SESSDATA 变化，读取当前账号信息...");
 
-      invoke<UserInfo>("get_user_info", { sessdata: currentSessdata })
+      const isCurrentSessdata = () =>
+        (useAppStore.getState().config?.sessdata || "") === currentSessdata;
+
+      const applyUserInfo = (userInfo: UserInfo, loginTime = userInfo.login_time || "--") => {
+        if (!isCurrentSessdata()) return;
+        setUserInfo({
+          username: userInfo.uname,
+          avatar: userInfo.face,
+          loginTime,
+          deviceName: "Windows 桌面端",
+        });
+        console.log("[ConfigWatch] 当前账号信息已更新:", userInfo.uname);
+      };
+
+      invoke<UserInfo | null>("get_saved_user_info")
+        .then((savedUserInfo) => {
+          if (savedUserInfo && (savedUserInfo.isLogin ?? savedUserInfo.is_login)) {
+            applyUserInfo(savedUserInfo);
+            return null;
+          }
+
+          return invoke<UserInfo>("get_user_info", { sessdata: currentSessdata });
+        })
         .then((userInfo) => {
+          if (!userInfo) return;
           if (userInfo.isLogin ?? userInfo.is_login) {
             const now = new Date();
             const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-
-            setUserInfo({
-              username: userInfo.uname,
-              avatar: userInfo.face,
-              loginTime: timeStr,
-              deviceName: "Windows 桌面端",
-            });
-            console.log("[ConfigWatch] 获取用户信息成功:", userInfo.uname);
-          } else {
+            applyUserInfo(userInfo, timeStr);
+          } else if (isCurrentSessdata()) {
+            console.warn("[ConfigWatch] 用户信息不可用，保留当前账号配置");
             setUserInfo(null);
-            console.warn("[ConfigWatch] 用户未登录");
           }
         })
         .catch((err) => {
           console.error("[ConfigWatch] 获取用户信息失败:", err);
-          setUserInfo(null);
+          if (isCurrentSessdata()) {
+            setUserInfo(null);
+          }
         });
     }
   }, [config?.sessdata, setUserInfo]);
