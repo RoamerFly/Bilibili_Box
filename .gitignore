@@ -40,3 +40,6 @@ page/
 /check_prompt*
 problems.md
 player-debug.log
+.codex-tmp/
+pub_log2.txt
+src-plugin/target/
