@@ -1460,6 +1460,7 @@ pub async fn verify_search_wind_control(
         .inner_size(800.0, 600.0)
         .resizable(true)
         .focused(true)
+        .incognito(true)
         .build()
         .map_err(|e| format!("无法打开风控验证窗口: {e}"))?;
 
@@ -1491,8 +1492,9 @@ pub async fn verify_search_wind_control(
                 last_cookies = bili_cookies.join("; ");
             }
 
-            // 每 3 秒检测一次搜索接口是否恢复正常
-            if check_timer.elapsed() >= Duration::from_secs(3) && !last_cookies.is_empty() {
+            // 在无痕模式下，用户需要重新登录来获取全新的 Cookie 以绕过风控。
+            // 因此只有在检测到用户已经成功登录（包含 SESSDATA）后，才检测搜索接口是否正常。
+            if check_timer.elapsed() >= Duration::from_secs(3) && last_cookies.contains("SESSDATA=") {
                 check_timer = Instant::now();
                 let req = bili_client.api_client()
                     .get("https://api.bilibili.com/x/web-interface/wbi/search/type")
@@ -1505,7 +1507,7 @@ pub async fn verify_search_wind_control(
                     if res.status() == reqwest::StatusCode::OK {
                         if let Ok(body) = res.text().await {
                             if body.contains("\"code\":0") && body.contains("\"data\":") {
-                                // 验证通过，自动关闭窗口
+                                // 验证并登录通过，自动关闭窗口
                                 let _ = window.close();
                                 break;
                             }
@@ -1525,16 +1527,14 @@ pub async fn verify_search_wind_control(
     let bili_url = Url::parse("https://www.bilibili.com/").unwrap();
     bili_client.merge_cookies(&bili_url, &last_cookies);
 
-    // 如果包含 SESSDATA，意味着用户可能在里面进行了登录。为了保险起见，将新的 Cookie 写回到配置中。
-    if last_cookies.contains("SESSDATA=") {
-        let app_state = app.state::<Arc<RwLock<Config>>>();
+    // 获取最新的合并后完整 Cookie (优先使用动态获取的新 Cookie，并包含原有未过期的本地 Cookie)
+    let latest_full_cookie = bili_client.get_cookie_for_url("https://www.bilibili.com/");
+    
+    // 直接写入本地配置文件，覆盖用户的本地 Cookie 数据，使风控凭证等能够持久化
+    let app_state = app.state::<Arc<RwLock<Config>>>();
+    {
         let mut config_write = app_state.write();
-        config_write.cookie = last_cookies.clone();
-        
-        if let Some(sessdata) = last_cookies.split(';').find(|s| s.trim().starts_with("SESSDATA=")) {
-            config_write.sessdata = sessdata.trim().replace("SESSDATA=", "");
-        }
-        
+        config_write.cookie = latest_full_cookie;
         let _ = config_write.save(&app);
     }
 

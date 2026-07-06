@@ -2013,17 +2013,106 @@ fn search_pubtime_range(value: Option<&str>) -> (String, String) {
     (begin_ts.to_string(), end_ts.to_string())
 }
 
-fn apply_search_headers(request: RequestBuilder, referer: &str) -> RequestBuilder {
-    request
+pub struct BrowserIdentity {
+    pub user_agent: &'static str,
+    pub sec_ch_ua: &'static str,
+    pub sec_ch_ua_platform: &'static str,
+}
+
+pub fn get_random_browser_identity() -> BrowserIdentity {
+    const IDENTITIES: &[BrowserIdentity] = &[
+        // Windows Chrome 136
+        BrowserIdentity {
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+            sec_ch_ua: "\"Chromium\";v=\"136\", \"Google Chrome\";v=\"136\", \"Not.A/Brand\";v=\"99\"",
+            sec_ch_ua_platform: "\"Windows\"",
+        },
+        // Windows Chrome 135
+        BrowserIdentity {
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+            sec_ch_ua: "\"Chromium\";v=\"135\", \"Google Chrome\";v=\"135\", \"Not.A/Brand\";v=\"99\"",
+            sec_ch_ua_platform: "\"Windows\"",
+        },
+        // Windows Edge 136
+        BrowserIdentity {
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0",
+            sec_ch_ua: "\"Chromium\";v=\"136\", \"Microsoft Edge\";v=\"136\", \"Not.A/Brand\";v=\"99\"",
+            sec_ch_ua_platform: "\"Windows\"",
+        },
+        // Windows Edge 135
+        BrowserIdentity {
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0",
+            sec_ch_ua: "\"Chromium\";v=\"135\", \"Microsoft Edge\";v=\"135\", \"Not.A/Brand\";v=\"99\"",
+            sec_ch_ua_platform: "\"Windows\"",
+        },
+        // macOS Chrome 136
+        BrowserIdentity {
+            user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+            sec_ch_ua: "\"Chromium\";v=\"136\", \"Google Chrome\";v=\"136\", \"Not.A/Brand\";v=\"99\"",
+            sec_ch_ua_platform: "\"macOS\"",
+        },
+        // macOS Safari 17.4
+        BrowserIdentity {
+            user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+            sec_ch_ua: "",
+            sec_ch_ua_platform: "\"macOS\"",
+        },
+        // macOS Safari 17.3
+        BrowserIdentity {
+            user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Safari/605.1.15",
+            sec_ch_ua: "",
+            sec_ch_ua_platform: "\"macOS\"",
+        },
+        // Linux Chrome 136
+        BrowserIdentity {
+            user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+            sec_ch_ua: "\"Chromium\";v=\"136\", \"Google Chrome\";v=\"136\", \"Not.A/Brand\";v=\"99\"",
+            sec_ch_ua_platform: "\"Linux\"",
+        },
+        // Linux Firefox 124
+        BrowserIdentity {
+            user_agent: "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0",
+            sec_ch_ua: "",
+            sec_ch_ua_platform: "\"Linux\"",
+        },
+        // Windows Firefox 124
+        BrowserIdentity {
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
+            sec_ch_ua: "",
+            sec_ch_ua_platform: "\"Windows\"",
+        },
+    ];
+    let start = std::time::SystemTime::now();
+    let since_the_epoch = start.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let nanos = since_the_epoch.subsec_nanos() as usize;
+    let idx = nanos % IDENTITIES.len();
+    BrowserIdentity {
+        user_agent: IDENTITIES[idx].user_agent,
+        sec_ch_ua: IDENTITIES[idx].sec_ch_ua,
+        sec_ch_ua_platform: IDENTITIES[idx].sec_ch_ua_platform,
+    }
+}
+
+fn apply_search_headers(mut request: RequestBuilder, referer: &str) -> RequestBuilder {
+    let identity = get_random_browser_identity();
+    request = request
         .header("accept", "application/json, text/plain, */*")
         .header("accept-language", "zh-CN,zh;q=0.9,en;q=0.8")
         .header("referer", referer)
-        .header("sec-ch-ua", "\"Chromium\";v=\"136\", \"Google Chrome\";v=\"136\", \"Not.A/Brand\";v=\"99\"")
+        .header("user-agent", identity.user_agent)
         .header("sec-ch-ua-mobile", "?0")
-        .header("sec-ch-ua-platform", "\"Windows\"")
         .header("sec-fetch-dest", "empty")
         .header("sec-fetch-mode", "cors")
-        .header("sec-fetch-site", "same-site")
+        .header("sec-fetch-site", "same-site");
+
+    if !identity.sec_ch_ua.is_empty() {
+        request = request.header("sec-ch-ua", identity.sec_ch_ua);
+    }
+    if !identity.sec_ch_ua_platform.is_empty() {
+        request = request.header("sec-ch-ua-platform", identity.sec_ch_ua_platform);
+    }
+
+    request
 }
 
 fn local_day_timestamp(date: chrono::NaiveDate, hour: u32, minute: u32, second: u32) -> i64 {

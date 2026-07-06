@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAppStore } from "@/stores/app-store";
 import {
   X,
@@ -23,7 +23,8 @@ import { openExternalUrl } from "@/lib/open-external";
 
 interface LoginDialogProps {
   open: boolean;
-  onClose: () => void;
+  onClose: (success?: boolean) => void;
+  forceNewLogin?: boolean;
 }
 
 type LoginMode = "qrcode" | "cookie" | "browser";
@@ -109,7 +110,7 @@ function extractSessdataFromQrcodeStatus(status: QrcodeStatusResponse): string |
   return urlParts[1].split("&")[0] || null;
 }
 
-export function LoginDialog({ open, onClose }: LoginDialogProps) {
+export function LoginDialog({ open, onClose, forceNewLogin }: LoginDialogProps) {
   const [mode, setMode] = useState<LoginMode>("qrcode");
   const [qrcodeUrl, setQrcodeUrl] = useState<string>("");
   const [qrcodeKey, setQrcodeKey] = useState<string>("");
@@ -130,9 +131,11 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
   const setConfig = useAppStore((s) => s.setConfig);
   const setUserInfo = useAppStore((s) => s.setUserInfo);
   const resetAccountScopedState = useAppStore((s) => s.resetAccountScopedState);
-  const isLoggedIn = userInfo !== null;
+  const actualIsLoggedIn = userInfo !== null;
+  const isLoggedIn = !forceNewLogin && actualIsLoggedIn;
   const username = userInfo?.username || "";
-  const shouldShowSavedAccounts = open && !isLoggedIn && !addingAccount && accountsLoaded && accounts.length > 0;
+  const shouldShowSavedAccounts = open && !isLoggedIn && !forceNewLogin && !addingAccount && accountsLoaded && accounts.length > 0;
+
 
   const loadAccounts = useCallback(async () => {
     setAccountsLoaded(false);
@@ -180,9 +183,9 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
     notifyAccountChanged();
   }, [loadAccounts, notifyAccountChanged, resetAccountScopedState, setConfig, setUserInfo]);
 
-  const handleClose = useCallback(() => {
+  const handleClose = useCallback((success?: boolean | any) => {
     setAddingAccount(false);
-    onClose();
+    onClose(success === true);
   }, [onClose]);
 
   useEffect(() => {
@@ -230,7 +233,7 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
             console.log("[Login] 提取到 SESSDATA:", sessdata.substring(0, 20) + "...");
             await completeLogin(sessdata, status.cookie);
             setPolling(false);
-            handleClose();
+            handleClose(true);
           } catch (err) {
             console.error("[Login] 保存 SESSDATA 失败:", err);
             setError(String(err));
@@ -287,7 +290,7 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
       const sessdata = extractSessdata(cookieInput);
       const cookie = cookieInput.includes("=") ? cookieInput.trim() : `SESSDATA=${sessdata}`;
       await completeLogin(sessdata, cookie);
-      handleClose();
+      handleClose(true);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -307,7 +310,8 @@ export function LoginDialog({ open, onClose }: LoginDialogProps) {
         throw new Error("未能从浏览器窗口获取 SESSDATA");
       }
       await completeLogin(sessdata, result.cookie);
-      handleClose();
+      setCookieInput("");
+      handleClose(true);
     } catch (e) {
       setError(String(e));
     } finally {

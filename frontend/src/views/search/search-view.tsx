@@ -18,6 +18,7 @@ import { invoke } from "@/lib/api";
 import { useDownloadQualityPrompt, type DownloadQualityTarget } from "@/components/download-quality-dialog";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { openExternalUrl } from "@/lib/open-external";
+import { LoginDialog } from "@/components/login-dialog";
 import type {
   AggregateSearchResult,
   SearchDate,
@@ -151,6 +152,9 @@ export function SearchView() {
   const searchRequestIdRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [loginDialogOpen, setLoginDialogOpen] = useState(false);
+  const windControlRef = useRef(false);
+  const retryArgsRef = useRef<{ rawInput: string; filters: SearchFilters; options: any } | null>(null);
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const cardLayout = useCardLayout("search", viewMode);
   const {
@@ -307,16 +311,11 @@ export function SearchView() {
       const errStr = String(err);
       
       if (errStr.includes("WIND_CONTROL_REQUIRED:")) {
-        const url = errStr.split("WIND_CONTROL_REQUIRED:")[1];
-        setError("触发风控，请在弹出的浏览器中完成验证...");
-        try {
-          await invoke("verify_search_wind_control", { url });
-          // 验证完成，重试搜索，由于重试是异步的，不恢复 loading=false
-          runSearch(rawInput, filters, options);
-          return;
-        } catch (verifyErr) {
-          setError(`风控验证失败或取消: ${verifyErr}`);
-        }
+        setError("触发风控，请通过二维码登录以完成验证...");
+        retryArgsRef.current = { rawInput, filters, options };
+        setLoginDialogOpen(true);
+        windControlRef.current = true;
+        return;
       } else {
         setError(errStr);
       }
@@ -717,10 +716,10 @@ export function SearchView() {
             alignItems: "center",
             justifyContent: "center",
             gap: "7px",
-            height: "44px",
-            padding: "0 18px",
-            borderRadius: "11px",
-            fontSize: "14.5px",
+            height: "48px",
+            padding: "0 24px",
+            borderRadius: "12px",
+            fontSize: "15px",
             fontWeight: 600,
             color: "#fff",
             backgroundColor: loading || !searchInput.trim() ? "#c0c0c8" : "#6366f1",
@@ -922,6 +921,24 @@ export function SearchView() {
         </div>
       ) : null}
       {downloadQualityDialog}
+      <LoginDialog 
+        open={loginDialogOpen} 
+        forceNewLogin={windControlRef.current}
+        onClose={(success?: boolean) => {
+          setLoginDialogOpen(false);
+          if (windControlRef.current) {
+            windControlRef.current = false;
+            if (success === true) {
+              const args = retryArgsRef.current;
+              if (args) {
+                runSearch(args.rawInput, args.filters, args.options);
+              }
+            } else {
+              setError("已取消登录，搜索中断。");
+            }
+          }
+        }} 
+      />
     </div>
   );
 }

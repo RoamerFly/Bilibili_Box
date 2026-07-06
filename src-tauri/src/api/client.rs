@@ -140,11 +140,6 @@ impl BiliClient {
 
     pub fn get_cookie_for_url(&self, url: &str) -> String {
         let mut cookie_parts: Vec<String> = Vec::new();
-        let config_cookie = self.get_cookie();
-        if !config_cookie.is_empty() {
-            cookie_parts.push(config_cookie);
-        }
-
         if let Ok(url) = Url::parse(url) {
             if let Some(jar_cookie) = self.shared_cookie_jar.read().cookies(&url) {
                 if let Ok(jar_cookie) = jar_cookie.to_str() {
@@ -156,8 +151,13 @@ impl BiliClient {
             }
         }
 
+        let config_cookie = self.get_cookie();
+        if !config_cookie.is_empty() {
+            cookie_parts.push(config_cookie);
+        }
+
         let joined = cookie_parts.join("; ");
-        // 去重：同名 cookie 保留首次出现（config 优先），避免重复 bili_jct 导致 B站 API 返回"非法访问"
+        // 去重：同名 cookie 保留首次出现（jar 优先，也就是最新动态获取的优先），避免重复 bili_jct 导致 B站 API 返回"非法访问"
         deduplicate_cookie_names(&joined)
     }
 
