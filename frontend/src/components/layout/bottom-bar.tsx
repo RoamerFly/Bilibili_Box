@@ -102,36 +102,91 @@ export function BottomBar() {
     }
   };
 
+  const speedShort = downloadSpeed && downloadSpeed !== "0 B/s" ? downloadSpeed.replace("B/s", "").trim() : "";
+  const compactText = activeTasks.length > 0
+    ? (speedShort ? speedShort : `${activeCount}个`)
+    : "空闲";
+
+  const fullText = activeTasks.length > 0
+    ? `${activeCount} 个下载任务${transferRunning && downloadSpeed && downloadSpeed !== "0 B/s" ? ` (${downloadSpeed})` : ""}`
+    : "队列空闲";
+
   return (
     <motion.div
       ref={bottomBarRef}
       className="bb-bottom-bar"
-      animate={{ height: expanded ? 300 : 68 }}
-      transition={{ type: "spring", stiffness: 360, damping: 34 }}
+      animate={{
+        height: expanded ? 360 : 36,
+        width: expanded ? "min(620px, calc(100vw - 32px))" : 100,
+      }}
+      transition={{ type: "spring", stiffness: 350, damping: 30 }}
     >
-      <div className="bb-bottom-head" onClick={toggleExpanded}>
-        <div className="bb-bottom-left">
-          <div className="bb-bottom-icon">
-            <Download size={24} />
-          </div>
-          <div className="bb-bottom-copy">
-            <strong>{headTitle}</strong>
-            <span>{headSubtitle}</span>
-          </div>
-          <div className="bb-bottom-progress">
-            <span style={{ width: `${Math.max(0, Math.min(100, activeProgress))}%` }} />
-          </div>
+      <div
+        className="bb-bottom-head"
+        onClick={toggleExpanded}
+        style={{
+          height: "36px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 8px",
+          cursor: "pointer",
+          userSelect: "none",
+          borderBottom: expanded ? "1px solid rgba(255, 255, 255, 0.08)" : "none",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0, flex: 1 }}>
+          <Download size={13} style={{ color: "var(--color-primary)", flexShrink: 0 }} />
+          <span style={{ fontSize: "11px", color: "var(--color-sidebar-text-muted)", fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {expanded ? fullText : compactText}
+          </span>
         </div>
 
-        <div className="bb-bottom-actions">
-          <button type="button" className="bb-bottom-button" onClick={openDownloadFolder}>
-            <FolderOpen size={18} />
-            打开下载目录
-          </button>
-          <button type="button" className="bb-bottom-toggle" aria-label={expanded ? "收起" : "展开"}>
-            <motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={{ type: "spring", stiffness: 320, damping: 22 }}>
-              <ChevronUp size={18} />
-            </motion.span>
+        <div style={{ display: "flex", alignItems: "center", gap: "4px" }} onClick={(e) => e.stopPropagation()}>
+          {expanded && (
+            <button
+              type="button"
+              onClick={openDownloadFolder}
+              style={{
+                width: "24px",
+                height: "24px",
+                borderRadius: "5px",
+                border: "none",
+                backgroundColor: "rgba(255, 255, 255, 0.06)",
+                color: "rgba(255, 255, 255, 0.8)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+              }}
+              title="打开下载目录"
+            >
+              <FolderOpen size={11} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={toggleExpanded}
+            style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "5px",
+              border: "none",
+              backgroundColor: "rgba(255, 255, 255, 0.06)",
+              color: "rgba(255, 255, 255, 0.8)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <motion.div
+              animate={{ rotate: expanded ? 180 : 0 }}
+              transition={{ duration: 0.2 }}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              <ChevronUp size={12} />
+            </motion.div>
           </button>
         </div>
       </div>

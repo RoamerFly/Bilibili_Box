@@ -47,6 +47,72 @@
   /* 卡片阴影 */
   --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.06);
   --shadow-card-hover: 0 6px 24px rgba(0, 0, 0, 0.1);
+
+  /* 毛玻璃 & 舞台效果 */
+  --color-glass-bg: rgba(255, 255, 255, 0.7);
+  --color-glass-border: rgba(255, 255, 255, 0.5);
+  --color-app-frame-border: rgba(93, 55, 199, 0.82);
+  --color-main-stage-bg: radial-gradient(circle at 16% 8%, rgba(120, 98, 255, 0.16), transparent 24%),
+    radial-gradient(circle at 72% 2%, rgba(255, 126, 219, 0.2), transparent 28%),
+    linear-gradient(135deg, #eef2ff 0%, #f7f2ff 48%, #edf8ff 100%);
+  --shadow-main-stage: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+
+  /* 底部悬浮条颜色（浅色模式） */
+  --color-bottom-pill-bg: rgba(255, 255, 255, 0.9);
+  --color-bottom-pill-border: rgba(99, 102, 241, 0.18);
+  --color-bottom-pill-text: #1a1a2e;
+  --color-bottom-pill-subtext: #505065;
+  --color-bottom-pill-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+  --color-bottom-pill-tab-bg: rgba(0, 0, 0, 0.05);
+  --color-bottom-pill-tab-active: rgba(0, 0, 0, 0.12);
+}
+
+html[data-theme="dark"] {
+  /* 主色 - 蓝紫色系 */
+  --color-primary: #818cf8;
+  --color-primary-hover: #6366f1;
+  --color-primary-light: rgba(129, 140, 248, 0.15);
+
+  /* 右侧内容区背景（深色） */
+  --color-bg: #0e0e14;
+  --color-bg-secondary: #16161e;
+  --color-bg-tertiary: #1f1f2e;
+  --color-bg-elevated: #1e1e2d;
+
+  /* Sidebar/BottomBar */
+  --color-sidebar-bg: #0a0a0f;
+  --color-sidebar-secondary: #16161e;
+
+  /* 前景色（深色区域用） */
+  --color-text: #e8e8ed;
+  --color-text-secondary: #9b9baa;
+  --color-text-muted: #7a7a8e;
+
+  /* 边框 */
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-hover: rgba(255, 255, 255, 0.14);
+
+  /* 卡片阴影 */
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.3);
+  --shadow-card-hover: 0 10px 30px rgba(0, 0, 0, 0.5);
+
+  /* 毛玻璃 & 舞台效果 */
+  --color-glass-bg: rgba(22, 22, 30, 0.7);
+  --color-glass-border: rgba(255, 255, 255, 0.08);
+  --color-app-frame-border: rgba(93, 55, 199, 0.4);
+  --color-main-stage-bg: radial-gradient(circle at 16% 8%, rgba(120, 98, 255, 0.08), transparent 24%),
+    radial-gradient(circle at 72% 2%, rgba(255, 126, 219, 0.08), transparent 28%),
+    linear-gradient(135deg, #0e0e14 0%, #16161e 48%, #0f0f15 100%);
+  --shadow-main-stage: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  /* 底部悬浮条颜色（暗色模式） */
+  --color-bottom-pill-bg: rgba(22, 22, 30, 0.92);
+  --color-bottom-pill-border: rgba(255, 255, 255, 0.08);
+  --color-bottom-pill-text: #e8e8ed;
+  --color-bottom-pill-subtext: #9b9baa;
+  --color-bottom-pill-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  --color-bottom-pill-tab-bg: rgba(255, 255, 255, 0.06);
+  --color-bottom-pill-tab-active: rgba(255, 255, 255, 0.14);
 }
 
 * {
@@ -138,10 +204,10 @@ body {
 
 /* 毛玻璃效果 */
 .glass {
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--color-glass-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--color-glass-border);
 }
 
 /* 悬停提升效果 */
@@ -172,18 +238,15 @@ body {
   background:
     radial-gradient(circle at 2% 0%, rgba(125, 90, 255, 0.55), transparent 22%),
     linear-gradient(135deg, #0a0d36 0%, #151053 36%, #29157a 100%);
-  border: 2px solid rgba(93, 55, 199, 0.82);
+  border: 2px solid var(--color-app-frame-border);
   border-radius: 16px;
   color: #111743;
 }
 
 .bb-main-stage {
-  background:
-    radial-gradient(circle at 16% 8%, rgba(120, 98, 255, 0.16), transparent 24%),
-    radial-gradient(circle at 72% 2%, rgba(255, 126, 219, 0.2), transparent 28%),
-    linear-gradient(135deg, #eef2ff 0%, #f7f2ff 48%, #edf8ff 100%);
+  background: var(--color-main-stage-bg);
   border-radius: 16px 0 0 16px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  box-shadow: var(--shadow-main-stage);
 }
 
 .bb-main-scroll {
@@ -194,7 +257,7 @@ body {
   position: fixed;
   z-index: 9998;
   top: 0;
-  left: 276px;
+  left: 80px;
   right: 116px;
   height: 42px;
 }
@@ -1064,22 +1127,27 @@ body {
 
 /* Bottom bar */
 .bb-bottom-bar {
-  position: relative;
-  background:
-    linear-gradient(90deg, rgba(12, 16, 66, 0.97), rgba(22, 22, 83, 0.96) 58%, rgba(19, 22, 80, 0.98));
-  border-top: 1px solid rgba(163, 160, 255, 0.22);
-  box-shadow: 0 -18px 40px rgba(14, 16, 70, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  color: white;
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  z-index: 40;
+  background: var(--color-bottom-pill-bg);
+  border: 1px solid var(--color-bottom-pill-border);
+  box-shadow: var(--color-bottom-pill-shadow);
+  color: var(--color-bottom-pill-text);
   overflow: hidden;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 16px;
 }
 
 .bb-bottom-head {
-  height: 68px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 22px;
-  padding: 0 23px;
+  gap: 12px;
+  padding: 0 12px;
   cursor: pointer;
 }
 
@@ -1180,8 +1248,8 @@ body {
 }
 
 .bb-bottom-body {
-  height: 236px;
-  padding: 0 22px 18px;
+  height: 318px;
+  padding: 0 14px 14px;
 }
 
 .bb-bottom-toolbar {
@@ -1197,7 +1265,7 @@ body {
   gap: 4px;
   padding: 4px;
   border-radius: 11px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--color-bottom-pill-tab-bg);
 }
 
 .bb-bottom-tabs button {
@@ -1205,15 +1273,15 @@ body {
   min-width: 70px;
   border: 0;
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.62);
+  color: var(--color-bottom-pill-subtext);
   background: transparent;
   cursor: pointer;
   font-weight: 800;
 }
 
 .bb-bottom-tabs button.active {
-  color: white;
-  background: rgba(255, 255, 255, 0.14);
+  color: var(--color-bottom-pill-text);
+  background: var(--color-bottom-pill-tab-active);
 }
 
 .bb-bottom-bulk-actions {
@@ -1225,10 +1293,10 @@ body {
 .bb-bottom-bulk-actions button,
 .bb-bottom-task-actions button {
   height: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--color-bottom-pill-border);
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.8);
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-bottom-pill-text);
+  background: var(--color-bottom-pill-tab-bg);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1241,12 +1309,12 @@ body {
 
 .bb-bottom-bulk-actions button.danger,
 .bb-bottom-task-actions button.danger {
-  color: #fecaca;
+  color: var(--color-error);
 }
 
 .bb-bottom-scroll,
 .bb-bottom-log-panel {
-  height: 188px;
+  height: 260px;
   overflow: hidden;
 }
 
@@ -1264,7 +1332,7 @@ body {
   min-height: 64px;
   border-radius: 13px;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--color-bottom-pill-tab-bg);
 }
 
 .bb-bottom-task-state {
@@ -1438,7 +1506,7 @@ body {
   }
 
   .bb-window-drag-strip {
-    left: 252px;
+    left: 80px;
   }
 
   .bb-brand {
@@ -1486,7 +1554,7 @@ body {
   }
 
   .bb-window-drag-strip {
-    left: 220px;
+    left: 80px;
   }
 
   .bb-brand strong {
@@ -1511,4 +1579,62 @@ body {
     font-size: 0;
     padding: 0;
   }
+}
+
+@keyframes select-slide-in {
+  from { opacity: 0; transform: scale(0.97) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.select-content-animated[data-state="open"] {
+  animation: select-slide-in 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Custom Select Menu */
+.bb-select-content {
+  z-index: 2000;
+  min-width: 120px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.bb-select-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 32px 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s ease;
+  background-color: transparent;
+}
+
+.bb-select-item:hover,
+.bb-select-item:focus,
+.bb-select-item[data-highlighted] {
+  background-color: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.bb-select-item[data-state="checked"] {
+  color: var(--color-primary);
+  background-color: var(--color-primary-light);
+}
+
+.bb-select-item-indicator {
+  position: absolute;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
