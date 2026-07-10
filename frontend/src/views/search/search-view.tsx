@@ -12,6 +12,8 @@ import {
   Star,
   ThumbsUp,
   UserRound,
+  Info,
+  History,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { invoke } from "@/lib/api";
@@ -154,6 +156,39 @@ export function SearchView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [loginDialogOpen, setLoginDialogOpen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem("bilibili_box_search_history");
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const saveHistory = useCallback((query: string) => {
+    if (!query.trim()) return;
+    setSearchHistory((prev) => {
+      const next = [query.trim(), ...prev.filter((item) => item !== query.trim())].slice(0, 15);
+      localStorage.setItem("bilibili_box_search_history", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const deleteHistoryItem = useCallback((query: string) => {
+    setSearchHistory((prev) => {
+      const next = prev.filter((item) => item !== query);
+      localStorage.setItem("bilibili_box_search_history", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const clearAllHistory = useCallback(() => {
+    setSearchHistory([]);
+    localStorage.removeItem("bilibili_box_search_history");
+  }, []);
+
   const windControlRef = useRef(false);
   const retryArgsRef = useRef<{ rawInput: string; filters: SearchFilters; options: any } | null>(null);
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
@@ -336,9 +371,12 @@ export function SearchView() {
       const activeScope = scope ?? searchScope;
       // "all" = 搜索全部类型（6次请求）; 其他 = 单类型搜索（1次请求）
       const searchType = activeScope === "all" ? "all" : (TAB_TO_SEARCH_TYPE[activeScope] ?? "video");
+      if (rawInput.trim()) {
+        saveHistory(rawInput);
+      }
       await runSearch(rawInput, currentFilters, { mode: "replace", searchType });
     },
-    [currentFilters, runSearch, searchInput, searchScope]
+    [currentFilters, runSearch, searchInput, searchScope, saveHistory]
   );
 
   const updateFilters = useCallback(
@@ -784,19 +822,16 @@ export function SearchView() {
   };
 
   return (
-    <div style={{ width: "100%", padding: "36px 44px 48px", minHeight: "100%" }}>
+    <div style={{ width: "100%", padding: "16px 20px 28px", minHeight: "100%" }}>
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        style={{ marginBottom: "24px" }}
+        style={{ marginBottom: "10px" }}
       >
-        <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
+        <h1 style={{ fontSize: "20px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.2 }}>
           聚合搜索
         </h1>
-        <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "4px" }}>
-          一个搜索框，支持关键词、链接和编号
-        </p>
       </motion.div>
 
       <motion.div
@@ -806,17 +841,17 @@ export function SearchView() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "14px",
-          marginBottom: "12px",
+          gap: "10px",
+          marginBottom: "10px",
         }}
       >
         <div style={{ flex: 1, position: "relative", display: "flex", alignItems: "center" }}>
           <Search
             style={{
               position: "absolute",
-              left: "16px",
-              width: "18px",
-              height: "18px",
+              left: "12px",
+              width: "16px",
+              height: "16px",
               color: "#a0a0ab",
               pointerEvents: "none",
             }}
@@ -826,21 +861,113 @@ export function SearchView() {
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void handleSearch()}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setTimeout(() => setIsFocused(false), 200)}
             placeholder={placeholder}
             style={{
               width: "100%",
-              height: "48px",
-              paddingLeft: "46px",
+              height: "40px",
+              paddingLeft: "36px",
               paddingRight: "16px",
-              borderRadius: "12px",
+              borderRadius: "10px",
               border: "1.5px solid #dcdce4",
               backgroundColor: "#fff",
-              fontSize: "14.5px",
+              fontSize: "13.5px",
               color: "#1a1a2e",
               outline: "none",
               fontFamily: "inherit",
             }}
           />
+
+          {/* 历史搜索浮窗（Dropdown Popover） */}
+          <AnimatePresence>
+            {isFocused && searchHistory.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 5 }}
+                transition={{ duration: 0.15 }}
+                style={{
+                  position: "absolute",
+                  top: "44px",
+                  left: 0,
+                  right: 0,
+                  backgroundColor: "var(--color-bg-secondary)",
+                  border: "1px solid var(--color-border)",
+                  borderRadius: "8px",
+                  boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+                  padding: "6px 0",
+                  zIndex: 9999,
+                  maxHeight: "300px",
+                  overflowY: "auto",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 14px 6px", borderBottom: "1px solid var(--color-border-subtle)", marginBottom: "4px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--color-text-secondary)" }}>历史搜索</span>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      clearAllHistory();
+                    }}
+                    style={{ border: "none", background: "none", fontSize: "11px", color: "var(--color-primary)", cursor: "pointer", fontWeight: 650, padding: 0 }}
+                  >
+                    清空全部
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  {searchHistory.map((item) => (
+                    <div
+                      key={item}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setSearchInput(item);
+                        void handleSearch(item);
+                      }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "8px 14px",
+                        cursor: "pointer",
+                        transition: "background-color 0.15s",
+                      }}
+                      className="hover:bg-[var(--color-bg-tertiary)]"
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
+                        <History size={12} style={{ color: "#a0a0ab", flexShrink: 0 }} />
+                        <span style={{ fontSize: "13px", color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {item}
+                        </span>
+                      </div>
+                      <span
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          deleteHistoryItem(item);
+                        }}
+                        style={{
+                          fontSize: "14px",
+                          color: "var(--color-text-secondary)",
+                          lineHeight: 1,
+                          cursor: "pointer",
+                          padding: "4px",
+                          borderRadius: "4px",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center"
+                        }}
+                        className="hover:bg-[var(--color-border)]"
+                        title="删除记录"
+                      >
+                        ×
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         <FilterSelect
@@ -865,11 +992,11 @@ export function SearchView() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            gap: "7px",
-            height: "48px",
-            padding: "0 24px",
-            borderRadius: "12px",
-            fontSize: "15px",
+            gap: "6px",
+            height: "40px",
+            padding: "0 18px",
+            borderRadius: "10px",
+            fontSize: "14px",
             fontWeight: 600,
             color: "#fff",
             backgroundColor: loading || !searchInput.trim() ? "#c0c0c8" : "#6366f1",
@@ -880,13 +1007,14 @@ export function SearchView() {
           }}
         >
           {loading ? (
-            <Loader2 className="animate-spin" style={{ width: 18, height: 18 }} />
+            <Loader2 className="animate-spin" style={{ width: 16, height: 16 }} />
           ) : (
-            <Search style={{ width: 18, height: 18 }} />
+            <Search style={{ width: 16, height: 16 }} />
           )}
           {loading ? "搜索中" : "搜索"}
         </motion.button>
       </motion.div>
+
 
       {result?.type === "Aggregate" && searchScope === "all" ? (
         <motion.div
@@ -896,35 +1024,56 @@ export function SearchView() {
           style={{ display: "grid", gap: "10px", marginBottom: "20px" }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "5px", padding: "4px", borderRadius: "11px", backgroundColor: "var(--color-bg-tertiary)", overflowX: "auto", width: "fit-content", maxWidth: "100%" }}>
-            {searchTypeTabs.map(({ value, label, count, loaded }) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => handleTabClick(value)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "7px",
-                  padding: "7px 12px",
-                  borderRadius: "8px",
-                  border: "none",
-                  backgroundColor: activeResultType === value ? "var(--color-bg-secondary)" : "transparent",
-                  boxShadow: activeResultType === value ? "var(--shadow-card)" : "none",
-                  color: activeResultType === value ? "var(--color-primary)" : "var(--color-text-secondary)",
-                  fontSize: "13px",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {label}
-                {loaded ? (
-                  <span style={tabCountBadgeStyle}>{formatSearchTabCount(count)}</span>
-                ) : (
-                  <span style={{ ...tabCountBadgeStyle, backgroundColor: "transparent", color: activeResultType === value ? "#a5a5c8" : "#b0b0c0", minWidth: "auto", padding: "0 4px" }}>·</span>
-                )}
-              </button>
-            ))}
+            {searchTypeTabs.map(({ value, label, count, loaded }) => {
+              const isActive = activeResultType === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => handleTabClick(value)}
+                  style={{
+                    position: "relative",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "7px",
+                    padding: "7px 12px",
+                    borderRadius: "8px",
+                    border: "none",
+                    backgroundColor: "transparent",
+                    color: isActive ? "var(--color-primary)" : "var(--color-text-secondary)",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    zIndex: 1,
+                  }}
+                >
+                  {isActive && (
+                    <motion.div
+                      layoutId="searchTabActiveBg"
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: "var(--color-bg-secondary)",
+                        boxShadow: "var(--shadow-card)",
+                        borderRadius: "8px",
+                        zIndex: -1,
+                      }}
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                  {label}
+                  {loaded ? (
+                    <span style={tabCountBadgeStyle}>{formatSearchTabCount(count)}</span>
+                  ) : (
+                    <span style={{ ...tabCountBadgeStyle, backgroundColor: "transparent", color: isActive ? "#a5a5c8" : "#b0b0c0", minWidth: "auto", padding: "0 4px" }}>·</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
             <FilterSelect
@@ -951,8 +1100,8 @@ export function SearchView() {
                 updateFilters({ ...currentFilters, duration: value as SearchDuration })
               }
             />
-            <span style={{ fontSize: "12.5px", color: "#9a9aa8" }}>
-              排序、日期和时长对关键词视频结果生效
+            <span title="排序、日期和时长对关键词视频结果生效" style={{ display: "inline-flex", alignItems: "center" }}>
+              <Info size={14} style={{ color: "#9a9aa8", cursor: "help" }} />
             </span>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
               {statsText && (
@@ -1050,37 +1199,45 @@ export function SearchView() {
           {result.type === "Aggregate" ? (
             <>
               {visibleAggregateResult ? (
-                <AggregateResult
-                  result={visibleAggregateResult}
-                  activeType={activeResultType}
-                  columns={columns}
-                  viewMode={viewMode}
-                  scale={cardScale}
-                  activeLiveType={activeLiveType}
-                  onLiveTypeChange={(type) => setSearchPageState({ activeLiveType: type, currentPage: 1 })}
-                  loadedCounts={{
-                    video: result.videos.length,
-                    bangumi: result.bangumi.length,
-                    film: (result.films ?? []).length,
-                    live: (result.lives ?? []).length,
-                    article: (result.articles ?? []).length,
-                    user: (result.users ?? []).length,
-                  }}
-                  onOpenVideoPlayer={handleOpenVideoPlayer}
-                  onOpenBangumiPlayer={handleOpenBangumiPlayer}
-                  onDownloadVideo={handleSearchVideoDownload}
-                  onDownloadBangumi={handleSearchBangumiDownload}
-                  onResolveVideoDownloadTargets={resolveSearchVideoDownloadTargets}
-                  onResolveBangumiDownloadTargets={resolveSearchBangumiDownloadTargets}
-                  onRequestDownloadQuality={requestDownloadQuality}
-                  onDownloadError={(err) => setError(String(err))}
-                  onOpenBrowser={handleOpenBrowser}
-                  onOpenAuthor={openUpProfile}
-                  onOpenContent={openContentDetail}
-                  multiSelectEnabled={multiSelectEnabled}
-                  selectedKeys={selectedKeys}
-                  onToggleSelection={toggleSelection}
-                />
+                <motion.div
+                  key={activeResultType}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <AggregateResult
+                    result={visibleAggregateResult}
+                    activeType={activeResultType}
+                    columns={columns}
+                    viewMode={viewMode}
+                    scale={cardScale}
+                    activeLiveType={activeLiveType}
+                    onLiveTypeChange={(type) => setSearchPageState({ activeLiveType: type, currentPage: 1 })}
+                    loadedCounts={{
+                      video: result.videos.length,
+                      bangumi: result.bangumi.length,
+                      film: (result.films ?? []).length,
+                      live: (result.lives ?? []).length,
+                      article: (result.articles ?? []).length,
+                      user: (result.users ?? []).length,
+                    }}
+                    onOpenVideoPlayer={handleOpenVideoPlayer}
+                    onOpenBangumiPlayer={handleOpenBangumiPlayer}
+                    onDownloadVideo={handleSearchVideoDownload}
+                    onDownloadBangumi={handleSearchBangumiDownload}
+                    onResolveVideoDownloadTargets={resolveSearchVideoDownloadTargets}
+                    onResolveBangumiDownloadTargets={resolveSearchBangumiDownloadTargets}
+                    onRequestDownloadQuality={requestDownloadQuality}
+                    onDownloadError={(err) => setError(String(err))}
+                    onOpenBrowser={handleOpenBrowser}
+                    onOpenAuthor={openUpProfile}
+                    onOpenContent={openContentDetail}
+                    multiSelectEnabled={multiSelectEnabled}
+                    selectedKeys={selectedKeys}
+                    onToggleSelection={toggleSelection}
+                  />
+                </motion.div>
               ) : null}
               {aggregatePageInfo && Math.max(aggregateLoadedPageCount, aggregateTotalPageCount) > 1 ? (
                 <SearchPagination
@@ -1454,7 +1611,6 @@ function AggregateResult({
 
   return (
     <>
-
       {showVideos && result.videos.length ? (
         <>
           <SearchSectionHeader title="视频结果" shown={result.videos.length} loaded={loadedCounts.video} total={result.video_page.total} />
@@ -2018,10 +2174,13 @@ function GenericSearchCard({
   );
 }
 
-function SearchSectionHeader({ title, shown, loaded, total }: { title: string; shown: number; loaded: number; total: number }) {
+function SearchSectionHeader({ title, shown, loaded, total, children }: { title: string; shown: number; loaded: number; total: number; children?: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "4px" }}>
-      <h2 style={{ fontSize: "16px", fontWeight: 700, color: "#1a1a2e" }}>{title}</h2>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "12px", marginBottom: "8px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <h2 style={{ fontSize: "16px", fontWeight: 700, color: "#1a1a2e" }}>{title}</h2>
+        {children}
+      </div>
       <span style={{ fontSize: "13px", color: "#8b8b9a" }}>已显示 {shown} 个，已加载 {loaded}/{Math.max(total, loaded)} 个</span>
     </div>
   );
