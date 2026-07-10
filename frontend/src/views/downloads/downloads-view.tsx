@@ -355,7 +355,7 @@ export function DownloadsView() {
         width: "100%",
         height: "100%",
         minHeight: 0,
-        padding: "36px 44px 28px",
+        padding: "20px 24px 16px",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
@@ -416,9 +416,9 @@ export function DownloadsView() {
               display: "flex",
               alignItems: "center",
               gap: "6px",
-              padding: "9px 18px",
-              borderRadius: "10px",
-              fontSize: "14px",
+              padding: "5px 12px",
+              borderRadius: "6px",
+              fontSize: "12.5px",
               fontWeight: 600,
               color: "#fff",
               backgroundColor: "#6366f1",
@@ -428,27 +428,27 @@ export function DownloadsView() {
               transition: "all 0.15s ease",
             }}
           >
-            <Plus style={{ width: "16px", height: "16px" }} />
+            <Plus style={{ width: "14px", height: "14px" }} />
             新建下载
           </motion.button>
 
           {/* 打开目录 */}
-          <ActionButton onClick={handleOpenFolder} icon={<FolderOpen style={{ width: "15px", height: "15px" }} />}>
+          <ActionButton onClick={handleOpenFolder} icon={<FolderOpen style={{ width: "14px", height: "14px" }} />}>
             打开目录
           </ActionButton>
 
           {/* 全部开始 */}
-          <ActionButton onClick={handleStartAll} icon={<Play style={{ width: "15px", height: "15px" }} />}>
+          <ActionButton onClick={handleStartAll} icon={<Play style={{ width: "14px", height: "14px" }} />}>
             {selectedTaskIds.size > 0 ? "开始选中" : "全部开始"}
           </ActionButton>
 
           {/* 全部暂停 */}
-          <ActionButton onClick={handlePauseAll} icon={<Pause style={{ width: "15px", height: "15px" }} />}>
+          <ActionButton onClick={handlePauseAll} icon={<Pause style={{ width: "14px", height: "14px" }} />}>
             {selectedTaskIds.size > 0 ? "暂停选中" : "全部暂停"}
           </ActionButton>
 
           {selectedTaskIds.size > 0 ? (
-            <ActionButton onClick={handleDeleteSelected} icon={<Trash2 style={{ width: "15px", height: "15px" }} />}>
+            <ActionButton onClick={handleDeleteSelected} icon={<Trash2 style={{ width: "14px", height: "14px" }} />}>
               删除选中 ({selectedTaskIds.size})
             </ActionButton>
           ) : null}
@@ -470,9 +470,9 @@ export function DownloadsView() {
               display: "flex",
               alignItems: "center",
               gap: "6px",
-              padding: "9px 16px",
-              borderRadius: "10px",
-              fontSize: "14px",
+              padding: "5px 12px",
+              borderRadius: "6px",
+              fontSize: "12.5px",
               fontWeight: 500,
               color: "#ef4444",
               backgroundColor: "#fff",
@@ -482,7 +482,7 @@ export function DownloadsView() {
               transition: "all 0.15s ease",
             }}
           >
-            <Trash2 style={{ width: "15px", height: "15px" }} />
+            <Trash2 style={{ width: "14px", height: "14px" }} />
             全部删除
           </motion.button>
         </div>
@@ -528,9 +528,9 @@ export function DownloadsView() {
               display: "flex",
               alignItems: "center",
               gap: "7px",
-              padding: "8px 18px",
-              borderRadius: "10px",
-              fontSize: "13.5px",
+              padding: "5px 12px",
+              borderRadius: "6px",
+              fontSize: "12.5px",
               fontWeight: activeTab === key ? 600 : 500,
               color: activeTab === key ? "#fff" : "#505065",
               backgroundColor: activeTab === key ? "#6366f1" : "#fff",
@@ -758,7 +758,7 @@ function DownloadRow({
         display: "grid",
         gridTemplateColumns: "38px minmax(290px, 1fr) 220px 100px 120px 126px",
         alignItems: "center",
-        padding: "14px 20px",
+        padding: "8px 16px",
         borderBottom: "1px solid #f5f5f8",
         transition: "background-color 0.12s ease",
         backgroundColor: selected ? "#f5f3ff" : "transparent",
@@ -984,9 +984,9 @@ function ActionButton({
         display: "flex",
         alignItems: "center",
         gap: "6px",
-        padding: "9px 16px",
-        borderRadius: "10px",
-        fontSize: "14px",
+        padding: "5px 12px",
+        borderRadius: "6px",
+        fontSize: "12.5px",
         fontWeight: 500,
         color: "#505065",
         backgroundColor: "#fff",

@@ -218,41 +218,42 @@ export function HomeView() {
     <motion.div className="bb-home" variants={containerVariants} initial="hidden" animate="show">
       <motion.section className="bb-hero" variants={itemVariants}>
         <div className="bb-hero-copy">
-          <h1>
-            欢迎使用 <span>BiliBox</span>
-          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <h1>
+              欢迎使用 <span>BiliBox</span>
+            </h1>
+            <button
+              type="button"
+              onClick={() => void handleRefreshStats()}
+              disabled={refreshingStats}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                padding: "3px 8px",
+                border: "1px solid rgba(117, 100, 255, 0.2)",
+                borderRadius: "6px",
+                background: "rgba(255, 255, 255, 0.6)",
+                color: refreshingStats ? "#a0a0ae" : "#6366f1",
+                cursor: refreshingStats ? "wait" : "pointer",
+                fontSize: "11px",
+                fontWeight: 700,
+                fontFamily: "inherit",
+                marginTop: "4px"
+              }}
+            >
+              <RefreshCw className={refreshingStats ? "animate-spin" : ""} size={11} />
+              {refreshingStats ? "更新中" : "刷新数据"}
+            </button>
+          </div>
           <p>你的 Bilibili 媒体工作台</p>
           <div className="bb-hero-pill">
-            <Sparkles size={18} fill="currentColor" />
+            <Sparkles size={14} fill="currentColor" />
             <span>高效下载 · 精彩收藏 · 轻松管理</span>
           </div>
         </div>
         <HeroVisual />
       </motion.section>
-
-      <motion.div variants={itemVariants} style={{ display: "flex", justifyContent: "flex-end", marginTop: "18px", marginBottom: "-8px" }}>
-        <button
-          type="button"
-          onClick={() => void handleRefreshStats()}
-          disabled={refreshingStats}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            padding: "6px 11px",
-            border: 0,
-            borderRadius: "8px",
-            background: "transparent",
-            color: refreshingStats ? "#a0a0ae" : "#6366f1",
-            cursor: refreshingStats ? "wait" : "pointer",
-            fontSize: "12.5px",
-            fontWeight: 600,
-          }}
-        >
-          <RefreshCw className={refreshingStats ? "animate-spin" : ""} size={14} />
-          刷新概览
-        </button>
-      </motion.div>
 
       <motion.section className="bb-stat-grid" variants={itemVariants}>
         <StatCard

@@ -456,7 +456,7 @@ export function SettingsView() {
   }
 
   return (
-    <div style={{ width: "100%", padding: "36px 44px 48px", minHeight: "100%" }}>
+    <div style={{ width: "100%", padding: "20px 24px 24px", minHeight: "100%" }}>
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}

@@ -584,7 +584,7 @@ export function FavoritesView() {
         width: "100%",
         height: "100%",
         minHeight: 0,
-        padding: "36px 44px 28px",
+        padding: "20px 24px 16px",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
@@ -784,7 +784,7 @@ export function FavoritesView() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "340px minmax(0, 1fr)",
+            gridTemplateColumns: "260px minmax(0, 1fr)",
             gap: "24px",
             alignItems: "start",
             flex: 1,

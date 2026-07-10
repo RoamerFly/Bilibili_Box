@@ -559,32 +559,32 @@ body {
 /* Home */
 .bb-home {
   min-height: 100%;
-  padding: 52px 24px 18px 28px;
+  padding: 40px 24px 18px 24px;
 }
 
 .bb-hero {
   position: relative;
-  min-height: 232px;
+  min-height: 156px;
   overflow: hidden;
-  border-radius: 24px;
+  border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.86);
   background:
     linear-gradient(100deg, rgba(255, 255, 255, 0.78) 0%, rgba(235, 248, 255, 0.74) 36%, rgba(251, 216, 255, 0.74) 100%);
-  box-shadow: 0 18px 42px rgba(74, 85, 172, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 32px rgba(74, 85, 172, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.92);
 }
 
 .bb-hero-copy {
   position: relative;
   z-index: 2;
-  padding: 42px 44px;
+  padding: 22px 28px;
   max-width: 560px;
 }
 
 .bb-hero h1 {
   margin: 0;
   color: #11165f;
-  font-size: clamp(34px, 3.1vw, 44px);
-  line-height: 1.06;
+  font-size: clamp(26px, 2.6vw, 34px);
+  line-height: 1.1;
   font-weight: 900;
 }
 
@@ -596,25 +596,25 @@ body {
 }
 
 .bb-hero p {
-  margin-top: 14px;
+  margin-top: 6px;
   color: #303e85;
-  font-size: 21px;
+  font-size: 15px;
   font-weight: 500;
 }
 
 .bb-hero-pill {
-  margin-top: 34px;
+  margin-top: 14px;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  height: 40px;
-  padding: 0 16px;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
   border-radius: 999px;
   color: #5b42ff;
   background: rgba(255, 255, 255, 0.66);
   border: 1px solid rgba(117, 100, 255, 0.22);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88), 0 10px 22px rgba(111, 91, 255, 0.12);
-  font-size: 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88), 0 6px 14px rgba(111, 91, 255, 0.08);
+  font-size: 12.5px;
   font-weight: 800;
 }
 
@@ -640,8 +640,8 @@ body {
 .bb-hero-visual img {
   position: absolute;
   right: 34px;
-  top: -154px;
-  width: min(760px, 50vw);
+  top: -90px;
+  width: min(480px, 40vw);
   height: auto;
   filter: saturate(1.12) drop-shadow(0 22px 30px rgba(78, 73, 189, 0.22));
 }

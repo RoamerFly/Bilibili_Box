@@ -413,7 +413,7 @@ export function HistoryView() {
         width: "100%",
         height: "100%",
         minHeight: 0,
-        padding: "36px 44px 28px",
+        padding: "20px 24px 16px",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
