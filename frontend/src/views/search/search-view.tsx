@@ -1105,12 +1105,7 @@ export function SearchView() {
             <span title="排序、日期和时长对关键词视频结果生效" style={{ display: "inline-flex", alignItems: "center" }}>
               <Info size={14} style={{ color: "#9a9aa8", cursor: "help" }} />
             </span>
-            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
-              {statsText && (
-                <span style={{ fontSize: "12px", color: "#8b8b9a", marginRight: "4px" }}>
-                  {statsText}
-                </span>
-              )}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
               
               {(activeResultType === "all" || activeResultType === "video" || activeResultType === "bangumi") && (
                 <div style={{ display: "inline-flex", alignItems: "center" }}>
@@ -1118,12 +1113,8 @@ export function SearchView() {
                     <div style={{
                       display: "inline-flex",
                       alignItems: "center",
-                      backgroundColor: "#fff",
-                      borderRadius: "8px",
-                      padding: "2px 4px",
-                      border: "1.5px solid #d8d8e4",
-                      gap: "2px",
-                      boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
+                      backgroundColor: "transparent",
+                      gap: "2px"
                     }}>
                       <button
                         type="button"
@@ -1204,23 +1195,19 @@ export function SearchView() {
                       type="button"
                       onClick={toggleMultiSelect}
                       style={{
-                        border: "1.5px solid #d8d8e4",
-                        backgroundColor: "#fff",
-                        borderRadius: "8px",
+                        border: "none",
+                        backgroundColor: "transparent",
                         fontSize: "12px",
                         fontWeight: 700,
                         color: "#505065",
-                        padding: "5px 12px",
+                        padding: "4px 8px",
                         cursor: "pointer",
                         display: "inline-flex",
                         alignItems: "center",
-                        gap: "6px",
                         fontFamily: "inherit",
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
                       }}
-                      className="hover:bg-[#f8f8fa] hover:text-[var(--color-primary)] transition-colors"
+                      className="hover:text-[var(--color-primary)] transition-colors"
                     >
-                      <Square size={13} style={{ color: "#a0a0ab" }} />
                       多选
                     </button>
 
