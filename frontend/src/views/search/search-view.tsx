@@ -14,6 +14,8 @@ import {
   UserRound,
   Info,
   History,
+  Square,
+  CheckSquare,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { invoke } from "@/lib/api";
@@ -1116,12 +1118,12 @@ export function SearchView() {
                     <div style={{
                       display: "inline-flex",
                       alignItems: "center",
-                      backgroundColor: "var(--color-bg-tertiary)",
-                      borderRadius: "6px",
-                      padding: "2px",
-                      border: "1.5px solid var(--color-border)",
+                      backgroundColor: "#fff",
+                      borderRadius: "8px",
+                      padding: "2px 4px",
+                      border: "1.5px solid #d8d8e4",
                       gap: "2px",
-                      boxShadow: "var(--shadow-sm)"
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
                     }}>
                       <button
                         type="button"
@@ -1131,22 +1133,26 @@ export function SearchView() {
                           background: "none",
                           fontSize: "12px",
                           fontWeight: 700,
-                          color: "var(--color-text-secondary)",
+                          color: "#505065",
                           padding: "4px 8px",
-                          borderRadius: "4px",
+                          borderRadius: "6px",
                           cursor: "pointer",
                           display: "inline-flex",
                           alignItems: "center",
-                          gap: "4px",
+                          gap: "6px",
                           fontFamily: "inherit",
                         }}
-                        className="hover:bg-[var(--color-bg-secondary)] hover:text-[var(--color-primary)] transition-colors"
+                        className="hover:bg-[#f0f0f5] hover:text-[var(--color-primary)] transition-colors"
                       >
-                        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "10px", width: "12px", height: "12px" }}>{allVisibleSelected ? "✓" : "□"}</span>
+                        {allVisibleSelected ? (
+                          <CheckSquare size={13} style={{ color: "var(--color-primary)" }} />
+                        ) : (
+                          <Square size={13} style={{ color: "#a0a0ab" }} />
+                        )}
                         {allVisibleSelected ? "取消全选" : "全选当前"}
                       </button>
                       
-                      <div style={{ width: "1px", height: "12px", backgroundColor: "var(--color-border)", margin: "0 2px" }} />
+                      <div style={{ width: "1px", height: "14px", backgroundColor: "#e2e2ec", margin: "0 3px" }} />
 
                       <button
                         type="button"
@@ -1159,20 +1165,20 @@ export function SearchView() {
                           fontWeight: 700,
                           color: selectedKeys.size > 0 ? "var(--color-primary)" : "#a5a5b2",
                           padding: "4px 8px",
-                          borderRadius: "4px",
+                          borderRadius: "6px",
                           cursor: batchDownloading || selectedKeys.size === 0 ? "not-allowed" : "pointer",
                           display: "inline-flex",
                           alignItems: "center",
-                          gap: "4px",
+                          gap: "6px",
                           fontFamily: "inherit",
                         }}
-                        className={selectedKeys.size > 0 ? "hover:bg-[var(--color-bg-secondary)] transition-colors" : ""}
+                        className={selectedKeys.size > 0 ? "hover:bg-[#f0f0f5] transition-colors" : ""}
                       >
-                        {batchDownloading ? <Loader2 className="animate-spin" style={{ width: 11, height: 11 }} /> : <Download style={{ width: 11, height: 11 }} />}
+                        {batchDownloading ? <Loader2 className="animate-spin" style={{ width: 12, height: 12 }} /> : <Download style={{ width: 12, height: 12 }} />}
                         下载{selectedKeys.size > 0 ? `(${selectedKeys.size})` : ""}
                       </button>
 
-                      <div style={{ width: "1px", height: "12px", backgroundColor: "var(--color-border)", margin: "0 2px" }} />
+                      <div style={{ width: "1px", height: "14px", backgroundColor: "#e2e2ec", margin: "0 3px" }} />
 
                       <button
                         type="button"
@@ -1184,7 +1190,7 @@ export function SearchView() {
                           fontWeight: 700,
                           color: "#ef4444",
                           padding: "4px 8px",
-                          borderRadius: "4px",
+                          borderRadius: "6px",
                           cursor: "pointer",
                           fontFamily: "inherit",
                         }}
@@ -1198,24 +1204,26 @@ export function SearchView() {
                       type="button"
                       onClick={toggleMultiSelect}
                       style={{
-                        border: "1.5px solid var(--color-border)",
-                        backgroundColor: "var(--color-bg-secondary)",
-                        borderRadius: "6px",
+                        border: "1.5px solid #d8d8e4",
+                        backgroundColor: "#fff",
+                        borderRadius: "8px",
                         fontSize: "12px",
                         fontWeight: 700,
-                        color: "var(--color-text-secondary)",
-                        padding: "4px 10px",
+                        color: "#505065",
+                        padding: "5px 12px",
                         cursor: "pointer",
                         display: "inline-flex",
                         alignItems: "center",
-                        gap: "4px",
+                        gap: "6px",
                         fontFamily: "inherit",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
                       }}
-                      className="hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-primary)] transition-colors"
+                      className="hover:bg-[#f8f8fa] hover:text-[var(--color-primary)] transition-colors"
                     >
-                      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "10px", width: "12px", height: "12px" }}>□</span>
+                      <Square size={13} style={{ color: "#a0a0ab" }} />
                       多选
                     </button>
+
                   )}
                 </div>
               )}
