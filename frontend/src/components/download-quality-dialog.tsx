@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Download, X } from "lucide-react";
 import { invoke } from "@/lib/api";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export interface DownloadQualityTarget {
   bvid: string;
@@ -163,11 +164,12 @@ function DownloadQualityDialog({
         position: "fixed",
         inset: 0,
         zIndex: 1200,
-        backgroundColor: "rgba(15, 23, 42, 0.34)",
+        backgroundColor: "rgba(15, 23, 42, 0.4)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         padding: "24px",
+        backdropFilter: "blur(4px)",
       }}
     >
       <div
@@ -178,46 +180,37 @@ function DownloadQualityDialog({
         style={{
           width: "min(400px, 100%)",
           borderRadius: "14px",
-          border: "1px solid #e7e7ef",
-          backgroundColor: "#fff",
-          boxShadow: "0 18px 48px rgba(15, 23, 42, 0.2)",
+          border: "1px solid var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+          boxShadow: "var(--shadow-card-hover)",
           padding: "20px",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "18px" }}>
+        <div style={{ display: "flex", alignItems: "center", justify_content: "space-between", gap: "12px", marginBottom: "18px" } as any}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <Download style={{ width: 19, height: 19, color: "#6366f1" }} />
-            <h3 style={{ fontSize: "16px", fontWeight: 700, color: "#1a1a2e" }}>选择下载清晰度</h3>
+            <Download style={{ width: 19, height: 19, color: "var(--color-primary)" }} />
+            <h3 style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text)" }}>选择下载清晰度</h3>
           </div>
           <button type="button" onClick={onCancel} aria-label="关闭" style={iconButtonStyle}>
             <X style={{ width: 17, height: 17 }} />
           </button>
         </div>
 
-        <select
-          aria-label="下载清晰度"
-          value={selectedQuality}
-          onChange={(event) => onQualityChange(event.target.value)}
-          style={{
-            width: "100%",
-            height: "42px",
-            borderRadius: "9px",
-            border: "1px solid #dedee7",
-            padding: "0 12px",
-            color: "#26263b",
-            backgroundColor: "#fff",
-            fontSize: "14px",
-          }}
-        >
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        <Select value={selectedQuality} onValueChange={onQualityChange}>
+          <SelectTrigger className="w-full h-[42px] rounded-[9px] border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-[14px]">
+            <SelectValue placeholder="选择下载清晰度" />
+          </SelectTrigger>
+          <SelectContent className="w-full z-[1300]">
+            {options.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {isBatch ? (
-          <p style={{ marginTop: "12px", color: "#7a7a8c", fontSize: "12.5px", lineHeight: 1.6 }}>
+          <p style={{ marginTop: "12px", color: "var(--color-text-muted)", fontSize: "12.5px", lineHeight: 1.6 }}>
             已汇总所选内容可用画质；单个内容不支持该画质时，将使用其最高可用画质。
           </p>
         ) : null}
@@ -236,11 +229,11 @@ const iconButtonStyle: React.CSSProperties = {
   height: "30px",
   border: "none",
   borderRadius: "7px",
-  backgroundColor: "#f5f5fa",
+  backgroundColor: "var(--color-bg-tertiary)",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  color: "#555568",
+  color: "var(--color-text-secondary)",
   cursor: "pointer",
 };
 
@@ -248,9 +241,9 @@ const cancelButtonStyle: React.CSSProperties = {
   height: "38px",
   padding: "0 16px",
   borderRadius: "9px",
-  border: "1px solid #dedee7",
-  color: "#505065",
-  backgroundColor: "#fff",
+  border: "1px solid var(--color-border)",
+  color: "var(--color-text-secondary)",
+  backgroundColor: "var(--color-bg-secondary)",
   fontSize: "13.5px",
   fontWeight: 600,
   cursor: "pointer",
@@ -258,7 +251,7 @@ const cancelButtonStyle: React.CSSProperties = {
 
 const confirmButtonStyle: React.CSSProperties = {
   ...cancelButtonStyle,
-  border: "1px solid #6366f1",
+  border: "1px solid var(--color-primary)",
   color: "#fff",
-  backgroundColor: "#6366f1",
+  backgroundColor: "var(--color-primary)",
 };

@@ -546,7 +546,7 @@ function LoggedInPanel({
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        background: "#ffffff",
+        background: "var(--color-bg-secondary)",
         borderRadius: "18px",
         boxShadow: "0 24px 64px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.08)",
       }}
@@ -610,7 +610,7 @@ function LoggedInPanel({
             style={{
               fontSize: "18px",
               fontWeight: 700,
-              color: "#1a1a2e",
+              color: "var(--color-text)",
               letterSpacing: "0.2px",
             }}
           >
@@ -680,7 +680,7 @@ function LoggedInPanel({
             height: "42px",
             borderRadius: "11px",
             border: "1.5px solid #d8d8e4",
-            background: "#ffffff",
+            background: "var(--color-bg-secondary)",
             color: "#505065",
             fontSize: "14px",
             fontWeight: 600,
@@ -737,15 +737,15 @@ function LoggedInPanel({
               >
                 <img src={account.face} alt={account.username} referrerPolicy="no-referrer" style={{ width: 32, height: 32, borderRadius: "50%", objectFit: "cover", background: "#eef2ff" }} />
                 <span style={{ minWidth: 0 }}>
-                  <span style={{ display: "block", color: "#1a1a2e", fontSize: "13px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</span>
-                  <span style={{ color: "#8b8b9a", fontSize: "11.5px" }}>UID {account.mid}</span>
+                  <span style={{ display: "block", color: "var(--color-text)", fontSize: "13px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</span>
+                  <span style={{ color: "var(--color-text-secondary)", fontSize: "11.5px" }}>UID {account.mid}</span>
                 </span>
                 <span style={{ color: account.active ? "#6366f1" : "#505065", fontSize: "12px", fontWeight: 800 }}>
                   {account.active ? "当前" : switchingProfile === account.profile ? "切换中" : "切换"}
                 </span>
               </button>
             )) : (
-              <div style={{ color: "#8b8b9a", fontSize: "12.5px", textAlign: "center", padding: "4px 0 10px" }}>
+              <div style={{ color: "var(--color-text-secondary)", fontSize: "12.5px", textAlign: "center", padding: "4px 0 10px" }}>
                 暂无可切换的已保存账号
               </div>
             )}
@@ -801,7 +801,7 @@ function LoggedInPanel({
             height: "40px",
             borderRadius: "11px",
             border: "1.5px solid #fed7aa",
-            background: "#ffffff",
+            background: "var(--color-bg-secondary)",
             color: deletingProfile ? "#bbb" : "#ea580c",
             fontSize: "13.5px",
             fontWeight: 700,
@@ -879,7 +879,7 @@ function LoggedOutAccountPanel({
         width: "400px",
         maxHeight: "calc(100vh - 48px)",
         overflow: "hidden",
-        background: "#ffffff",
+        background: "var(--color-bg-secondary)",
         borderRadius: "18px",
         boxShadow: "0 24px 64px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.08)",
       }}
@@ -903,8 +903,8 @@ function LoggedOutAccountPanel({
             <Users className="w-[22px] h-[22px]" />
           </div>
           <div>
-            <h2 style={{ color: "#1a1a2e", fontSize: "18px", fontWeight: 800 }}>选择本地账号</h2>
-            <p style={{ color: "#8b8b9a", fontSize: "12.5px", marginTop: "3px" }}>已保存的账号可直接切换，无需重新扫码</p>
+            <h2 style={{ color: "var(--color-text)", fontSize: "18px", fontWeight: 800 }}>选择本地账号</h2>
+            <p style={{ color: "var(--color-text-secondary)", fontSize: "12.5px", marginTop: "3px" }}>已保存的账号可直接切换，无需重新扫码</p>
           </div>
         </div>
 
@@ -926,8 +926,8 @@ function LoggedOutAccountPanel({
             >
               <img src={account.face} alt={account.username} referrerPolicy="no-referrer" style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", background: "#eef2ff" }} />
               <span style={{ minWidth: 0 }}>
-                <span style={{ display: "block", color: "#1a1a2e", fontSize: "13px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</span>
-                <span style={{ color: "#8b8b9a", fontSize: "11.5px" }}>UID {account.mid}</span>
+                <span style={{ display: "block", color: "var(--color-text)", fontSize: "13px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</span>
+                <span style={{ color: "var(--color-text-secondary)", fontSize: "11.5px" }}>UID {account.mid}</span>
               </span>
               <button
                 type="button"
@@ -1028,7 +1028,7 @@ function LoginForm({
       className="relative"
       style={{
         width: "420px",
-        background: "#ffffff",
+        background: "var(--color-bg-secondary)",
         borderRadius: "18px",
         boxShadow: "0 24px 64px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.08)",
       }}
@@ -1233,7 +1233,7 @@ function QrcodePanel({ qrcodeUrl, loading, error, onRefresh }: QrcodePanelProps)
               style={{
                 padding: "12px",
                 borderRadius: "12px",
-                background: "#ffffff",
+                background: "var(--color-bg-secondary)",
                 boxShadow: "0 2px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.04)",
               }}
             >
@@ -1385,9 +1385,9 @@ function CookiePanel({ cookieInput, setCookieInput, loading, error, onLogin }: C
               padding: "14px 16px",
               borderRadius: "12px",
               border: "1.5px solid #e0e0e6",
-              background: "#ffffff",
+              background: "var(--color-bg-secondary)",
               fontSize: "14px",
-              color: "#1a1a2e",
+              color: "var(--color-text)",
               resize: "none",
               outline: "none",
               fontFamily: "inherit",

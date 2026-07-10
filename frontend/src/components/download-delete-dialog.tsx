@@ -30,9 +30,9 @@ export function DownloadDeleteDialog({ count, onConfirm, onCancel }: DownloadDel
         style={{
           width: "min(430px, calc(100vw - 40px))",
           borderRadius: "12px",
-          border: "1px solid #ebeaf2",
-          backgroundColor: "#fff",
-          boxShadow: "0 28px 58px rgba(15, 23, 42, 0.2)",
+          border: "1px solid var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+          boxShadow: "var(--shadow-card-hover)",
           padding: "20px",
         }}
       >
@@ -44,18 +44,18 @@ export function DownloadDeleteDialog({ count, onConfirm, onCancel }: DownloadDel
               borderRadius: "10px",
               display: "grid",
               placeItems: "center",
-              backgroundColor: "#fff7ed",
-              color: "#ea580c",
+              backgroundColor: "rgba(249, 115, 22, 0.1)",
+              color: "rgb(249, 115, 22)",
               flexShrink: 0,
             }}
           >
             <AlertTriangle size={21} />
           </span>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <h2 id="delete-download-title" style={{ fontSize: "16px", fontWeight: 700, color: "#171728" }}>
+            <h2 id="delete-download-title" style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text)" }}>
               删除 {count} 个下载任务？
             </h2>
-            <p style={{ marginTop: "7px", fontSize: "13px", lineHeight: 1.6, color: "#686878" }}>
+            <p style={{ marginTop: "7px", fontSize: "13px", lineHeight: 1.6, color: "var(--color-text-secondary)" }}>
               可以只移除任务记录，也可以同时删除磁盘中的已下载文件。删除文件后无法恢复。
             </p>
           </div>
@@ -89,8 +89,8 @@ const iconButtonStyle: React.CSSProperties = {
   placeItems: "center",
   borderRadius: "8px",
   border: 0,
-  color: "#7a7a8c",
-  backgroundColor: "#f5f5f8",
+  color: "var(--color-text-muted)",
+  backgroundColor: "var(--color-bg-tertiary)",
   cursor: "pointer",
 };
 
@@ -102,9 +102,9 @@ const secondaryButtonStyle: React.CSSProperties = {
   gap: "6px",
   padding: "0 12px",
   borderRadius: "8px",
-  border: "1px solid #dedee7",
-  backgroundColor: "#fff",
-  color: "#505065",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
+  color: "var(--color-text-secondary)",
   fontSize: "13px",
   fontWeight: 600,
   cursor: "pointer",
@@ -113,6 +113,6 @@ const secondaryButtonStyle: React.CSSProperties = {
 const dangerButtonStyle: React.CSSProperties = {
   ...secondaryButtonStyle,
   color: "#fff",
-  borderColor: "#dc2626",
-  backgroundColor: "#dc2626",
+  borderColor: "var(--color-error)",
+  backgroundColor: "var(--color-error)",
 };

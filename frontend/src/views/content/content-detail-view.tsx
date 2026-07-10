@@ -3,6 +3,7 @@ import { ArrowLeft, BookOpen, Download, ExternalLink, Image as ImageIcon, Link2,
 import { motion } from "framer-motion";
 import Hls from "hls.js";
 import { useAppStore } from "@/stores/app-store";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ClickableAvatar } from "@/components/video-card";
 import { CommentsSection } from "@/components/comments-section";
 import { invoke } from "@/lib/api";
@@ -522,15 +523,21 @@ function LivePlayerBlock({
         </div>
         <label style={{ display: "inline-flex", alignItems: "center", gap: "7px", fontSize: "12px", color: "#cbd5e1", fontWeight: 800 }}>
           画质
-          <select
-            value={quality}
-            onChange={(event) => onQualityChange(Number(event.target.value))}
-            style={{ height: "28px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "#fff", fontSize: "12px", fontWeight: 800, outline: "none" }}
+          <Select
+            value={String(quality)}
+            onValueChange={(val) => onQualityChange(Number(val))}
           >
-            {qualities.map((item) => (
-              <option key={item} value={item}>{liveQualityLabel(item)}</option>
-            ))}
-          </select>
+            <SelectTrigger style={{ height: "28px", borderRadius: "8px", border: "1px solid #334155", backgroundColor: "#0f172a", color: "#fff", fontSize: "12px", fontWeight: 800, outline: "none" }} className="min-w-[85px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="z-[1100]">
+              {qualities.map((item) => (
+                <SelectItem key={item} value={String(item)}>
+                  {liveQualityLabel(item)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
       </div>
       {loading ? (

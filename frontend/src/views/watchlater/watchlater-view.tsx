@@ -18,6 +18,7 @@ import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { biliVideoUrl, openExternalUrl } from "@/lib/open-external";
 import { showComingSoon } from "@/lib/coming-soon";
 import { loadCachedPageData } from "@/lib/page-cache";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAppStore } from "@/stores/app-store";
 import { formatBiliImageUrl, formatDuration } from "@/lib/utils";
 import { runPreservingMainScroll } from "@/lib/scroll-position";
@@ -620,86 +621,35 @@ function WatchLaterCard({
 }
 
 function FilterMenu({
-  open,
-  setOpen,
   value,
-  label,
   options,
   onSelect,
 }: {
-  open: boolean;
-  setOpen: (open: boolean) => void;
+  open?: boolean;
+  setOpen?: (open: boolean) => void;
   value: string;
   label: string;
   options: Array<{ value: string; label: string }>;
   onSelect: (value: string) => void;
 }) {
+  const activeLabel = options.find((opt) => opt.value === value)?.label || value;
+
   return (
     <div style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen(!open)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "5px",
-          padding: "7px 14px",
-          borderRadius: "9px",
-          fontSize: "13.5px",
-          color: "#505065",
-          backgroundColor: "transparent",
-          border: "none",
-          cursor: "pointer",
-        }}
-      >
-        {label}
-        <ChevronDown style={{ width: 15, height: 15, transform: open ? "rotate(180deg)" : "rotate(0deg)" }} />
-      </button>
-      <AnimatePresence>
-        {open ? (
-          <motion.div
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            style={{
-              position: "absolute",
-              top: "calc(100% + 6px)",
-              left: 0,
-              minWidth: "150px",
-              backgroundColor: "#fff",
-              border: "1.5px solid #ececf2",
-              borderRadius: "11px",
-              padding: "5px",
-              boxShadow: "0 8px 24px rgba(0,0,0,0.09)",
-              zIndex: 30,
-            }}
-          >
-            {options.map((option) => (
-              <button
-                key={option.value}
-                onClick={() => {
-                  onSelect(option.value);
-                  setOpen(false);
-                }}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "9px 13px",
-                  borderRadius: "8px",
-                  border: "none",
-                  cursor: "pointer",
-                  backgroundColor: value === option.value ? "#f3f0ff" : "transparent",
-                  color: value === option.value ? "#6366f1" : "#505065",
-                  fontWeight: value === option.value ? 600 : 400,
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+      <Select value={value} onValueChange={onSelect}>
+        <SelectTrigger 
+          className="border-none bg-transparent hover:bg-transparent shadow-none hover:text-[var(--color-primary)] text-[var(--color-text-secondary)] font-semibold text-[13.5px] px-3.5 py-1.5 h-auto w-auto focus:ring-0 focus:border-none cursor-pointer active:scale-100"
+        >
+          <span className="truncate">{activeLabel}</span>
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

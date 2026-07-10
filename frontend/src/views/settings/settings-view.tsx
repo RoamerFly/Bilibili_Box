@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Cookie,
   Database,
@@ -20,6 +20,7 @@ import { motion } from "framer-motion";
 import { DOWNLOAD_QUALITY_OPTIONS } from "@/components/download-quality-dialog";
 import { LoginDialog } from "@/components/login-dialog";
 import { invoke } from "@/lib/api";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { showComingSoon } from "@/lib/coming-soon";
 import { CARD_LAYOUT_KEYS, DEFAULT_CARD_LAYOUT, DEFAULT_CARD_SCALE, useAppStore, type CardLayoutKey } from "@/stores/app-store";
 
@@ -592,7 +593,7 @@ export function SettingsView() {
           control={
             <ThemeSelector
               value={(backendConfig.theme as ThemeMode) || "system"}
-              onChange={() => showComingSoon()}
+              onChange={(val) => void saveConfig({ theme: val })}
             />
           }
         />
@@ -659,18 +660,21 @@ export function SettingsView() {
                   使用默认
                 </ModeButton>
               </div>
-              <select
-                aria-label="默认下载清晰度"
+              <Select
                 value={backendConfig.download_quality}
-                onChange={(e) => void saveConfig({ download_quality: e.target.value })}
-                style={{ ...selectStyle, opacity: backendConfig.prompt_download_quality ? 0.72 : 1 }}
+                onValueChange={(val) => void saveConfig({ download_quality: val })}
               >
-                {DOWNLOAD_QUALITY_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    默认 {option.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger style={{ ...selectStyle, opacity: backendConfig.prompt_download_quality ? 0.72 : 1 }}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DOWNLOAD_QUALITY_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      默认 {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           }
         />
@@ -1286,7 +1290,7 @@ function ThemeSelector({
         gap: "2px",
         padding: "3px",
         borderRadius: "10px",
-        backgroundColor: "#f3f3f8",
+        backgroundColor: "var(--color-bg-tertiary)",
       }}
     >
       {options.map((option) => {
@@ -1304,9 +1308,9 @@ function ThemeSelector({
               borderRadius: "8px",
               fontSize: "13.5px",
               fontWeight: active ? 600 : 400,
-              border: active ? "1.5px solid #6366f1" : "1.5px solid transparent",
-              color: active ? "#6366f1" : "#505065",
-              backgroundColor: active ? "#fff" : "transparent",
+              border: active ? "1.5px solid var(--color-primary)" : "1.5px solid transparent",
+              color: active ? "var(--color-primary)" : "var(--color-text-secondary)",
+              backgroundColor: active ? "var(--color-bg-secondary)" : "transparent",
               cursor: "pointer",
               fontFamily: "inherit",
             }}
@@ -1491,7 +1495,7 @@ function ScaleSlider({
           accentColor: "#6366f1",
           outline: "none",
           cursor: "pointer",
-          background: `linear-gradient(90deg, #6366f1 ${progress}%, #e5e7eb ${progress}%)`,
+          background: `linear-gradient(90deg, #6366f1 ${progress}%, var(--color-bg-tertiary) ${progress}%)`,
         }}
       />
       <span
@@ -1500,7 +1504,7 @@ function ScaleSlider({
           textAlign: "right",
           fontSize: "13px",
           fontWeight: 800,
-          color: "#1a1a2e",
+          color: "var(--color-text)",
           fontVariantNumeric: "tabular-nums",
         }}
       >
@@ -1514,10 +1518,10 @@ const selectStyle: React.CSSProperties = {
   minWidth: "180px",
   padding: "9px 12px",
   borderRadius: "10px",
-  border: "1.5px solid #e2e2ea",
-  backgroundColor: "#fff",
+  border: "1.5px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
   fontSize: "13.5px",
-  color: "#33334a",
+  color: "var(--color-text)",
 };
 
 const secondaryButtonStyle: React.CSSProperties = {
@@ -1528,9 +1532,9 @@ const secondaryButtonStyle: React.CSSProperties = {
   borderRadius: "8px",
   fontSize: "13.5px",
   fontWeight: 500,
-  color: "#505065",
-  backgroundColor: "#fff",
-  border: "1.5px solid #e2e2ea",
+  color: "var(--color-text-secondary)",
+  backgroundColor: "var(--color-bg-secondary)",
+  border: "1.5px solid var(--color-border)",
   cursor: "pointer",
   whiteSpace: "nowrap",
 };
@@ -1543,8 +1547,8 @@ const dialogBackdropStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "center",
   padding: "24px",
-  backgroundColor: "rgba(15,23,42,0.28)",
-  backdropFilter: "blur(3px)",
+  backgroundColor: "rgba(15,23,42,0.4)",
+  backdropFilter: "blur(4px)",
 };
 
 const dialogPanelStyle: React.CSSProperties = {
@@ -1552,9 +1556,9 @@ const dialogPanelStyle: React.CSSProperties = {
   maxHeight: "82vh",
   overflowY: "auto",
   borderRadius: "16px",
-  border: "1px solid #ececf2",
-  backgroundColor: "#fff",
-  boxShadow: "0 24px 70px rgba(15,23,42,0.22)",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
+  boxShadow: "var(--shadow-card-hover)",
   padding: "20px",
 };
 
@@ -1567,7 +1571,7 @@ const dialogHeaderStyle: React.CSSProperties = {
 };
 
 const dialogTitleStyle: React.CSSProperties = {
-  color: "#1a1a2e",
+  color: "var(--color-text)",
   fontSize: "18px",
   fontWeight: 850,
   lineHeight: 1.25,
@@ -1582,7 +1586,7 @@ function stepperButtonStyle(disabled: boolean): React.CSSProperties {
     height: "38px",
     border: "none",
     backgroundColor: "transparent",
-    color: disabled ? "#d0d0da" : "#505065",
+    color: disabled ? "var(--color-text-muted)" : "var(--color-text-secondary)",
     cursor: disabled ? "not-allowed" : "pointer",
     fontSize: "17px",
     fontFamily: "inherit",

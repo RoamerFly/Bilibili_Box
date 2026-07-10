@@ -16,6 +16,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import { invoke } from "@/lib/api";
 import { useDownloadQualityPrompt, type DownloadQualityTarget } from "@/components/download-quality-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { openExternalUrl } from "@/lib/open-external";
 import { LoginDialog } from "@/components/login-dialog";
@@ -745,7 +746,7 @@ export function SearchView() {
           transition={{ delay: 0.08, duration: 0.25 }}
           style={{ display: "grid", gap: "10px", marginBottom: "20px" }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "5px", padding: "4px", borderRadius: "11px", backgroundColor: "#f1f1f7", overflowX: "auto", width: "fit-content", maxWidth: "100%" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "5px", padding: "4px", borderRadius: "11px", backgroundColor: "var(--color-bg-tertiary)", overflowX: "auto", width: "fit-content", maxWidth: "100%" }}>
             {searchTypeTabs.map(({ value, label, count, loaded }) => (
               <button
                 key={value}
@@ -758,9 +759,9 @@ export function SearchView() {
                   padding: "7px 12px",
                   borderRadius: "8px",
                   border: "none",
-                  backgroundColor: activeResultType === value ? "#fff" : "transparent",
-                  boxShadow: activeResultType === value ? "0 1px 4px rgba(65,65,95,0.09)" : "none",
-                  color: activeResultType === value ? "#4338ca" : "#666679",
+                  backgroundColor: activeResultType === value ? "var(--color-bg-secondary)" : "transparent",
+                  boxShadow: activeResultType === value ? "var(--shadow-card)" : "none",
+                  color: activeResultType === value ? "var(--color-primary)" : "var(--color-text-secondary)",
                   fontSize: "13px",
                   fontWeight: 700,
                   cursor: "pointer",
@@ -2011,8 +2012,8 @@ const tabCountBadgeStyle: React.CSSProperties = {
   height: "19px",
   padding: "0 7px",
   borderRadius: "999px",
-  backgroundColor: "#eceef3",
-  color: "#657080",
+  backgroundColor: "var(--color-bg-tertiary)",
+  color: "var(--color-text-secondary)",
   fontSize: "11.5px",
   fontWeight: 850,
   lineHeight: 1,
@@ -2095,43 +2096,25 @@ function FilterSelect({
   options: Array<{ value: string; label: string }>;
   onChange: (value: string) => void;
 }) {
+  const activeLabel = options.find((opt) => opt.value === value)?.label || value;
+
   return (
-    <label
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "8px",
-        padding: "7px 10px",
-        borderRadius: "10px",
-        backgroundColor: "#fff",
-        border: "1px solid #e2e2ea",
-      }}
-    >
-      <span style={{ fontSize: "13px", fontWeight: 600, color: "#6f6f82", whiteSpace: "nowrap" }}>
-        {label}
-      </span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        style={{
-          height: "28px",
-          border: "none",
-          outline: "none",
-          backgroundColor: "transparent",
-          color: "#1a1a2e",
-          fontSize: "13px",
-          fontWeight: 600,
-          fontFamily: "inherit",
-          cursor: "pointer",
-        }}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div style={{ display: "inline-flex", alignItems: "center" }}>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger 
+          className="border-none bg-transparent hover:bg-transparent shadow-none hover:text-[var(--color-primary)] text-[var(--color-text-secondary)] font-semibold text-[13.5px] px-3.5 py-1.5 h-auto w-auto focus:ring-0 focus:border-none cursor-pointer active:scale-100"
+        >
+          <span className="truncate">{activeLabel}</span>
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
 

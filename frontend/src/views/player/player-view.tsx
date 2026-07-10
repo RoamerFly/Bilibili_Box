@@ -22,6 +22,7 @@ import {
 import type { MediaPlayerClass } from "dashjs";
 import { motion } from "framer-motion";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CommentsSection } from "@/components/comments-section";
 import { invoke } from "@/lib/api";
 import { showNotice } from "@/lib/coming-soon";
@@ -1006,27 +1007,37 @@ export function PlayerView() {
                     <PlayerIconButton title="下载音频为 MP3" onClick={() => void handleAudioDownload()}>
                       <Music2 size={18} />
                     </PlayerIconButton>
-                    <select
-                      aria-label="播放清晰度"
-                      title="播放清晰度"
-                      value={playbackQuality}
+                    <Select
+                      value={String(playbackQuality)}
+                      onValueChange={(val) => void handlePlaybackQualityChange(Number(val))}
                       disabled={!availableQualities.length}
-                      onChange={(event) => void handlePlaybackQualityChange(Number(event.target.value))}
-                      style={playerSelectStyle}
                     >
-                      {availableQualities.length ? availableQualities.map((quality) => (
-                        <option key={quality} value={quality}>{PLAYBACK_QUALITY_LABELS[quality] || `${quality}P`}</option>
-                      )) : <option value={playbackQuality}>本地</option>}
-                    </select>
-                    <select
-                      aria-label="播放倍速"
-                      title="播放倍速"
-                      value={playbackRate}
-                      onChange={(event) => handlePlaybackRateChange(Number(event.target.value))}
-                      style={playerSelectStyle}
+                      <SelectTrigger style={playerSelectStyle} className="min-w-[80px] border-white/30 bg-black/40 text-white h-[30px] rounded-[7px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="z-[1050]">
+                        {availableQualities.length ? availableQualities.map((quality) => (
+                          <SelectItem key={quality} value={String(quality)}>
+                            {PLAYBACK_QUALITY_LABELS[quality] || `${quality}P`}
+                          </SelectItem>
+                        )) : <SelectItem value={String(playbackQuality)}>本地</SelectItem>}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={String(playbackRate)}
+                      onValueChange={(val) => handlePlaybackRateChange(Number(val))}
                     >
-                      {PLAYBACK_SPEEDS.map((rate) => <option key={rate} value={rate}>{rate}x</option>)}
-                    </select>
+                      <SelectTrigger style={playerSelectStyle} className="min-w-[65px] border-white/30 bg-black/40 text-white h-[30px] rounded-[7px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="z-[1050]">
+                        {PLAYBACK_SPEEDS.map((rate) => (
+                          <SelectItem key={rate} value={String(rate)}>
+                            {rate}x
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <PlayerIconButton
                       title={isPictureInPicture ? "退出画中画" : "画中画"}
                       disabled={!canPictureInPicture}
@@ -1947,9 +1958,9 @@ const episodeActionButtonStyle: React.CSSProperties = {
   height: "30px",
   padding: "0 10px",
   borderRadius: "8px",
-  border: "1px solid #dedee7",
-  backgroundColor: "#fff",
-  color: "#6366f1",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
+  color: "var(--color-primary)",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
@@ -1962,9 +1973,9 @@ const episodeActionButtonStyle: React.CSSProperties = {
 const coinDialogStyle: React.CSSProperties = {
   width: "min(400px, 100%)",
   borderRadius: "16px",
-  border: "1px solid #ececf2",
-  backgroundColor: "#fff",
-  boxShadow: "0 24px 60px rgba(15, 23, 42, 0.22)",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
+  boxShadow: "var(--shadow-card-hover)",
   padding: "18px",
 };
 
@@ -1975,7 +1986,7 @@ const coinOptionStyle: React.CSSProperties = {
   gap: "10px",
   padding: "12px 14px",
   borderRadius: "12px",
-  backgroundColor: "#fff",
-  border: "1px solid #ececf2",
+  backgroundColor: "var(--color-bg-secondary)",
+  border: "1px solid var(--color-border)",
   cursor: "pointer",
 };
