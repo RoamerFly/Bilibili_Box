@@ -18,6 +18,7 @@ import { DownloadsView } from "@/views/downloads/downloads-view";
 import { SettingsView } from "@/views/settings/settings-view";
 import { AnimatePresence, motion } from "framer-motion";
 import { easeConfig } from "@/lib/utils";
+import { Minus, Square, X } from "lucide-react";
 import { invoke } from "@/lib/api";
 import { COMING_SOON_EVENT } from "@/lib/coming-soon";
 
@@ -40,6 +41,7 @@ export function AppShell() {
   const setUserInfo = useAppStore((s) => s.setUserInfo);
   const setRecommendPageState = useAppStore((s) => s.setRecommendPageState);
   const bottomBarExpanded = useAppStore((s) => s.bottomBarExpanded);
+  const theme = useAppStore((s) => s.config?.theme) as string | undefined;
   const scrollRef = useRef<HTMLDivElement>(null);
   const previousViewRef = useRef(currentView);
   const [showComingSoon, setShowComingSoon] = useState(false);
@@ -49,6 +51,38 @@ export function AppShell() {
   // 启用 config watch - 监听 sessdata 变化自动获取/清除用户信息
   useConfigWatch();
   useDownloadEvents();
+
+  useEffect(() => {
+    const applyTheme = (themeValue: string | undefined) => {
+      const activeTheme = themeValue || "system";
+      if (activeTheme === "system") {
+        const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        if (isDark) {
+          document.documentElement.dataset.theme = "dark";
+        } else {
+          delete document.documentElement.dataset.theme;
+        }
+      } else if (activeTheme === "dark") {
+        document.documentElement.dataset.theme = "dark";
+      } else {
+        delete document.documentElement.dataset.theme;
+      }
+    };
+
+    applyTheme(theme);
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleSystemThemeChange = () => {
+      if (!theme || theme === "system") {
+        applyTheme("system");
+      }
+    };
+
+    mediaQuery.addEventListener("change", handleSystemThemeChange);
+    return () => {
+      mediaQuery.removeEventListener("change", handleSystemThemeChange);
+    };
+  }, [theme]);
 
   useLayoutEffect(() => {
     const previousView = previousViewRef.current;
@@ -134,16 +168,13 @@ export function AppShell() {
         <motion.div
           ref={scrollRef}
           className="bb-main-scroll flex-1 overflow-x-hidden overflow-y-auto"
-          animate={{ paddingBottom: bottomBarExpanded ? 300 : 68 }}
-          transition={{ type: "spring", stiffness: 350, damping: 30 }}
+          style={{ paddingBottom: "60px" }}
         >
           <AnimatePresence initial={false} mode="wait">
             {renderView(currentView, accountViewVersion)}
           </AnimatePresence>
         </motion.div>
-        <div className="absolute bottom-0 left-0 z-30" style={{ right: 12 }}>
-          <BottomBar />
-        </div>
+        <BottomBar />
         <AnimatePresence>
           {showComingSoon ? (
             <motion.div
@@ -187,6 +218,9 @@ function WindowDragRegion() {
 }
 
 function WindowControls() {
+  const isMacOS = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform || "");
+  if (isMacOS) return null;
+
   const stop = (event: MouseEvent<HTMLElement>) => {
     event.stopPropagation();
   };
@@ -199,31 +233,36 @@ function WindowControls() {
   };
 
   return (
-    <div className="bb-window-controls">
+    <div 
+      className="absolute right-0 top-0 z-[9000] flex h-9 select-none"
+      onMouseDown={stop}
+    >
       <button
         type="button"
         aria-label="最小化"
-        onMouseDown={stop}
+        style={{ border: "none" }}
+        className="flex h-9 w-11 items-center justify-center text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-border)] hover:text-[var(--color-text)] bg-transparent cursor-pointer"
         onClick={(event) => runWindowAction(event, "window_minimize", "minimize window")}
       >
-        <span />
+        <Minus size={15} />
       </button>
       <button
         type="button"
         aria-label="最大化"
-        onMouseDown={stop}
+        style={{ border: "none" }}
+        className="flex h-9 w-11 items-center justify-center text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-border)] hover:text-[var(--color-text)] bg-transparent cursor-pointer"
         onClick={(event) => runWindowAction(event, "window_toggle_maximize", "toggle window maximize")}
       >
-        <i />
+        <Square size={11} />
       </button>
       <button
         type="button"
         aria-label="关闭"
-        className="close"
-        onMouseDown={stop}
+        style={{ border: "none" }}
+        className="flex h-9 w-11 items-center justify-center text-[var(--color-text-secondary)] transition-colors hover:bg-[#ef4444] hover:text-white bg-transparent cursor-pointer"
         onClick={(event) => runWindowAction(event, "window_close", "close window")}
       >
-        <b />
+        <X size={15} />
       </button>
     </div>
   );

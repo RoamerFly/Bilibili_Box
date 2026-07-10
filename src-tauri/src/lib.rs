@@ -82,11 +82,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(move |app| {
-            let config = Config::load(app.handle())?;
-            let config = Arc::new(RwLock::new(config.clone()));
+            let mut config_val = Config::load(app.handle())?;
+            config_val.start_maximized = false; // Force non-fullscreen startup
+            let config = Arc::new(RwLock::new(config_val.clone()));
             app.manage(config.clone());
 
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let _ = window.set_decorations(false);
+                }
+                
                 if config.read().start_maximized {
                     let _ = window.maximize();
                 } else {

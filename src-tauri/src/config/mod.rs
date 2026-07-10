@@ -497,7 +497,7 @@ impl Config {
     fn default_with_dir(_user_data_dir: &Path) -> Self {
         Self {
             download_dir: Self::default_download_dir(),
-            start_maximized: true,
+            start_maximized: false,
             card_scale: 1.0,
             card_page_size: 6,
             card_page_rows: 3,
