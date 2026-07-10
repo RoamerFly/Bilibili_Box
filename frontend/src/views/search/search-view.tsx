@@ -1111,28 +1111,111 @@ export function SearchView() {
               )}
               
               {(activeResultType === "all" || activeResultType === "video" || activeResultType === "bangumi") && (
-                <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <div style={{ display: "inline-flex", alignItems: "center" }}>
                   {multiSelectEnabled ? (
-                    <>
-                      <GhostActionButton size="small" onClick={toggleVisibleSelection} icon={<span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", width: "12px", height: "12px" }} aria-hidden="true">{allVisibleSelected ? "✓" : "□"}</span>}>
-                        {allVisibleSelected ? "取消全选" : "全选当前"}
-                      </GhostActionButton>
-                      <GhostActionButton size="small" onClick={toggleMultiSelect} icon={<span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", width: "12px", height: "12px" }} aria-hidden="true">✓</span>}>
-                        取消
-                      </GhostActionButton>
-                      <GhostActionButton
-                        size="small"
-                        onClick={() => void handleBatchDownload()}
-                        icon={batchDownloading ? <Loader2 className="animate-spin" style={{ width: 12, height: 12 }} /> : <Download style={{ width: 12, height: 12 }} />}
-                        disabled={batchDownloading || selectedKeys.size === 0}
+                    <div style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      borderRadius: "6px",
+                      padding: "2px",
+                      border: "1.5px solid var(--color-border)",
+                      gap: "2px",
+                      boxShadow: "var(--shadow-sm)"
+                    }}>
+                      <button
+                        type="button"
+                        onClick={toggleVisibleSelection}
+                        style={{
+                          border: "none",
+                          background: "none",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          color: "var(--color-text-secondary)",
+                          padding: "4px 8px",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          fontFamily: "inherit",
+                        }}
+                        className="hover:bg-[var(--color-bg-secondary)] hover:text-[var(--color-primary)] transition-colors"
                       >
-                        下载选中 {selectedKeys.size ? `(${selectedKeys.size})` : ""}
-                      </GhostActionButton>
-                    </>
+                        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "10px", width: "12px", height: "12px" }}>{allVisibleSelected ? "✓" : "□"}</span>
+                        {allVisibleSelected ? "取消全选" : "全选当前"}
+                      </button>
+                      
+                      <div style={{ width: "1px", height: "12px", backgroundColor: "var(--color-border)", margin: "0 2px" }} />
+
+                      <button
+                        type="button"
+                        onClick={() => void handleBatchDownload()}
+                        disabled={batchDownloading || selectedKeys.size === 0}
+                        style={{
+                          border: "none",
+                          background: "none",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          color: selectedKeys.size > 0 ? "var(--color-primary)" : "#a5a5b2",
+                          padding: "4px 8px",
+                          borderRadius: "4px",
+                          cursor: batchDownloading || selectedKeys.size === 0 ? "not-allowed" : "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          fontFamily: "inherit",
+                        }}
+                        className={selectedKeys.size > 0 ? "hover:bg-[var(--color-bg-secondary)] transition-colors" : ""}
+                      >
+                        {batchDownloading ? <Loader2 className="animate-spin" style={{ width: 11, height: 11 }} /> : <Download style={{ width: 11, height: 11 }} />}
+                        下载{selectedKeys.size > 0 ? `(${selectedKeys.size})` : ""}
+                      </button>
+
+                      <div style={{ width: "1px", height: "12px", backgroundColor: "var(--color-border)", margin: "0 2px" }} />
+
+                      <button
+                        type="button"
+                        onClick={toggleMultiSelect}
+                        style={{
+                          border: "none",
+                          background: "none",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          color: "#ef4444",
+                          padding: "4px 8px",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                        className="hover:bg-[#fef2f2] transition-colors"
+                      >
+                        取消
+                      </button>
+                    </div>
                   ) : (
-                    <GhostActionButton size="small" onClick={toggleMultiSelect} icon={<span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", width: "12px", height: "12px" }} aria-hidden="true">□</span>}>
+                    <button
+                      type="button"
+                      onClick={toggleMultiSelect}
+                      style={{
+                        border: "1.5px solid var(--color-border)",
+                        backgroundColor: "var(--color-bg-secondary)",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        color: "var(--color-text-secondary)",
+                        padding: "4px 10px",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        fontFamily: "inherit",
+                      }}
+                      className="hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-primary)] transition-colors"
+                    >
+                      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "10px", width: "12px", height: "12px" }}>□</span>
                       多选
-                    </GhostActionButton>
+                    </button>
                   )}
                 </div>
               )}
