@@ -495,6 +495,61 @@ export function SearchView() {
     };
   }, [activeLiveType, activeResultType, currentPage, pageSize, result]);
 
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [multiSelectEnabled, setMultiSelectEnabled] = useState(false);
+  const [batchDownloading, setBatchDownloading] = useState(false);
+
+  useEffect(() => {
+    setSelectedKeys(new Set());
+    setMultiSelectEnabled(false);
+  }, [result]);
+
+  const showVideos = activeResultType === "all" || activeResultType === "video";
+  const showBangumi = activeResultType === "all" || activeResultType === "bangumi";
+  
+  const visibleKeys = useMemo(() => {
+    if (result?.type !== "Aggregate") return [];
+    return [
+      ...(showVideos ? result.videos.map((video) => `video:${video.bvid}`) : []),
+      ...(showBangumi ? result.bangumi.map((bangumi) => `bangumi:${bangumi.season_id}`) : []),
+    ];
+  }, [result, showVideos, showBangumi]);
+
+  const allVisibleSelected = useMemo(() => {
+    return visibleKeys.length > 0 && visibleKeys.every((key) => selectedKeys.has(key));
+  }, [visibleKeys, selectedKeys]);
+
+  const toggleMultiSelect = () => {
+    setMultiSelectEnabled((enabled) => {
+      if (enabled) setSelectedKeys(new Set());
+      return !enabled;
+    });
+  };
+
+  const toggleSelection = useCallback((key: string) => {
+    setSelectedKeys((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleVisibleSelection = () => {
+    setSelectedKeys((previous) => {
+      const next = new Set(previous);
+      if (allVisibleSelected) {
+        visibleKeys.forEach((key) => next.delete(key));
+      } else {
+        visibleKeys.forEach((key) => next.add(key));
+      }
+      return next;
+    });
+  };
+
   useEffect(() => {
     if (result?.type !== "Aggregate" || aggregateLoadedPageCount <= 0) return;
     if (currentPage > aggregateLoadedPageCount) {
@@ -602,6 +657,100 @@ export function SearchView() {
     const detail = await invoke<BangumiInfo>("get_bangumi_info", { seasonId: bangumi.season_id });
     return detail.episodes.map((episode) => ({ bvid: episode.bvid, cid: episode.cid }));
   };
+
+  const handleBatchDownload = async () => {
+    if (result?.type !== "Aggregate") return;
+    const operations = [
+      ...result.videos
+        .filter((video) => selectedKeys.has(`video:${video.bvid}`))
+        .map((video) => ({
+          key: `video:${video.bvid}`,
+          title: video.title || video.bvid,
+          targets: () => resolveSearchVideoDownloadTargets(video),
+          run: (quality: string, groupOptions: { groupId: string; groupTitle: string; groupTotal: number }) =>
+            handleSearchVideoDownload(video, quality, groupOptions),
+        })),
+      ...result.bangumi
+        .filter((bangumi) => selectedKeys.has(`bangumi:${bangumi.season_id}`))
+        .map((bangumi) => ({
+          key: `bangumi:${bangumi.season_id}`,
+          title: bangumi.title,
+          targets: () => resolveSearchBangumiDownloadTargets(bangumi),
+          run: (quality: string, groupOptions: { groupId: string; groupTitle: string; groupTotal: number }) =>
+            handleSearchBangumiDownload(bangumi, quality, groupOptions),
+        })),
+    ];
+    if (!operations.length) return;
+
+    setBatchDownloading(true);
+    try {
+      const targets = (await Promise.all(operations.map((operation) => operation.targets()))).flat();
+      const downloadQuality = await requestDownloadQuality(targets);
+      if (!downloadQuality) return;
+      const groupOptions = {
+        groupId: `search-selected:${Date.now()}`,
+        groupTitle: operations.slice(0, 2).map((operation) => operation.title).join("、") + (operations.length > 2 ? " 等" : ""),
+        groupTotal: targets.length,
+      };
+      const outcomes = await Promise.all(operations.map(async (operation) => ({ key: operation.key, ok: await operation.run(downloadQuality, groupOptions) })));
+      setSelectedKeys(new Set(outcomes.filter((outcome) => !outcome.ok).map((outcome) => outcome.key)));
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBatchDownloading(false);
+    }
+  };
+
+  const liveRooms = useMemo(() => {
+    if (result?.type !== "Aggregate") return [];
+    return result.lives.filter((item) => item.badge === "直播间");
+  }, [result]);
+
+  const liveUsers = useMemo(() => {
+    if (result?.type !== "Aggregate") return [];
+    return result.lives.filter((item) => item.badge === "主播");
+  }, [result]);
+
+  const displayedLives = useMemo(() => {
+    return activeLiveType === "room" ? liveRooms : liveUsers;
+  }, [activeLiveType, liveRooms, liveUsers]);
+
+  const statsText = useMemo(() => {
+    if (result?.type !== "Aggregate" || !visibleAggregateResult) return "";
+    const type = activeResultType === "all" ? "video" : activeResultType;
+    
+    let shown = 0;
+    let loaded = 0;
+    let total = 0;
+    
+    if (type === "video") {
+      shown = visibleAggregateResult.videos.length;
+      loaded = result.videos.length;
+      total = result.video_page.total;
+    } else if (type === "bangumi") {
+      shown = visibleAggregateResult.bangumi.length;
+      loaded = result.bangumi.length;
+      total = result.bangumi_page.total;
+    } else if (type === "film") {
+      shown = (visibleAggregateResult.films ?? []).length;
+      loaded = (result.films ?? []).length;
+      total = result.film_page?.total || 0;
+    } else if (type === "live") {
+      shown = displayedLives.length;
+      loaded = (result.lives ?? []).length;
+      total = result.live_page?.total || 0;
+    } else if (type === "article") {
+      shown = (visibleAggregateResult.articles ?? []).length;
+      loaded = (result.articles ?? []).length;
+      total = result.article_page?.total || 0;
+    } else if (type === "user") {
+      shown = (visibleAggregateResult.users ?? []).length;
+      loaded = (result.users ?? []).length;
+      total = result.user_page?.total || 0;
+    }
+    
+    return `已显示 ${shown} 个，已加载 ${loaded}/${Math.max(total, loaded)} 个`;
+  }, [result, visibleAggregateResult, activeResultType, displayedLives]);
 
   const handleOpenBrowser = (url: string) => {
     void openExternalUrl(url).catch((err) => setError(String(err)));
@@ -805,7 +954,40 @@ export function SearchView() {
             <span style={{ fontSize: "12.5px", color: "#9a9aa8" }}>
               排序、日期和时长对关键词视频结果生效
             </span>
-            <div style={{ marginLeft: "auto" }}>
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
+              {statsText && (
+                <span style={{ fontSize: "12px", color: "#8b8b9a", marginRight: "4px" }}>
+                  {statsText}
+                </span>
+              )}
+              
+              {(activeResultType === "all" || activeResultType === "video" || activeResultType === "bangumi") && (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  {multiSelectEnabled ? (
+                    <>
+                      <GhostActionButton size="small" onClick={toggleVisibleSelection} icon={<span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", width: "12px", height: "12px" }} aria-hidden="true">{allVisibleSelected ? "✓" : "□"}</span>}>
+                        {allVisibleSelected ? "取消全选" : "全选当前"}
+                      </GhostActionButton>
+                      <GhostActionButton size="small" onClick={toggleMultiSelect} icon={<span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", width: "12px", height: "12px" }} aria-hidden="true">✓</span>}>
+                        取消
+                      </GhostActionButton>
+                      <GhostActionButton
+                        size="small"
+                        onClick={() => void handleBatchDownload()}
+                        icon={batchDownloading ? <Loader2 className="animate-spin" style={{ width: 12, height: 12 }} /> : <Download style={{ width: 12, height: 12 }} />}
+                        disabled={batchDownloading || selectedKeys.size === 0}
+                      >
+                        下载选中 {selectedKeys.size ? `(${selectedKeys.size})` : ""}
+                      </GhostActionButton>
+                    </>
+                  ) : (
+                    <GhostActionButton size="small" onClick={toggleMultiSelect} icon={<span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", width: "12px", height: "12px" }} aria-hidden="true">□</span>}>
+                      多选
+                    </GhostActionButton>
+                  )}
+                </div>
+              )}
+              
               <PageCardControls
                 layoutKey="search"
                 viewMode={viewMode}
@@ -895,6 +1077,9 @@ export function SearchView() {
                   onOpenBrowser={handleOpenBrowser}
                   onOpenAuthor={openUpProfile}
                   onOpenContent={openContentDetail}
+                  multiSelectEnabled={multiSelectEnabled}
+                  selectedKeys={selectedKeys}
+                  onToggleSelection={toggleSelection}
                 />
               ) : null}
               {aggregatePageInfo && Math.max(aggregateLoadedPageCount, aggregateTotalPageCount) > 1 ? (
@@ -1222,6 +1407,9 @@ function AggregateResult({
   onOpenBrowser,
   onOpenAuthor,
   onOpenContent,
+  multiSelectEnabled,
+  selectedKeys,
+  onToggleSelection,
 }: {
   result: Extract<SearchResponse, { type: "Aggregate" }>;
   activeType: SearchResultType;
@@ -1250,135 +1438,22 @@ function AggregateResult({
   onOpenBrowser: (url: string) => void;
   onOpenAuthor: (author: { mid: number; name?: string; face?: string }) => void;
   onOpenContent: (content: ContentDetailState) => void;
+  multiSelectEnabled: boolean;
+  selectedKeys: Set<string>;
+  onToggleSelection: (key: string) => void;
 }) {
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
-  const [multiSelectEnabled, setMultiSelectEnabled] = useState(false);
-  const [batchDownloading, setBatchDownloading] = useState(false);
   const showVideos = activeType === "all" || activeType === "video";
   const showBangumi = activeType === "all" || activeType === "bangumi";
   const showFilms = activeType === "all" || activeType === "film";
   const showLives = activeType === "all" || activeType === "live";
   const showArticles = activeType === "all" || activeType === "article";
   const showUsers = activeType === "all" || activeType === "user";
-  const visibleKeys = [
-    ...(showVideos ? result.videos.map((video) => `video:${video.bvid}`) : []),
-    ...(showBangumi ? result.bangumi.map((bangumi) => `bangumi:${bangumi.season_id}`) : []),
-  ];
   const liveRooms = result.lives.filter((item) => item.badge === "直播间");
   const liveUsers = result.lives.filter((item) => item.badge === "主播");
   const displayedLives = activeLiveType === "room" ? liveRooms : liveUsers;
-  const allVisibleSelected = visibleKeys.length > 0 && visibleKeys.every((key) => selectedKeys.has(key));
-
-  useEffect(() => {
-    setSelectedKeys(new Set());
-    setMultiSelectEnabled(false);
-  }, [result]);
-
-  const toggleMultiSelect = () => {
-    setMultiSelectEnabled((enabled) => {
-      if (enabled) setSelectedKeys(new Set());
-      return !enabled;
-    });
-  };
-
-  const toggleSelection = (key: string) => {
-    if (!multiSelectEnabled) return;
-    setSelectedKeys((previous) => {
-      const next = new Set(previous);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-  };
-
-  const toggleVisibleSelection = () => {
-    if (!multiSelectEnabled) return;
-    setSelectedKeys((previous) => {
-      const next = new Set(previous);
-      if (allVisibleSelected) {
-        visibleKeys.forEach((key) => next.delete(key));
-      } else {
-        visibleKeys.forEach((key) => next.add(key));
-      }
-      return next;
-    });
-  };
-
-  const handleBatchDownload = async () => {
-    const operations = [
-      ...result.videos
-        .filter((video) => selectedKeys.has(`video:${video.bvid}`))
-        .map((video) => ({
-          key: `video:${video.bvid}`,
-          title: video.title || video.bvid,
-          targets: () => onResolveVideoDownloadTargets(video),
-          run: (quality: string, groupOptions: { groupId: string; groupTitle: string; groupTotal: number }) =>
-            onDownloadVideo(video, quality, groupOptions),
-        })),
-      ...result.bangumi
-        .filter((bangumi) => selectedKeys.has(`bangumi:${bangumi.season_id}`))
-        .map((bangumi) => ({
-          key: `bangumi:${bangumi.season_id}`,
-          title: bangumi.title,
-          targets: () => onResolveBangumiDownloadTargets(bangumi),
-          run: (quality: string, groupOptions: { groupId: string; groupTitle: string; groupTotal: number }) =>
-            onDownloadBangumi(bangumi, quality, groupOptions),
-        })),
-    ];
-    if (!operations.length) return;
-
-    setBatchDownloading(true);
-    try {
-      const targets = (await Promise.all(operations.map((operation) => operation.targets()))).flat();
-      const downloadQuality = await onRequestDownloadQuality(targets);
-      if (!downloadQuality) return;
-      const groupOptions = {
-        groupId: `search-selected:${Date.now()}`,
-        groupTitle: operations.slice(0, 2).map((operation) => operation.title).join("、") + (operations.length > 2 ? " 等" : ""),
-        groupTotal: targets.length,
-      };
-      const outcomes = await Promise.all(operations.map(async (operation) => ({ key: operation.key, ok: await operation.run(downloadQuality, groupOptions) })));
-      setSelectedKeys(new Set(outcomes.filter((outcome) => !outcome.ok).map((outcome) => outcome.key)));
-    } catch (err) {
-      onDownloadError(err);
-    } finally {
-      setBatchDownloading(false);
-    }
-  };
 
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px", flexWrap: "wrap" }}>
-        <span style={{ fontSize: "13px", color: "#7a7a8c" }}>
-          当前类别 {getSearchTypeLabel(activeType)}
-        </span>
-        <div style={{ display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap" }}>
-          {multiSelectEnabled ? (
-            <>
-              <GhostActionButton onClick={toggleVisibleSelection} icon={<span aria-hidden="true">{allVisibleSelected ? "✓" : "□"}</span>}>
-                {allVisibleSelected ? "取消全选" : "全选当前"}
-              </GhostActionButton>
-              <GhostActionButton onClick={toggleMultiSelect} icon={<span aria-hidden="true">✓</span>}>
-                取消
-              </GhostActionButton>
-              <GhostActionButton
-                onClick={() => void handleBatchDownload()}
-                icon={batchDownloading ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Download style={{ width: 15, height: 15 }} />}
-                disabled={batchDownloading || selectedKeys.size === 0}
-              >
-                下载选中 {selectedKeys.size ? `(${selectedKeys.size})` : ""}
-              </GhostActionButton>
-            </>
-          ) : (
-            <GhostActionButton onClick={toggleMultiSelect} icon={<span aria-hidden="true">□</span>}>
-              多选
-            </GhostActionButton>
-          )}
-        </div>
-      </div>
 
       {showVideos && result.videos.length ? (
         <>
@@ -1391,7 +1466,7 @@ function AggregateResult({
                 selectable={multiSelectEnabled}
                 selected={multiSelectEnabled && selectedKeys.has(`video:${video.bvid}`)}
                 scale={scale}
-                onToggleSelection={() => toggleSelection(`video:${video.bvid}`)}
+                onToggleSelection={() => onToggleSelection(`video:${video.bvid}`)}
                 onDownload={() => void onDownloadVideo(video)}
                 onOpenBrowser={() => onOpenBrowser(`https://www.bilibili.com/video/${video.bvid}`)}
                 onPlay={() => onOpenVideoPlayer({ bvid: video.bvid, title: video.title, pic: video.pic })}
@@ -1413,7 +1488,7 @@ function AggregateResult({
                 selectable={multiSelectEnabled}
                 selected={multiSelectEnabled && selectedKeys.has(`bangumi:${bangumi.season_id}`)}
                 scale={scale}
-                onToggleSelection={() => toggleSelection(`bangumi:${bangumi.season_id}`)}
+                onToggleSelection={() => onToggleSelection(`bangumi:${bangumi.season_id}`)}
                 onDownload={() => void onDownloadBangumi(bangumi)}
                 onOpenBrowser={() => onOpenBrowser(`https://www.bilibili.com/bangumi/play/ss${bangumi.season_id}`)}
                 onPlay={() => onOpenBangumiPlayer(bangumi)}
@@ -2159,12 +2234,15 @@ function GhostActionButton({
   icon,
   onClick,
   disabled = false,
+  size = "normal",
 }: {
   children: React.ReactNode;
   icon: React.ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  size?: "normal" | "small";
 }) {
+  const isSmall = size === "small";
   return (
     <motion.button
       onClick={onClick}
@@ -2175,12 +2253,12 @@ function GhostActionButton({
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: "7px",
-        padding: "9px 18px",
-        borderRadius: "10px",
+        gap: isSmall ? "4px" : "7px",
+        padding: isSmall ? "5px 12px" : "9px 18px",
+        borderRadius: isSmall ? "6px" : "10px",
         backgroundColor: "#fff",
         color: disabled ? "#a5a5b2" : "#505065",
-        fontSize: "14px",
+        fontSize: isSmall ? "12px" : "14px",
         fontWeight: 600,
         cursor: disabled ? "not-allowed" : "pointer",
         border: "1.5px solid #d8d8e4",
