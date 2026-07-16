@@ -450,7 +450,7 @@ export function SettingsView() {
           minHeight: "100%",
         }}
       >
-        <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
+        <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "var(--color-primary)" }} />
       </div>
     );
   }
@@ -465,10 +465,10 @@ export function SettingsView() {
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
           <div>
-            <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
+            <h1 style={{ fontSize: "24px", fontWeight: 800, color: "var(--color-text)", lineHeight: 1.25 }}>
               设置
             </h1>
-            <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "5px" }}>
+            <p style={{ fontSize: "14px", color: "var(--color-text-muted)", marginTop: "5px" }}>
               个性化配置 BiliBox
             </p>
           </div>
@@ -519,8 +519,8 @@ export function SettingsView() {
             marginBottom: "16px",
             padding: "11px 16px",
             borderRadius: "10px",
-            backgroundColor: feedbackIsError ? "#fef2f2" : "#f0fdf4",
-            color: feedbackIsError ? "#dc2626" : "#15803d",
+            backgroundColor: feedbackIsError ? "var(--color-error-bg)" : "var(--color-success-bg)",
+            color: feedbackIsError ? "var(--color-error-text)" : "var(--color-success-text)",
             fontSize: "13.5px",
           }}
         >
@@ -533,15 +533,15 @@ export function SettingsView() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.08, duration: 0.35 }}
         style={{
-          backgroundColor: "#fff",
+          backgroundColor: "var(--color-bg-secondary)",
           borderRadius: "14px",
-          border: "1.5px solid #ececf2",
+          border: "1.5px solid var(--color-border)",
           overflow: "hidden",
         }}
       >
         <SettingRow
-          icon={<Cookie style={{ width: 21, height: 21, color: "#d97706" }} />}
-          iconBgColor="#fef9e6"
+          icon={<Cookie style={{ width: 21, height: 21, color: "var(--color-warning-text)" }} />}
+          iconBgColor="var(--color-warning-bg)"
           title="登录状态"
           description="使用 Bilibili 账号获取更多个人内容"
           control={
@@ -555,14 +555,14 @@ export function SettingsView() {
                     borderRadius: "8px",
                     fontSize: "13px",
                     fontWeight: 500,
-                    backgroundColor: "#f0fdf4",
-                    color: "#16a34a",
+                    backgroundColor: "var(--color-success-bg)",
+                    color: "var(--color-success-text)",
                   }}
                 >
                   已登录：{userInfo?.username}
                 </span>
               ) : (
-                <span style={{ fontSize: "13px", color: "#8b8b9a" }}>未登录</span>
+                <span style={{ fontSize: "13px", color: "var(--color-text-muted)" }}>未登录</span>
               )}
               {isLoggedIn ? (
                 <button onClick={() => void handleOpenAccountSwitcher()} style={secondaryButtonStyle}>
@@ -576,7 +576,7 @@ export function SettingsView() {
                 </button>
               ) : null}
               {isLoggedIn ? (
-                <button onClick={() => void handleLogoutAndDelete()} style={{ ...secondaryButtonStyle, color: "#ea580c", borderColor: "#fed7aa" }}>
+                <button onClick={() => void handleLogoutAndDelete()} style={{ ...secondaryButtonStyle, color: "var(--color-warning-text)", borderColor: "#fed7aa" }}>
                   <Trash2 style={{ width: 15, height: 15, marginRight: "6px" }} />
                   退出账号并删除数据
                 </button>
@@ -586,8 +586,8 @@ export function SettingsView() {
         />
 
         <SettingRow
-          icon={<Palette style={{ width: 21, height: 21, color: "#6366f1" }} />}
-          iconBgColor="#f0efff"
+          icon={<Palette style={{ width: 21, height: 21, color: "var(--color-primary)" }} />}
+          iconBgColor="var(--color-primary-light)"
           title="外观主题"
           description="选择应用使用的配色模式"
           control={
@@ -599,8 +599,8 @@ export function SettingsView() {
         />
 
         <SettingRow
-          icon={<Eye style={{ width: 21, height: 21, color: "#2563eb" }} />}
-          iconBgColor="#eff6ff"
+          icon={<Eye style={{ width: 21, height: 21, color: "var(--color-info-text)" }} />}
+          iconBgColor="var(--color-info-bg)"
           title="是否显示评论区"
           description="控制视频播放页和动态详情页底部评论区容器的显示"
           control={
@@ -613,7 +613,7 @@ export function SettingsView() {
 
         <SettingRow
           icon={<FolderOpen style={{ width: 21, height: 21, color: "#059669" }} />}
-          iconBgColor="#ecfdf5"
+          iconBgColor="var(--color-success-bg)"
           title="下载目录"
           description="设置下载文件的默认保存位置"
           control={
@@ -621,7 +621,7 @@ export function SettingsView() {
               <span
                 style={{
                   fontSize: "13.5px",
-                  color: "#33334a",
+                  color: "var(--color-text)",
                   fontFamily:
                     'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
                   overflow: "hidden",
@@ -640,13 +640,13 @@ export function SettingsView() {
         />
 
         <SettingRow
-          icon={<MonitorPlay style={{ width: 21, height: 21, color: "#2563eb" }} />}
-          iconBgColor="#eff6ff"
+          icon={<MonitorPlay style={{ width: 21, height: 21, color: "var(--color-info-text)" }} />}
+          iconBgColor="var(--color-info-bg)"
           title="下载画质策略"
           description="可每次选择或使用默认画质；目标视频最高画质低于所选画质时，将自动下载其最高可用画质"
           control={
             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-              <div style={{ display: "flex", alignItems: "center", padding: "3px", gap: "2px", backgroundColor: "#f3f3f8", borderRadius: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", padding: "3px", gap: "2px", backgroundColor: "var(--color-bg-tertiary)", borderRadius: "10px" }}>
                 <ModeButton
                   active={backendConfig.prompt_download_quality}
                   onClick={() => void saveConfig({ prompt_download_quality: true })}
@@ -681,7 +681,7 @@ export function SettingsView() {
 
         <SettingRow
           icon={<Maximize2 style={{ width: 21, height: 21, color: "#7c3aed" }} />}
-          iconBgColor="#faf5ff"
+          iconBgColor="var(--color-primary-light)"
           title="启动时最大化窗口"
           description="下次打开程序时直接使用最大化窗口"
           control={
@@ -694,7 +694,7 @@ export function SettingsView() {
 
         <SettingRow
           icon={<Monitor style={{ width: 21, height: 21, color: "#0f766e" }} />}
-          iconBgColor="#ecfeff"
+          iconBgColor="var(--color-info-bg)"
           title="卡片设置"
           description="统一或分别配置各页面的卡片行列数与卡片大小，并可实时预览效果。"
           control={
@@ -704,8 +704,8 @@ export function SettingsView() {
                   minWidth: "116px",
                   padding: "8px 10px",
                   borderRadius: "9px",
-                  backgroundColor: unifiedCardLayout.isUniform && unifiedCardScale.isUniform ? "#f0fdf4" : "#fff7ed",
-                  color: unifiedCardLayout.isUniform && unifiedCardScale.isUniform ? "#15803d" : "#c2410c",
+                  backgroundColor: unifiedCardLayout.isUniform && unifiedCardScale.isUniform ? "var(--color-success-bg)" : "var(--color-warning-bg)",
+                  color: unifiedCardLayout.isUniform && unifiedCardScale.isUniform ? "var(--color-success-text)" : "var(--color-warning-text)",
                   fontSize: "13px",
                   fontWeight: 800,
                   textAlign: "center",
@@ -723,7 +723,7 @@ export function SettingsView() {
 
         <SettingRow
           icon={<Monitor style={{ width: 21, height: 21, color: "#0f766e" }} />}
-          iconBgColor="#ecfeff"
+          iconBgColor="var(--color-info-bg)"
           title="并发下载数"
           description="控制同时进行的下载任务数量"
           control={
@@ -818,7 +818,7 @@ function SettingRow({
         alignItems: "center",
         gap: "16px",
         padding: "22px 28px",
-        borderBottom: isLast ? "none" : "1px solid #f5f5f8",
+        borderBottom: isLast ? "none" : "1px solid var(--color-bg-subtle)",
       }}
     >
       <div
@@ -837,10 +837,10 @@ function SettingRow({
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        <h3 style={{ fontSize: "15px", fontWeight: 600, color: "#1a1a2e", marginBottom: "3px" }}>
+        <h3 style={{ fontSize: "15px", fontWeight: 600, color: "var(--color-text)", marginBottom: "3px" }}>
           {title}
         </h3>
-        <p style={{ fontSize: "13px", color: "#8b8b9a" }}>{description}</p>
+        <p style={{ fontSize: "13px", color: "var(--color-text-muted)" }}>{description}</p>
       </div>
 
       <div style={{ flexShrink: 0 }}>{control}</div>
@@ -909,7 +909,7 @@ function CardSettingsDialog({
         <div style={dialogHeaderStyle}>
           <div>
             <h2 style={dialogTitleStyle}>卡片设置</h2>
-            <p style={{ marginTop: "4px", color: "#8b8b9a", fontSize: "13px" }}>
+            <p style={{ marginTop: "4px", color: "var(--color-text-muted)", fontSize: "13px" }}>
               分页面调整行列数和卡片大小，也可以一键统一所有页面。
             </p>
           </div>
@@ -918,11 +918,11 @@ function CardSettingsDialog({
 
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.1fr) minmax(280px, 0.9fr)", gap: "16px", alignItems: "start" }}>
           <div style={{ display: "grid", gap: "12px" }}>
-            <div style={{ padding: "14px", borderRadius: "13px", border: "1px solid #ececf2", backgroundColor: "#fafafe" }}>
+            <div style={{ padding: "14px", borderRadius: "13px", border: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-subtle)" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
                 <div>
-                  <strong style={{ color: "#1a1a2e", fontSize: "14px" }}>统一行列数</strong>
-                  <div style={{ color: unifiedLayout.isUniform ? "#15803d" : "#c2410c", fontSize: "12.5px", marginTop: "3px", fontWeight: 700 }}>
+                  <strong style={{ color: "var(--color-text)", fontSize: "14px" }}>统一行列数</strong>
+                  <div style={{ color: unifiedLayout.isUniform ? "var(--color-success-text)" : "var(--color-warning-text)", fontSize: "12.5px", marginTop: "3px", fontWeight: 700 }}>
                     当前：{unifiedLayout.label}
                   </div>
                 </div>
@@ -946,11 +946,11 @@ function CardSettingsDialog({
               </div>
             </div>
 
-            <div style={{ padding: "14px", borderRadius: "13px", border: "1px solid #ececf2", backgroundColor: "#fafafe" }}>
+            <div style={{ padding: "14px", borderRadius: "13px", border: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-subtle)" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
                 <div>
-                  <strong style={{ color: "#1a1a2e", fontSize: "14px" }}>统一卡片大小</strong>
-                  <div style={{ color: unifiedScale.isUniform ? "#15803d" : "#c2410c", fontSize: "12.5px", marginTop: "3px", fontWeight: 700 }}>
+                  <strong style={{ color: "var(--color-text)", fontSize: "14px" }}>统一卡片大小</strong>
+                  <div style={{ color: unifiedScale.isUniform ? "var(--color-success-text)" : "var(--color-warning-text)", fontSize: "12.5px", marginTop: "3px", fontWeight: 700 }}>
                     当前：{unifiedScale.label}
                   </div>
                 </div>
@@ -987,15 +987,15 @@ function CardSettingsDialog({
                       alignItems: "center",
                       padding: "12px",
                       borderRadius: "13px",
-                      border: active ? "1.5px solid #6366f1" : "1px solid #ececf2",
-                      backgroundColor: active ? "#f5f3ff" : "#fff",
+                      border: active ? "1.5px solid var(--color-primary)" : "1px solid var(--color-border)",
+                      backgroundColor: active ? "var(--color-primary-light)" : "var(--color-bg-secondary)",
                       textAlign: "left",
                       cursor: "pointer",
                     }}
                   >
                     <span>
-                      <strong style={{ display: "block", color: "#1a1a2e", fontSize: "13.5px" }}>{CARD_PAGE_LABELS[key]}</strong>
-                      <span style={{ color: "#8b8b9a", fontSize: "12px" }}>{safeRows} 行 x {safeColumns} 列 · {Math.round(safeScale * 100)}%</span>
+                      <strong style={{ display: "block", color: "var(--color-text)", fontSize: "13.5px" }}>{CARD_PAGE_LABELS[key]}</strong>
+                      <span style={{ color: "var(--color-text-muted)", fontSize: "12px" }}>{safeRows} 行 x {safeColumns} 列 · {Math.round(safeScale * 100)}%</span>
                     </span>
                     <span style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
                       <StepperField label="行" value={safeRows} min={1} max={8} onChange={(rows) => onSetCardLayout(key, { rows })} />
@@ -1008,11 +1008,11 @@ function CardSettingsDialog({
             </div>
           </div>
 
-          <div style={{ position: "sticky", top: 0, padding: "14px", borderRadius: "14px", border: "1px solid #ececf2", backgroundColor: "#fff", boxShadow: "0 10px 28px rgba(15,23,42,0.06)" }}>
+          <div style={{ position: "sticky", top: 0, padding: "14px", borderRadius: "14px", border: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-secondary)", boxShadow: "0 10px 28px rgba(15,23,42,0.06)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "12px" }}>
               <div>
-                <strong style={{ color: "#1a1a2e", fontSize: "14px" }}>{CARD_PAGE_LABELS[activeKey]}预览</strong>
-                <div style={{ color: "#8b8b9a", fontSize: "12.5px", marginTop: "3px" }}>
+                <strong style={{ color: "var(--color-text)", fontSize: "14px" }}>{CARD_PAGE_LABELS[activeKey]}预览</strong>
+                <div style={{ color: "var(--color-text-muted)", fontSize: "12.5px", marginTop: "3px" }}>
                   {rows} 行 x {columns} 列，每页 {pageSize} 张，大小 {Math.round(activeScale * 100)}%
                 </div>
               </div>
@@ -1024,7 +1024,7 @@ function CardSettingsDialog({
                 gap: `${10 * activeScale}px`,
                 padding: "12px",
                 borderRadius: "13px",
-                backgroundColor: "#f5f5f7",
+                backgroundColor: "var(--color-bg)",
               }}
             >
               {previewItems.map((item, index) => (
@@ -1033,23 +1033,23 @@ function CardSettingsDialog({
                   style={{
                     borderRadius: `${10 * activeScale}px`,
                     overflow: "hidden",
-                    border: "1px solid #e8e8ef",
-                    backgroundColor: "#fff",
+                    border: "1px solid var(--color-border)",
+                    backgroundColor: "var(--color-bg-secondary)",
                     minWidth: 0,
                   }}
                 >
                   <div
                     style={{
                       height: `${72 * activeScale}px`,
-                      background: `linear-gradient(135deg, ${index % 2 ? "#dbeafe" : "#fce7f3"}, ${index % 2 ? "#f5f3ff" : "#e0f2fe"})`,
+                      background: `linear-gradient(135deg, ${index % 2 ? "var(--color-info-bg)" : "#fce7f3"}, ${index % 2 ? "var(--color-primary-light)" : "var(--color-info-bg)"})`,
                     }}
                   />
                   <div style={{ padding: `${8 * activeScale}px`, display: "grid", gap: `${5 * activeScale}px` }}>
-                    <strong style={{ color: "#1a1a2e", fontSize: `${12.5 * activeScale}px`, lineHeight: 1.35, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <strong style={{ color: "var(--color-text)", fontSize: `${12.5 * activeScale}px`, lineHeight: 1.35, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {item.title}
                     </strong>
-                    <span style={{ color: "#6366f1", fontSize: `${11.5 * activeScale}px`, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.author}</span>
-                    <span style={{ color: "#8b8b9a", fontSize: `${11 * activeScale}px`, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.note}</span>
+                    <span style={{ color: "var(--color-primary)", fontSize: `${11.5 * activeScale}px`, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.author}</span>
+                    <span style={{ color: "var(--color-text-muted)", fontSize: `${11 * activeScale}px`, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.note}</span>
                   </div>
                 </div>
               ))}
@@ -1085,7 +1085,7 @@ function CacheDialog({
             <CacheBucketCard bucket={overview.download_cache} actionLabel="清理下载缓存" onAction={onClearDownloadCache} />
           </div>
         ) : (
-          <div style={{ color: "#8b8b9a", fontSize: "14px" }}>暂无缓存数据</div>
+          <div style={{ color: "var(--color-text-muted)", fontSize: "14px" }}>暂无缓存数据</div>
         )}
       </div>
     </div>
@@ -1094,12 +1094,12 @@ function CacheDialog({
 
 function CacheBucketCard({ bucket, actionLabel, onAction }: { bucket: CacheBucketInfo; actionLabel: string; onAction: () => void }) {
   return (
-    <div style={{ padding: "14px 16px", borderRadius: "12px", border: "1px solid #ececf2", backgroundColor: "#fafafe" }}>
+    <div style={{ padding: "14px 16px", borderRadius: "12px", border: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-subtle)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
-        <strong style={{ color: "#1a1a2e", fontSize: "15px" }}>{bucket.label}</strong>
-        <span style={{ color: "#6366f1", fontWeight: 800, fontSize: "13px" }}>{formatBytes(bucket.total_bytes)}</span>
+        <strong style={{ color: "var(--color-text)", fontSize: "15px" }}>{bucket.label}</strong>
+        <span style={{ color: "var(--color-primary)", fontWeight: 800, fontSize: "13px" }}>{formatBytes(bucket.total_bytes)}</span>
       </div>
-      <div style={{ marginTop: "8px", color: "#6b7280", fontSize: "13px", lineHeight: 1.65 }}>
+      <div style={{ marginTop: "8px", color: "var(--color-text-muted)", fontSize: "13px", lineHeight: 1.65 }}>
         <div>文件数：{bucket.file_count}</div>
         <div style={{ wordBreak: "break-all" }}>目录：{bucket.path}</div>
       </div>
@@ -1144,7 +1144,7 @@ function AccountSwitcherDialog({
             width: "100%",
             marginBottom: "12px",
             borderStyle: "dashed",
-            color: "#6366f1",
+            color: "var(--color-primary)",
             fontWeight: 800,
           }}
         >
@@ -1162,8 +1162,8 @@ function AccountSwitcherDialog({
                   gap: "12px",
                   padding: "12px",
                   borderRadius: "12px",
-                  border: account.active ? "1.5px solid #6366f1" : "1px solid #ececf2",
-                  backgroundColor: account.active ? "#f5f3ff" : "#fff",
+                  border: account.active ? "1.5px solid var(--color-primary)" : "1px solid var(--color-border)",
+                  backgroundColor: account.active ? "var(--color-primary-light)" : "var(--color-bg-secondary)",
                   textAlign: "left",
                 }}
               >
@@ -1171,11 +1171,11 @@ function AccountSwitcherDialog({
                   src={account.face}
                   alt={account.username}
                   referrerPolicy="no-referrer"
-                  style={{ width: 42, height: 42, borderRadius: "50%", objectFit: "cover", backgroundColor: "#eef2ff" }}
+                  style={{ width: 42, height: 42, borderRadius: "50%", objectFit: "cover", backgroundColor: "var(--color-primary-light)" }}
                 />
                 <span style={{ minWidth: 0 }}>
-                  <strong style={{ display: "block", color: "#1a1a2e", fontSize: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</strong>
-                  <span style={{ color: "#8b8b9a", fontSize: "12.5px" }}>UID {account.mid}</span>
+                  <strong style={{ display: "block", color: "var(--color-text)", fontSize: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</strong>
+                  <span style={{ color: "var(--color-text-muted)", fontSize: "12.5px" }}>UID {account.mid}</span>
                 </span>
                 <button
                   type="button"
@@ -1184,7 +1184,7 @@ function AccountSwitcherDialog({
                   style={{
                     border: "none",
                     background: "transparent",
-                    color: account.active ? "#6366f1" : "#505065",
+                    color: account.active ? "var(--color-primary)" : "var(--color-text-secondary)",
                     fontSize: "13px",
                     fontWeight: 800,
                     cursor: account.active || switchingProfile || deletingProfile ? "default" : "pointer",
@@ -1213,7 +1213,7 @@ function AccountSwitcherDialog({
             ))}
           </div>
         ) : (
-          <div style={{ color: "#8b8b9a", fontSize: "14px", padding: "10px 0" }}>暂无可切换的已保存账号</div>
+          <div style={{ color: "var(--color-text-muted)", fontSize: "14px", padding: "10px 0" }}>暂无可切换的已保存账号</div>
         )}
       </div>
     </div>
@@ -1225,10 +1225,10 @@ function CacheRefreshOverlay({ activeIndex }: { activeIndex: number }) {
     <div style={{ ...dialogBackdropStyle, cursor: "wait" }}>
       <div style={{ ...dialogPanelStyle, maxWidth: "460px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
-          <Loader2 className="animate-spin" style={{ width: 24, height: 24, color: "#6366f1" }} />
+          <Loader2 className="animate-spin" style={{ width: 24, height: 24, color: "var(--color-primary)" }} />
           <div>
             <h2 style={dialogTitleStyle}>正在更新所有页面</h2>
-            <p style={{ color: "#8b8b9a", fontSize: "13px", marginTop: "3px" }}>请等待当前操作完成</p>
+            <p style={{ color: "var(--color-text-muted)", fontSize: "13px", marginTop: "3px" }}>请等待当前操作完成</p>
           </div>
         </div>
         <div style={{ display: "grid", gap: "8px" }}>
@@ -1241,8 +1241,8 @@ function CacheRefreshOverlay({ activeIndex }: { activeIndex: number }) {
                 justifyContent: "space-between",
                 padding: "9px 12px",
                 borderRadius: "10px",
-                backgroundColor: index === activeIndex ? "#f0efff" : index < activeIndex ? "#f0fdf4" : "#f7f7fb",
-                color: index === activeIndex ? "#6366f1" : index < activeIndex ? "#15803d" : "#6b7280",
+                backgroundColor: index === activeIndex ? "var(--color-primary-light)" : index < activeIndex ? "var(--color-success-bg)" : "var(--color-bg-subtle)",
+                color: index === activeIndex ? "var(--color-primary)" : index < activeIndex ? "var(--color-success-text)" : "var(--color-text-muted)",
                 fontSize: "13.5px",
                 fontWeight: 700,
               }}
@@ -1339,7 +1339,7 @@ function ToggleSwitch({
         height: "30px",
         borderRadius: "999px",
         border: "none",
-        backgroundColor: checked ? "#6366f1" : "#d4d4dc",
+        backgroundColor: checked ? "var(--color-primary)" : "var(--color-border)",
         padding: "3px",
         cursor: "pointer",
         display: "flex",
@@ -1353,7 +1353,7 @@ function ToggleSwitch({
           width: "24px",
           height: "24px",
           borderRadius: "50%",
-          backgroundColor: "#fff",
+          backgroundColor: "var(--color-bg-secondary)",
           boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
         }}
       />
@@ -1378,9 +1378,9 @@ function ModeButton({
         height: "34px",
         padding: "0 12px",
         borderRadius: "8px",
-        border: active ? "1px solid #6366f1" : "1px solid transparent",
-        backgroundColor: active ? "#fff" : "transparent",
-        color: active ? "#6366f1" : "#505065",
+        border: active ? "1px solid var(--color-primary)" : "1px solid transparent",
+        backgroundColor: active ? "var(--color-bg-elevated)" : "transparent",
+        color: active ? "var(--color-primary)" : "var(--color-text-secondary)",
         fontSize: "13px",
         fontWeight: active ? 600 : 500,
         cursor: "pointer",
@@ -1408,9 +1408,9 @@ function NumberStepper({
         display: "flex",
         alignItems: "center",
         borderRadius: "10px",
-        border: "1.5px solid #e2e2ea",
+        border: "1.5px solid var(--color-border)",
         overflow: "hidden",
-        backgroundColor: "#fff",
+        backgroundColor: "var(--color-bg-secondary)",
       }}
     >
       <button
@@ -1426,7 +1426,7 @@ function NumberStepper({
           textAlign: "center",
           fontSize: "14.5px",
           fontWeight: 600,
-          color: "#1a1a2e",
+          color: "var(--color-text)",
           fontVariantNumeric: "tabular-nums",
           padding: "0 8px",
           userSelect: "none",
@@ -1460,7 +1460,7 @@ function StepperField({
 }) {
   return (
     <div style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
-      <span style={{ fontSize: "13px", fontWeight: 700, color: "#6f6f82" }}>{label}</span>
+      <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--color-text-secondary)" }}>{label}</span>
       <NumberStepper value={value} min={min} max={max} onChange={onChange} />
     </div>
   );
@@ -1479,7 +1479,7 @@ function ScaleSlider({
   const progress = ((safeValue - 0.7) / 0.9) * 100;
   return (
     <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", minWidth: compact ? "170px" : "230px" }}>
-      <span style={{ fontSize: "13px", fontWeight: 700, color: "#6f6f82", whiteSpace: "nowrap" }}>大小</span>
+      <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>大小</span>
       <input
         aria-label="卡片大小"
         type="range"
@@ -1492,10 +1492,10 @@ function ScaleSlider({
           width: compact ? "92px" : "140px",
           height: 5,
           borderRadius: 999,
-          accentColor: "#6366f1",
+          accentColor: "var(--color-primary)",
           outline: "none",
           cursor: "pointer",
-          background: `linear-gradient(90deg, #6366f1 ${progress}%, var(--color-bg-tertiary) ${progress}%)`,
+          background: `linear-gradient(90deg, var(--color-primary) ${progress}%, var(--color-bg-tertiary) ${progress}%)`,
         }}
       />
       <span

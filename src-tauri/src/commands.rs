@@ -202,19 +202,28 @@ fn cache_hash(value: &str) -> String {
 
 fn page_cache_path(
     app: &AppHandle,
-    config: &Config,
+    _config: &Config,
     key: &str,
 ) -> Result<std::path::PathBuf, String> {
     if key.is_empty() || key.len() > 2048 {
         return Err("无效的页面缓存键".to_string());
     }
 
+    Ok(Config::page_cache_dir(app)?
+        .join("page")
+        .join(format!("{}.json", cache_hash(key))))
+}
+
+fn legacy_page_cache_path(
+    app: &AppHandle,
+    config: &Config,
+    key: &str,
+) -> Result<std::path::PathBuf, String> {
     let scope = if config.sessdata.trim().is_empty() {
         "guest".to_string()
     } else {
         format!("user-{}", cache_hash(&config.sessdata))
     };
-
     Ok(Config::page_cache_dir(app)?
         .join(scope)
         .join(format!("{}.json", cache_hash(key))))
@@ -227,9 +236,14 @@ pub fn get_page_cache(
     config: State<'_, Arc<RwLock<Config>>>,
     key: String,
 ) -> Result<Option<Value>, String> {
-    let path = page_cache_path(&app, &config.read(), &key)?;
+    let config = config.read();
+    let mut path = page_cache_path(&app, &config, &key)?;
     if !path.exists() {
-        return Ok(None);
+        let legacy_path = legacy_page_cache_path(&app, &config, &key)?;
+        if !legacy_path.exists() {
+            return Ok(None);
+        }
+        path = legacy_path;
     }
 
     let content = std::fs::read_to_string(&path).map_err(|e| format!("读取页面缓存失败: {e}"))?;

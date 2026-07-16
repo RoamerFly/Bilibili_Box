@@ -566,16 +566,16 @@ function LoggedInPanel({
           borderRadius: "8px",
           border: "none",
           background: "transparent",
-          color: "#9999aa",
+          color: "var(--color-text-muted)",
           transition: "all 0.15s",
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.background = "rgba(0,0,0,0.06)";
-          e.currentTarget.style.color = "#555568";
+          e.currentTarget.style.color = "var(--color-text-secondary)";
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.background = "transparent";
-          e.currentTarget.style.color = "#9999aa";
+          e.currentTarget.style.color = "var(--color-text-muted)";
         }}
       >
         <X className="w-[16px] h-[16px]" />
@@ -622,7 +622,7 @@ function LoggedInPanel({
             style={{
               fontSize: "11.5px",
               fontWeight: 500,
-              color: "#16a34a",
+              color: "var(--color-success-text)",
               background: "rgba(22,163,74,0.08)",
             }}
           >
@@ -639,7 +639,7 @@ function LoggedInPanel({
       </div>
 
       {/* 分隔线 */}
-      <div style={{ borderTop: "1px solid #f0f0f3", margin: "0 28px" }} />
+      <div style={{ borderTop: "1px solid var(--color-bg-subtle)", margin: "0 28px" }} />
 
       {/* ═══ 信息列表 ═══ */}
       <div style={{ padding: "18px 28px 14px" }}>
@@ -673,7 +673,7 @@ function LoggedInPanel({
           type="button"
           onClick={onToggleAccountList}
           disabled={loggingOut || Boolean(switchingProfile) || Boolean(deletingProfile)}
-          whileHover={!loggingOut && !switchingProfile && !deletingProfile ? { backgroundColor: "#f7f7ff", borderColor: "#a5b4fc" } : {}}
+          whileHover={!loggingOut && !switchingProfile && !deletingProfile ? { backgroundColor: "var(--color-primary-light)", borderColor: "#a5b4fc" } : {}}
           whileTap={!loggingOut && !switchingProfile && !deletingProfile ? { scale: 0.985 } : {}}
           className="cursor-pointer w-full"
           style={{
@@ -681,7 +681,7 @@ function LoggedInPanel({
             borderRadius: "11px",
             border: "1.5px solid #d8d8e4",
             background: "var(--color-bg-secondary)",
-            color: "#505065",
+            color: "var(--color-text-secondary)",
             fontSize: "14px",
             fontWeight: 600,
             display: "flex",
@@ -707,8 +707,8 @@ function LoggedInPanel({
                 height: "38px",
                 borderRadius: "10px",
                 border: "1.5px dashed #a5b4fc",
-                background: "#f8f7ff",
-                color: "#6366f1",
+                background: "var(--color-primary-light)",
+                color: "var(--color-primary)",
                 fontSize: "13px",
                 fontWeight: 800,
                 cursor: loggingOut || switchingProfile ? "not-allowed" : "pointer",
@@ -729,18 +729,18 @@ function LoggedInPanel({
                   gap: "9px",
                   padding: "9px 10px",
                   borderRadius: "10px",
-                  border: account.active ? "1.5px solid #6366f1" : "1px solid #ececf2",
-                  background: account.active ? "#f5f3ff" : "#fff",
+                  border: account.active ? "1.5px solid var(--color-primary)" : "1px solid var(--color-border)",
+                  background: account.active ? "var(--color-primary-light)" : "var(--color-bg-secondary)",
                   cursor: account.active || switchingProfile || deletingProfile ? "default" : "pointer",
                   textAlign: "left",
                 }}
               >
-                <img src={account.face} alt={account.username} referrerPolicy="no-referrer" style={{ width: 32, height: 32, borderRadius: "50%", objectFit: "cover", background: "#eef2ff" }} />
+                <img src={account.face} alt={account.username} referrerPolicy="no-referrer" style={{ width: 32, height: 32, borderRadius: "50%", objectFit: "cover", background: "var(--color-primary-light)" }} />
                 <span style={{ minWidth: 0 }}>
                   <span style={{ display: "block", color: "var(--color-text)", fontSize: "13px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</span>
                   <span style={{ color: "var(--color-text-secondary)", fontSize: "11.5px" }}>UID {account.mid}</span>
                 </span>
-                <span style={{ color: account.active ? "#6366f1" : "#505065", fontSize: "12px", fontWeight: 800 }}>
+                <span style={{ color: account.active ? "var(--color-primary)" : "var(--color-text-secondary)", fontSize: "12px", fontWeight: 800 }}>
                   {account.active ? "当前" : switchingProfile === account.profile ? "切换中" : "切换"}
                 </span>
               </button>
@@ -755,14 +755,14 @@ function LoggedInPanel({
           type="button"
           onClick={onLogout}
           disabled={loggingOut || Boolean(deletingProfile)}
-          whileHover={!loggingOut && !deletingProfile ? { backgroundColor: "#fef2f2", borderColor: "#f87171" } : {}}
+          whileHover={!loggingOut && !deletingProfile ? { backgroundColor: "var(--color-error-bg)", borderColor: "#f87171" } : {}}
           whileTap={!loggingOut && !deletingProfile ? { scale: 0.985 } : {}}
           className="cursor-pointer w-full"
           style={{
             height: "42px",
             borderRadius: "11px",
             border: `1.5px solid ${loggingOut ? '#fcc' : '#fecaca'}`,
-            background: loggingOut ? "#fafafa" : "#ffffff",
+            background: loggingOut ? "var(--color-bg-subtle)" : "var(--color-bg-secondary)",
             color: loggingOut ? "#bbb" : "#ef4444",
             fontSize: "14px",
             fontWeight: 600,
@@ -794,7 +794,7 @@ function LoggedInPanel({
           type="button"
           onClick={onLogoutAndDelete}
           disabled={loggingOut || Boolean(switchingProfile) || Boolean(deletingProfile)}
-          whileHover={!loggingOut && !switchingProfile && !deletingProfile ? { backgroundColor: "#fff7ed", borderColor: "#fb923c" } : {}}
+          whileHover={!loggingOut && !switchingProfile && !deletingProfile ? { backgroundColor: "var(--color-warning-bg)", borderColor: "#fb923c" } : {}}
           whileTap={!loggingOut && !switchingProfile && !deletingProfile ? { scale: 0.985 } : {}}
           className="cursor-pointer w-full"
           style={{
@@ -802,7 +802,7 @@ function LoggedInPanel({
             borderRadius: "11px",
             border: "1.5px solid #fed7aa",
             background: "var(--color-bg-secondary)",
-            color: deletingProfile ? "#bbb" : "#ea580c",
+            color: deletingProfile ? "#bbb" : "var(--color-warning-text)",
             fontSize: "13.5px",
             fontWeight: 700,
             display: "flex",
@@ -833,12 +833,12 @@ function LoggedInPanel({
         className="flex items-center justify-center gap-1.5"
         style={{
           padding: "0 28px 20px",
-          borderTop: "1px solid #f5f5f7",
+          borderTop: "1px solid var(--color-bg)",
           paddingTop: "14px",
         }}
       >
         <Lock className="w-[13px] h-[13px]" style={{ color: "#bbb" }} />
-        <span style={{ fontSize: "11.5px", color: "#aaaabb" }}>
+        <span style={{ fontSize: "11.5px", color: "var(--color-text-disabled)" }}>
           为保障账号安全，请勿在公共设备上登录
         </span>
       </div>
@@ -892,14 +892,14 @@ function LoggedOutAccountPanel({
           onClose();
         }}
         className="absolute top-4 right-4 flex items-center justify-center cursor-pointer z-10"
-        style={{ width: "30px", height: "30px", borderRadius: "8px", border: "none", background: "transparent", color: "#9999aa" }}
+        style={{ width: "30px", height: "30px", borderRadius: "8px", border: "none", background: "transparent", color: "var(--color-text-muted)" }}
       >
         <X className="w-[16px] h-[16px]" />
       </button>
 
       <div style={{ padding: "34px 28px 16px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
-          <div style={{ width: 46, height: 46, borderRadius: 14, display: "grid", placeItems: "center", background: "#f0efff", color: "#6366f1" }}>
+          <div style={{ width: 46, height: 46, borderRadius: 14, display: "grid", placeItems: "center", background: "var(--color-primary-light)", color: "var(--color-primary)" }}>
             <Users className="w-[22px] h-[22px]" />
           </div>
           <div>
@@ -919,12 +919,12 @@ function LoggedOutAccountPanel({
                 gap: "10px",
                 padding: "10px 11px",
                 borderRadius: "11px",
-                border: "1px solid #ececf2",
-                background: "#fff",
+                border: "1px solid var(--color-border)",
+                background: "var(--color-bg-secondary)",
                 textAlign: "left",
               }}
             >
-              <img src={account.face} alt={account.username} referrerPolicy="no-referrer" style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", background: "#eef2ff" }} />
+              <img src={account.face} alt={account.username} referrerPolicy="no-referrer" style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", background: "var(--color-primary-light)" }} />
               <span style={{ minWidth: 0 }}>
                 <span style={{ display: "block", color: "var(--color-text)", fontSize: "13px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.username}</span>
                 <span style={{ color: "var(--color-text-secondary)", fontSize: "11.5px" }}>UID {account.mid}</span>
@@ -936,7 +936,7 @@ function LoggedOutAccountPanel({
                 style={{
                   border: "none",
                   background: "transparent",
-                  color: "#6366f1",
+                  color: "var(--color-primary)",
                   fontSize: "12px",
                   fontWeight: 800,
                   cursor: switchingProfile || deletingProfile ? "wait" : "pointer",
@@ -977,8 +977,8 @@ function LoggedOutAccountPanel({
             marginTop: "14px",
             borderRadius: "11px",
             border: "1.5px dashed #a5b4fc",
-            background: "#f8f7ff",
-            color: "#6366f1",
+            background: "var(--color-primary-light)",
+            color: "var(--color-primary)",
             fontSize: "14px",
             fontWeight: 800,
             cursor: switchingProfile || deletingProfile ? "not-allowed" : "pointer",
@@ -1048,16 +1048,16 @@ function LoginForm({
           borderRadius: "8px",
           border: "none",
           background: "transparent",
-          color: "#9999aa",
+          color: "var(--color-text-muted)",
           transition: "all 0.15s",
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.background = "rgba(0,0,0,0.06)";
-          e.currentTarget.style.color = "#555568";
+          e.currentTarget.style.color = "var(--color-text-secondary)";
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.background = "transparent";
-          e.currentTarget.style.color = "#9999aa";
+          e.currentTarget.style.color = "var(--color-text-muted)";
         }}
       >
         <X className="w-[16px] h-[16px]" />
@@ -1069,7 +1069,7 @@ function LoginForm({
         style={{
           paddingTop: "28px",
           paddingBottom: "20px",
-          borderBottom: "1px solid #f0f0f3",
+          borderBottom: "1px solid var(--color-bg-subtle)",
         }}
       >
         <div className="flex gap-7">
@@ -1126,11 +1126,11 @@ function LoginForm({
           className="text-center"
           style={{
             padding: "0 36px 22px",
-            borderTop: "1px solid #f5f5f7",
+            borderTop: "1px solid var(--color-bg)",
             marginTop: "0",
           }}
         >
-          <span style={{ fontSize: "11.5px", color: "#aaaabb" }}>
+          <span style={{ fontSize: "11.5px", color: "var(--color-text-disabled)" }}>
             登录即代表你同意
           </span>{" "}
           <a
@@ -1139,7 +1139,7 @@ function LoginForm({
             rel="noreferrer"
             style={{
               fontSize: "11.5px",
-              color: "#6366f1",
+              color: "var(--color-primary)",
               textDecoration: "none",
             }}
           >
@@ -1152,7 +1152,7 @@ function LoginForm({
             rel="noreferrer"
             style={{
               fontSize: "11.5px",
-              color: "#6366f1",
+              color: "var(--color-primary)",
               textDecoration: "none",
             }}
           >
@@ -1199,7 +1199,7 @@ function QrcodePanel({ qrcodeUrl, loading, error, onRefresh }: QrcodePanelProps)
         className="text-center"
         style={{
           fontSize: "13.5px",
-          color: "#555568",
+          color: "var(--color-text-secondary)",
           marginBottom: "22px",
         }}
       >
@@ -1215,13 +1215,13 @@ function QrcodePanel({ qrcodeUrl, loading, error, onRefresh }: QrcodePanelProps)
                 width: "200px",
                 height: "200px",
                 borderRadius: "14px",
-                background: "#f7f7f8",
+                background: "var(--color-bg-subtle)",
                 boxShadow: "inset 0 1px 3px rgba(0,0,0,0.05)",
               }}
             >
               <Loader2
                 className="w-8 h-8"
-                style={{ color: "#6366f1", animation: "spin 1s linear infinite" }}
+                style={{ color: "var(--color-primary)", animation: "spin 1s linear infinite" }}
               />
             </div>
           ) : qrcodeUrl ? (
@@ -1243,7 +1243,7 @@ function QrcodePanel({ qrcodeUrl, loading, error, onRefresh }: QrcodePanelProps)
                 level="H"
                 includeMargin={false}
                 bgColor="#FFFFFF"
-                fgColor="#111111"
+                fgColor="var(--color-text)"
                 style={{
                   filter: isHovering ? "blur(3px)" : "none",
                   transition: "filter 0.2s ease",
@@ -1265,9 +1265,9 @@ function QrcodePanel({ qrcodeUrl, loading, error, onRefresh }: QrcodePanelProps)
                   >
                     <RefreshCw
                       className="w-8 h-8 mb-2"
-                      style={{ color: "#6366f1" }}
+                      style={{ color: "var(--color-primary)" }}
                     />
-                    <span style={{ fontSize: "13px", color: "#555568", fontWeight: 500 }}>
+                    <span style={{ fontSize: "13px", color: "var(--color-text-secondary)", fontWeight: 500 }}>
                       点击刷新
                     </span>
                   </motion.div>
@@ -1281,8 +1281,8 @@ function QrcodePanel({ qrcodeUrl, loading, error, onRefresh }: QrcodePanelProps)
                 width: "200px",
                 height: "200px",
                 borderRadius: "14px",
-                background: "#f7f7f8",
-                border: "1px dashed #dcdce0",
+                background: "var(--color-bg-subtle)",
+                border: "1px dashed var(--color-border)",
               }}
             >
               <div className="flex flex-col items-center gap-2">
@@ -1293,7 +1293,7 @@ function QrcodePanel({ qrcodeUrl, loading, error, onRefresh }: QrcodePanelProps)
                     background: "none",
                     border: "none",
                     fontSize: "12px",
-                    color: "#6366f1",
+                    color: "var(--color-primary)",
                     cursor: "pointer",
                   }}
                 >
@@ -1306,13 +1306,13 @@ function QrcodePanel({ qrcodeUrl, loading, error, onRefresh }: QrcodePanelProps)
 
         <p
           className="text-center"
-          style={{ fontSize: "13px", color: "#444455", marginBottom: "4px" }}
+          style={{ fontSize: "13px", color: "var(--color-text-secondary)", marginBottom: "4px" }}
         >
           打开哔哩哔哩 APP
         </p>
         <p
           className="text-center"
-          style={{ fontSize: "12.5px", color: "#9999aa" }}
+          style={{ fontSize: "12.5px", color: "var(--color-text-muted)" }}
         >
           点击首页右上角 扫一扫
         </p>
@@ -1366,7 +1366,7 @@ function CookiePanel({ cookieInput, setCookieInput, loading, error, onLogin }: C
           className="text-center"
           style={{
             fontSize: "13.5px",
-            color: "#555568",
+            color: "var(--color-text-secondary)",
             marginBottom: "18px",
           }}
         >
@@ -1384,7 +1384,7 @@ function CookiePanel({ cookieInput, setCookieInput, loading, error, onLogin }: C
               width: "100%",
               padding: "14px 16px",
               borderRadius: "12px",
-              border: "1.5px solid #e0e0e6",
+              border: "1.5px solid var(--color-border)",
               background: "var(--color-bg-secondary)",
               fontSize: "14px",
               color: "var(--color-text)",
@@ -1396,11 +1396,11 @@ function CookiePanel({ cookieInput, setCookieInput, loading, error, onLogin }: C
               transition: "border-color 0.15s, box-shadow 0.15s",
             }}
             onFocus={(e) => {
-              e.target.style.borderColor = "#6366f1";
+              e.target.style.borderColor = "var(--color-primary)";
               e.target.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.10)";
             }}
             onBlur={(e) => {
-              e.target.style.borderColor = "#e0e0e6";
+              e.target.style.borderColor = "var(--color-border)";
               e.target.style.boxShadow = "none";
             }}
           />
@@ -1414,11 +1414,11 @@ function CookiePanel({ cookieInput, setCookieInput, loading, error, onLogin }: C
                 right: "16px",
                 fontSize: "14px",
                 lineHeight: "1.65",
-                color: "#bbbcc4",
+                color: "var(--color-text-disabled)",
               }}
             >
               请粘贴你的{" "}
-              <span style={{ color: "#6366f1", fontWeight: 500 }}>
+              <span style={{ color: "var(--color-primary)", fontWeight: 500 }}>
                 Bilibili Cookie
               </span>
             </div>
@@ -1434,7 +1434,7 @@ function CookiePanel({ cookieInput, setCookieInput, loading, error, onLogin }: C
               background: "none",
               border: "none",
               fontSize: "12.5px",
-              color: "#6366f1",
+              color: "var(--color-primary)",
               fontWeight: 500,
               padding: "2px 0",
               cursor: "pointer",
@@ -1477,8 +1477,8 @@ function CookiePanel({ cookieInput, setCookieInput, loading, error, onLogin }: C
             height: "46px",
             borderRadius: "11px",
             border: "none",
-            background: loading ? "#bbb" : "#6366f1",
-            color: "#ffffff",
+            background: loading ? "#bbb" : "var(--color-primary)",
+            color: "#fff",
             fontSize: "15px",
             fontWeight: 600,
             letterSpacing: "0.3px",
@@ -1505,7 +1505,7 @@ function CookiePanel({ cookieInput, setCookieInput, loading, error, onLogin }: C
           style={{ marginTop: "16px" }}
         >
           <Lock className="w-[13px] h-[13px]" style={{ color: "#bbb" }} />
-          <span style={{ fontSize: "11.5px", color: "#aaaabb" }}>
+          <span style={{ fontSize: "11.5px", color: "var(--color-text-disabled)" }}>
             仅本地存储，不会上传你的 Cookie
           </span>
         </div>
@@ -1542,7 +1542,7 @@ function BrowserPanel({ loading, error, onLogin }: BrowserPanelProps) {
             height: "72px",
             borderRadius: "18px",
             background: "rgba(99,102,241,0.08)",
-            color: "#6366f1",
+            color: "var(--color-primary)",
             marginBottom: "18px",
           }}
         >
@@ -1551,7 +1551,7 @@ function BrowserPanel({ loading, error, onLogin }: BrowserPanelProps) {
 
         <p
           className="text-center"
-          style={{ fontSize: "13.5px", color: "#555568", marginBottom: "22px" }}
+          style={{ fontSize: "13.5px", color: "var(--color-text-secondary)", marginBottom: "22px" }}
         >
           打开内置浏览器完成 Bilibili 登录
         </p>
@@ -1587,8 +1587,8 @@ function BrowserPanel({ loading, error, onLogin }: BrowserPanelProps) {
             height: "46px",
             borderRadius: "11px",
             border: "none",
-            background: loading ? "#bbb" : "#6366f1",
-            color: "#ffffff",
+            background: loading ? "#bbb" : "var(--color-primary)",
+            color: "#fff",
             fontSize: "15px",
             fontWeight: 600,
             letterSpacing: "0.3px",
@@ -1637,11 +1637,11 @@ function TabButton({
         padding: "0",
         fontSize: "15px",
         fontWeight: active ? 600 : 450,
-        color: active ? "#6366f1" : "#9999aa",
+        color: active ? "var(--color-primary)" : "var(--color-text-muted)",
         transition: "color 0.2s",
         letterSpacing: "0.2px",
       }}
-      whileHover={!active ? { color: "#666677" } : {}}
+      whileHover={!active ? { color: "var(--color-text-secondary)" } : {}}
       whileTap={{ scale: 0.97 }}
     >
       {label}
@@ -1652,7 +1652,7 @@ function TabButton({
           style={{
             height: "2.5px",
             borderRadius: "2px",
-            background: "#6366f1",
+            background: "var(--color-primary)",
           }}
           transition={{ type: "spring", stiffness: 400, damping: 30 }}
         />
@@ -1669,7 +1669,7 @@ function InfoRow({
   icon,
   label,
   value,
-  valueColor = "#555568",
+  valueColor = "var(--color-text-secondary)",
   valueFontWeight = 400,
 }: {
   icon: React.ReactNode;
@@ -1681,7 +1681,7 @@ function InfoRow({
   return (
     <div
       className="flex items-center"
-      style={{ padding: "11px 0", borderBottom: "1px solid #f5f5f7" }}
+      style={{ padding: "11px 0", borderBottom: "1px solid var(--color-bg)" }}
     >
       <div
         className="flex items-center justify-center shrink-0 mr-3"
@@ -1689,15 +1689,15 @@ function InfoRow({
           width: "32px",
           height: "32px",
           borderRadius: "9px",
-          background: "#f7f7f9",
-          color: "#8888a0",
+          background: "var(--color-bg-subtle)",
+          color: "var(--color-text-muted)",
         }}
       >
         {icon}
       </div>
       <span
         className="shrink-0"
-        style={{ fontSize: "13.5px", color: "#777788", width: "72px" }}
+        style={{ fontSize: "13.5px", color: "var(--color-text-secondary)", width: "72px" }}
       >
         {label}
       </span>

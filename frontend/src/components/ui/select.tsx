@@ -7,6 +7,7 @@ const SelectContext = React.createContext<{
   value?: string;
   onValueChange?: (value: string) => void;
   open: boolean;
+  disabled: boolean;
   setOpen: (open: boolean) => void;
   activeLabel: string;
   setActiveLabel: (label: string) => void;
@@ -15,15 +16,18 @@ const SelectContext = React.createContext<{
 export interface SelectProps {
   value?: string;
   onValueChange?: (value: string) => void;
+  disabled?: boolean;
+  className?: string;
   children?: React.ReactNode;
 }
 
-const Select = ({ value, onValueChange, children }: SelectProps) => {
+const Select = ({ value, onValueChange, disabled = false, className, children }: SelectProps) => {
   const [open, setOpen] = React.useState(false);
   const [activeLabel, setActiveLabel] = React.useState("");
   const timeoutRef = React.useRef<number | null>(null);
 
   const handleMouseEnter = () => {
+    if (disabled) return;
     if (timeoutRef.current) {
       window.clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
@@ -35,6 +39,7 @@ const Select = ({ value, onValueChange, children }: SelectProps) => {
   };
 
   const handleMouseLeave = () => {
+    if (disabled) return;
     if (timeoutRef.current) {
       window.clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
@@ -54,11 +59,11 @@ const Select = ({ value, onValueChange, children }: SelectProps) => {
   }, []);
 
   return (
-    <SelectContext.Provider value={{ value, onValueChange, open, setOpen, activeLabel, setActiveLabel }}>
+    <SelectContext.Provider value={{ value, onValueChange, open, disabled, setOpen, activeLabel, setActiveLabel }}>
       <div
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className="relative inline-flex flex-col min-w-0"
+        className={cn("relative inline-flex flex-col min-w-0", className)}
       >
         {children}
       </div>
@@ -70,16 +75,16 @@ const SelectGroup = ({ children }: { children: React.ReactNode }) => {
   return <div className="flex flex-col">{children}</div>;
 };
 
-const SelectValue = ({ placeholder }: { placeholder?: string }) => {
+const SelectValue = ({ placeholder, children }: { placeholder?: string; children?: React.ReactNode }) => {
   const context = React.useContext(SelectContext);
   if (!context) return null;
-  return <span>{context.activeLabel || placeholder}</span>;
+  return <span>{children || context.activeLabel || placeholder}</span>;
 };
 
 const SelectTrigger = React.forwardRef<
   HTMLButtonElement,
   React.ButtonHTMLAttributes<HTMLButtonElement>
->(({ className, children, ...props }, ref) => {
+>(({ className, children, disabled, ...props }, ref) => {
   const context = React.useContext(SelectContext);
   if (!context) return null;
 
@@ -88,6 +93,7 @@ const SelectTrigger = React.forwardRef<
       ref={ref}
       type="button"
       onClick={() => context.setOpen(!context.open)}
+      disabled={context.disabled || disabled}
       className={cn(
         "group flex h-9.5 w-full items-center justify-between gap-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-[13px] font-medium text-[var(--color-text)] transition-all duration-200 outline-none cursor-pointer select-none hover:border-[var(--color-primary-hover)] focus:border-[var(--color-primary)] active:scale-[0.98]",
         className
@@ -137,21 +143,25 @@ const SelectItem = ({
 }: {
   value: string;
   className?: string;
-  children: string;
+  children: React.ReactNode;
 }) => {
   const context = React.useContext(SelectContext);
   if (!context) return null;
 
   const isChecked = context.value === value;
+  const label = React.Children.toArray(children)
+    .map((child) => (typeof child === "string" || typeof child === "number" ? String(child) : ""))
+    .join("");
 
   React.useEffect(() => {
     if (isChecked) {
-      context.setActiveLabel(children);
+      context.setActiveLabel(label);
     }
-  }, [isChecked, children]);
+  }, [isChecked, label, context]);
 
   const handleSelect = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (context.disabled) return;
     context.onValueChange?.(value);
     context.setOpen(false);
   };

@@ -234,7 +234,7 @@ export function HomeView() {
                 border: "1px solid rgba(117, 100, 255, 0.2)",
                 borderRadius: "6px",
                 background: "rgba(255, 255, 255, 0.6)",
-                color: refreshingStats ? "#a0a0ae" : "#6366f1",
+                color: refreshingStats ? "var(--color-text-muted)" : "var(--color-primary)",
                 cursor: refreshingStats ? "wait" : "pointer",
                 fontSize: "11px",
                 fontWeight: 700,

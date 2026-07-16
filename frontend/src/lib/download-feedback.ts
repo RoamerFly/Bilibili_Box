@@ -1,4 +1,4 @@
-import { useAppStore, useDownloadStore, useLogStore } from "@/stores/app-store";
+import { useAppStore, useDownloadStore } from "@/stores/app-store";
 
 interface QueuedDownloadMetadata {
   mediaKind?: "video" | "audio";
@@ -22,5 +22,4 @@ export function notifyDownloadQueued(taskIds: string[], title: string, metadata:
   }
 
   useAppStore.getState().setBottomBarExpanded(true);
-  useLogStore.getState().addLog(`Queued download: ${normalizedTitle}`, "info");
 }

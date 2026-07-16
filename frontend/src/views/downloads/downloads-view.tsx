@@ -8,7 +8,7 @@ import {
   RotateCcw,
   Search,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { cn, formatBiliImageUrl } from "@/lib/utils";
 import { invoke } from "@/lib/api";
 import { DownloadProgress, DownloadStage } from "@/lib/types";
@@ -381,7 +381,7 @@ export function DownloadsView() {
             style={{
               fontSize: "24px",
               fontWeight: 800,
-              color: "#1a1a2e",
+              color: "var(--color-text)",
               letterSpacing: "-0.02em",
               lineHeight: 1.25,
             }}
@@ -391,7 +391,7 @@ export function DownloadsView() {
           <p
             style={{
               fontSize: "14px",
-              color: "#8b8b9a",
+              color: "var(--color-text-muted)",
               marginTop: "4px",
             }}
           >
@@ -407,10 +407,10 @@ export function DownloadsView() {
             whileHover={{ scale: 1.04 }}
             whileTap={{ scale: 0.96 }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = "#5544dd";
+              e.currentTarget.style.backgroundColor = "var(--color-primary-hover)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = "#6366f1";
+              e.currentTarget.style.backgroundColor = "var(--color-primary)";
             }}
             style={{
               display: "flex",
@@ -421,7 +421,7 @@ export function DownloadsView() {
               fontSize: "12.5px",
               fontWeight: 600,
               color: "#fff",
-              backgroundColor: "#6366f1",
+              backgroundColor: "var(--color-primary)",
               border: "none",
               cursor: "pointer",
               fontFamily: "inherit",
@@ -459,12 +459,12 @@ export function DownloadsView() {
             whileHover={{ scale: 1.04 }}
             whileTap={{ scale: 0.96 }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = "#fef2f2";
+              e.currentTarget.style.backgroundColor = "var(--color-error-bg)";
               e.currentTarget.style.borderColor = "#fecaca";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = "#fff";
-              e.currentTarget.style.borderColor = "#e2e2ea";
+              e.currentTarget.style.backgroundColor = "var(--color-bg-secondary)";
+              e.currentTarget.style.borderColor = "var(--color-border)";
             }}
             style={{
               display: "flex",
@@ -475,8 +475,8 @@ export function DownloadsView() {
               fontSize: "12.5px",
               fontWeight: 500,
               color: "#ef4444",
-              backgroundColor: "#fff",
-              border: "1.5px solid #e2e2ea",
+              backgroundColor: "var(--color-bg-secondary)",
+              border: "1.5px solid var(--color-border)",
               cursor: "pointer",
               fontFamily: "inherit",
               transition: "all 0.15s ease",
@@ -514,14 +514,14 @@ export function DownloadsView() {
             onClick={() => setActiveTab(key)}
             onMouseEnter={(e) => {
               if (activeTab !== key) {
-                e.currentTarget.style.borderColor = "#c7c2ff";
-                e.currentTarget.style.color = "#6366f1";
+                e.currentTarget.style.borderColor = "var(--color-border-hover)";
+                e.currentTarget.style.color = "var(--color-primary)";
               }
             }}
             onMouseLeave={(e) => {
               if (activeTab !== key) {
                 e.currentTarget.style.borderColor = "transparent";
-                e.currentTarget.style.color = "#505065";
+                e.currentTarget.style.color = "var(--color-text-secondary)";
               }
             }}
             style={{
@@ -532,9 +532,9 @@ export function DownloadsView() {
               borderRadius: "6px",
               fontSize: "12.5px",
               fontWeight: activeTab === key ? 600 : 500,
-              color: activeTab === key ? "#fff" : "#505065",
-              backgroundColor: activeTab === key ? "#6366f1" : "#fff",
-              border: activeTab === key ? "none" : "1.5px solid transparent",
+              color: activeTab === key ? "#fff" : "var(--color-text-secondary)",
+              backgroundColor: activeTab === key ? "var(--color-primary)" : "var(--color-bg-secondary)",
+              border: `1.5px solid ${activeTab === key ? "var(--color-primary)" : "transparent"}`,
               cursor: "pointer",
               fontFamily: "inherit",
               transition: "all 0.15s ease",
@@ -554,8 +554,8 @@ export function DownloadsView() {
                 fontWeight: 600,
                 fontVariantNumeric: "tabular-nums",
                 lineHeight: "20px",
-                backgroundColor: activeTab === key ? "rgba(255,255,255,0.25)" : "#f0f0f5",
-                color: activeTab === key ? "#fff" : "#7a7a8c",
+                backgroundColor: activeTab === key ? "rgba(255,255,255,0.25)" : "var(--color-bg-tertiary)",
+                color: activeTab === key ? "#fff" : "var(--color-text-muted)",
               }}
             >
               {count}
@@ -570,9 +570,9 @@ export function DownloadsView() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1, duration: 0.35 }}
         style={{
-          backgroundColor: "#fff",
+          backgroundColor: "var(--color-bg-secondary)",
           borderRadius: "14px",
-          border: "1.5px solid #ececf2",
+          border: "1.5px solid var(--color-border)",
           overflow: "hidden",
           flex: 1,
           minHeight: 0,
@@ -582,7 +582,7 @@ export function DownloadsView() {
       >
         {loading && tasks.length === 0 ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "80px" }}>
-            <Loader2 className="animate-spin" style={{ width: "32px", height: "32px", color: "#6366f1" }} />
+            <Loader2 className="animate-spin" style={{ width: "32px", height: "32px", color: "var(--color-primary)" }} />
           </div>
         ) : filteredTasks.length === 0 ? (
           <EmptyState
@@ -611,8 +611,8 @@ export function DownloadsView() {
                 gridTemplateColumns: "38px minmax(290px, 1fr) 220px 100px 120px 126px",
                 alignItems: "center",
                 padding: "12px 20px",
-                borderBottom: "1px solid #f0f0f5",
-                backgroundColor: "#fafafe",
+                borderBottom: "1px solid var(--color-bg-tertiary)",
+                backgroundColor: "var(--color-bg-subtle)",
               }}
             >
               <input
@@ -620,23 +620,21 @@ export function DownloadsView() {
                 checked={allPageSelected}
                 onChange={togglePageTasks}
                 aria-label="选择当前页任务"
-                style={{ width: "16px", height: "16px", accentColor: "#6366f1" }}
+                style={{ width: "16px", height: "16px", accentColor: "var(--color-primary)" }}
               />
-              <span style={{ fontSize: "13px", fontWeight: 600, color: "#7a7a8c" }}>文件名</span>
-              <span style={{ fontSize: "13px", fontWeight: 600, color: "#7a7a8c", textAlign: "center" }}>进度</span>
-              <span style={{ fontSize: "13px", fontWeight: 600, color: "#7a7a8c", textAlign: "center" }}>速度</span>
-              <span style={{ fontSize: "13px", fontWeight: 600, color: "#7a7a8c", textAlign: "center" }}>状态</span>
-              <span style={{ fontSize: "13px", fontWeight: 600, color: "#7a7a8c", textAlign: "right" }}>操作</span>
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text-muted)" }}>文件名</span>
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text-muted)", textAlign: "center" }}>进度</span>
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text-muted)", textAlign: "center" }}>速度</span>
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text-muted)", textAlign: "center" }}>状态</span>
+              <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text-muted)", textAlign: "right" }}>操作</span>
             </div>
 
             {/* 行数据 */}
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-              <AnimatePresence>
-                {pagedTasks.map((task, index) => (
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", scrollbarGutter: "stable" }}>
+                {pagedTasks.map((task) => (
                   <DownloadRow
                     key={task.task_id}
                     task={task}
-                    index={index}
                     onPause={handlePause}
                     onResume={handleResume}
                     onDelete={(task) => requestDelete(taskIdsOf(task))}
@@ -647,7 +645,6 @@ export function DownloadsView() {
                     onToggleSelected={toggleTask}
                   />
                 ))}
-              </AnimatePresence>
             </div>
 
             {pageCount > 1 ? (
@@ -657,7 +654,7 @@ export function DownloadsView() {
                   justifyContent: "center",
                   gap: "8px",
                   padding: "14px 18px",
-                  borderTop: "1px solid #f5f5f8",
+                  borderTop: "1px solid var(--color-bg-subtle)",
                   flexWrap: "wrap",
                 }}
               >
@@ -686,8 +683,8 @@ export function DownloadsView() {
               textAlign: "center",
               padding: "18px",
               fontSize: "13px",
-              color: "#b0b0bc",
-              borderTop: "1px solid #f5f5f8",
+              color: "var(--color-text-disabled)",
+              borderTop: "1px solid var(--color-bg-subtle)",
             }}
           >
             没有更多了
@@ -718,7 +715,6 @@ export function DownloadsView() {
 // ============================================================
 function DownloadRow({
   task,
-  index,
   onPause,
   onResume,
   onDelete,
@@ -729,7 +725,6 @@ function DownloadRow({
   onToggleSelected,
 }: {
   task: DownloadTask;
-  index: number;
   onPause: (task: DownloadTask) => void;
   onResume: (task: DownloadTask) => void;
   onDelete: (task: DownloadTask) => void;
@@ -749,27 +744,23 @@ function DownloadRow({
       : "—";
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -6 }}
-      transition={{ delay: Math.min(index * 0.04, 0.25), duration: 0.25 }}
+    <div
       style={{
         display: "grid",
         gridTemplateColumns: "38px minmax(290px, 1fr) 220px 100px 120px 126px",
         alignItems: "center",
         padding: "8px 16px",
-        borderBottom: "1px solid #f5f5f8",
+        borderBottom: "1px solid var(--color-bg-subtle)",
         transition: "background-color 0.12s ease",
-        backgroundColor: selected ? "#f5f3ff" : "transparent",
+        backgroundColor: selected ? "var(--color-primary-light)" : "transparent",
         cursor: task.isGroup || task.state === "Completed" ? "pointer" : "default",
       }}
       onClick={() => onPlay(task)}
       onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = "#fafafe";
+        e.currentTarget.style.backgroundColor = "var(--color-bg-subtle)";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = selected ? "#f5f3ff" : "transparent";
+        e.currentTarget.style.backgroundColor = selected ? "var(--color-primary-light)" : "transparent";
       }}
     >
       <input
@@ -778,7 +769,7 @@ function DownloadRow({
         onChange={() => onToggleSelected(task.task_id)}
         onClick={(event) => event.stopPropagation()}
         aria-label={`选择 ${task.title}`}
-        style={{ width: "16px", height: "16px", accentColor: "#6366f1" }}
+        style={{ width: "16px", height: "16px", accentColor: "var(--color-primary)" }}
       />
       {/* 文件名区域 */}
       <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
@@ -790,7 +781,7 @@ function DownloadRow({
             borderRadius: "8px",
             overflow: "hidden",
             flexShrink: 0,
-            backgroundColor: "#f0f0f5",
+            backgroundColor: "var(--color-bg-tertiary)",
           }}
         >
           <img
@@ -810,7 +801,7 @@ function DownloadRow({
             style={{
               fontSize: "14px",
               fontWeight: 600,
-              color: "#1a1a2e",
+              color: "var(--color-text)",
               lineHeight: 1.3,
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -820,15 +811,15 @@ function DownloadRow({
           >
           {task.title}
           {task.isGroup && task.children?.length ? (
-            <span style={{ marginLeft: 8, color: "#8b8b9a", fontSize: "12px", fontWeight: 700 }}>
+            <span style={{ marginLeft: 8, color: "var(--color-text-muted)", fontSize: "12px", fontWeight: 700 }}>
               共 {task.children.length} 项
             </span>
           ) : null}
           </p>
-          <span style={{ fontSize: "12px", color: "#8b8b9a" }}>
+          <span style={{ fontSize: "12px", color: "var(--color-text-muted)" }}>
             {task.quality} · {task.format}{task.isGroup ? " · 点击查看详情" : ""}
           </span>
-          <span style={{ fontSize: "11.5px", color: "#a0a0ae" }}>{sizeText}</span>
+          <span style={{ fontSize: "11.5px", color: "var(--color-text-muted)" }}>{sizeText}</span>
         </div>
       </div>
 
@@ -846,7 +837,7 @@ function DownloadRow({
           style={{
             fontSize: "13px",
             fontWeight: 600,
-            color: "#505065",
+            color: "var(--color-text-secondary)",
             fontVariantNumeric: "tabular-nums",
           }}
         >
@@ -857,7 +848,7 @@ function DownloadRow({
             width: "100%",
             height: "6px",
             borderRadius: "3px",
-            backgroundColor: "#f0f0f5",
+            backgroundColor: "var(--color-bg-tertiary)",
             overflow: "hidden",
           }}
         >
@@ -872,11 +863,11 @@ function DownloadRow({
             transition={{ duration: 0.4, ease: "easeOut" }}
           />
         </div>
-        <span style={{ fontSize: "11px", color: "#6f6f82", fontWeight: 600 }}>
+        <span style={{ fontSize: "11px", color: "var(--color-text-secondary)", fontWeight: 600 }}>
           {getStageText(task.stage, task.state)}
         </span>
         {task.remaining_time && (
-          <span style={{ fontSize: "11px", color: "#a0a0ae", fontVariantNumeric: "tabular-nums" }}>
+          <span style={{ fontSize: "11px", color: "var(--color-text-muted)", fontVariantNumeric: "tabular-nums" }}>
             剩余 {task.remaining_time}
           </span>
         )}
@@ -888,7 +879,7 @@ function DownloadRow({
           style={{
             fontSize: "13px",
             fontWeight: 500,
-            color: task.speed > 0 ? "#6366f1" : "#a0a0ae",
+            color: task.speed > 0 ? "var(--color-primary)" : "var(--color-text-muted)",
             fontVariantNumeric: "tabular-nums",
           }}
         >
@@ -913,7 +904,7 @@ function DownloadRow({
           >
             {stateConfig.text}
           </span>
-          <span style={{ fontSize: "11px", color: task.state === "Failed" ? "#dc2626" : "#8b8b9a", maxWidth: "112px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={task.state === "Failed" ? task.error : getStageText(task.stage, task.state)}>
+          <span style={{ fontSize: "11px", color: task.state === "Failed" ? "var(--color-error-text)" : "var(--color-text-muted)", maxWidth: "112px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={task.state === "Failed" ? task.error : getStageText(task.stage, task.state)}>
             {task.state === "Failed" ? task.error || "查看日志" : getStageText(task.stage, task.state)}
           </span>
         </div>
@@ -947,7 +938,7 @@ function DownloadRow({
           <FolderOpen style={{ width: "15px", height: "15px" }} />
         </IconButton>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -973,12 +964,12 @@ function ActionButton({
         onClick?.();
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = "#f5f5ff";
-        e.currentTarget.style.borderColor = "#d0d0ff";
+        e.currentTarget.style.backgroundColor = "var(--color-primary-light)";
+        e.currentTarget.style.borderColor = "var(--color-border-hover)";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = "#fff";
-        e.currentTarget.style.borderColor = "#e2e2ea";
+        e.currentTarget.style.backgroundColor = "var(--color-bg-secondary)";
+        e.currentTarget.style.borderColor = "var(--color-border)";
       }}
       style={{
         display: "flex",
@@ -988,9 +979,9 @@ function ActionButton({
         borderRadius: "6px",
         fontSize: "12.5px",
         fontWeight: 500,
-        color: "#505065",
-        backgroundColor: "#fff",
-        border: "1.5px solid #e2e2ea",
+        color: "var(--color-text-secondary)",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1.5px solid var(--color-border)",
         cursor: "pointer",
         fontFamily: "inherit",
         transition: "all 0.15s ease",
@@ -1029,17 +1020,17 @@ function IconButton({
         borderRadius: "8px",
         border: "none",
         backgroundColor: "transparent",
-        color: "#a0a0ae",
+        color: "var(--color-text-muted)",
         cursor: "pointer",
         transition: "all 0.15s ease",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = danger ? "#fef2f2" : "#f3f3f8";
-        e.currentTarget.style.color = danger ? "#ef4444" : "#505065";
+        e.currentTarget.style.backgroundColor = danger ? "var(--color-error-bg)" : "var(--color-bg-tertiary)";
+        e.currentTarget.style.color = danger ? "#ef4444" : "var(--color-text-secondary)";
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.backgroundColor = "transparent";
-        e.currentTarget.style.color = "#a0a0ae";
+        e.currentTarget.style.color = "var(--color-text-muted)";
       }}
     >
       {children}
@@ -1067,9 +1058,9 @@ function PageButton({
         height: "36px",
         padding: "0 12px",
         borderRadius: "10px",
-        border: active ? "1px solid #6366f1" : "1px solid #e2e2ea",
-        backgroundColor: active ? "#6366f1" : "#fff",
-        color: disabled ? "#c0c0c8" : active ? "#fff" : "#505065",
+        border: active ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
+        backgroundColor: active ? "var(--color-primary)" : "var(--color-bg-secondary)",
+        color: disabled ? "var(--color-text-disabled)" : active ? "#fff" : "var(--color-text-secondary)",
         fontSize: "13px",
         fontWeight: 600,
         cursor: disabled ? "not-allowed" : "pointer",
@@ -1096,19 +1087,19 @@ function EmptyState({ message }: { message: string }) {
           width: "64px",
           height: "64px",
           borderRadius: "16px",
-          backgroundColor: "#f3f3f8",
+          backgroundColor: "var(--color-bg-tertiary)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           marginBottom: "16px",
         }}
       >
-        <DownloadIcon style={{ width: "28px", height: "28px", color: "#c0c0c8" }} />
+        <DownloadIcon style={{ width: "28px", height: "28px", color: "var(--color-text-disabled)" }} />
       </div>
-      <p style={{ fontSize: "16px", fontWeight: 600, color: "#505065", marginBottom: "4px" }}>
+      <p style={{ fontSize: "16px", fontWeight: 600, color: "var(--color-text-secondary)", marginBottom: "4px" }}>
         暂无下载任务
       </p>
-      <p style={{ fontSize: "13.5px", color: "#9a9aa5" }}>{message}</p>
+      <p style={{ fontSize: "13.5px", color: "var(--color-text-muted)" }}>{message}</p>
     </div>
   );
 }
@@ -1134,29 +1125,29 @@ function TaskDetailDialog({
     >
       <div
         onClick={(event) => event.stopPropagation()}
-        style={{ width: "min(760px, 94vw)", maxHeight: "84vh", overflow: "hidden", display: "flex", flexDirection: "column", borderRadius: "16px", backgroundColor: "#fff", boxShadow: "0 24px 70px rgba(15,23,42,0.25)" }}
+        style={{ width: "min(760px, 94vw)", maxHeight: "84vh", overflow: "hidden", display: "flex", flexDirection: "column", borderRadius: "16px", backgroundColor: "var(--color-bg-secondary)", boxShadow: "0 24px 70px rgba(15,23,42,0.25)" }}
       >
-        <div style={{ padding: "18px 20px", borderBottom: "1px solid #ececf2", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+        <div style={{ padding: "18px 20px", borderBottom: "1px solid var(--color-border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
           <div style={{ minWidth: 0 }}>
-            <h2 style={{ color: "#1a1a2e", fontSize: "18px", fontWeight: 850, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</h2>
-            <p style={{ marginTop: "4px", color: "#8b8b9a", fontSize: "13px" }}>共 {children.length} 个子任务</p>
+            <h2 style={{ color: "var(--color-text)", fontSize: "18px", fontWeight: 850, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</h2>
+            <p style={{ marginTop: "4px", color: "var(--color-text-muted)", fontSize: "13px" }}>共 {children.length} 个子任务</p>
           </div>
           <button type="button" onClick={onClose} style={{ ...iconButtonPlainStyle, width: 34, height: 34 }}>×</button>
         </div>
         <div style={{ padding: "14px 18px", overflowY: "auto", display: "grid", gap: "10px" }}>
           {children.map((child, index) => (
-            <div key={child.task_id} style={{ display: "grid", gridTemplateColumns: "36px minmax(0, 1fr) 92px 76px", gap: "10px", alignItems: "center", padding: "10px", borderRadius: "10px", border: "1px solid #f0f0f5" }}>
-              <span style={{ color: "#8b8b9a", fontSize: "12px", fontWeight: 800 }}>{index + 1}</span>
+            <div key={child.task_id} style={{ display: "grid", gridTemplateColumns: "36px minmax(0, 1fr) 92px 76px", gap: "10px", alignItems: "center", padding: "10px", borderRadius: "10px", border: "1px solid var(--color-bg-tertiary)" }}>
+              <span style={{ color: "var(--color-text-muted)", fontSize: "12px", fontWeight: 800 }}>{index + 1}</span>
               <div style={{ minWidth: 0 }}>
-                <div style={{ color: "#242432", fontSize: "13.5px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{child.title}</div>
-                <div style={{ marginTop: "4px", color: "#8b8b9a", fontSize: "12px" }}>{child.media_kind === "article" ? "专栏图片" : "视频"} · {child.progress.toFixed(0)}%</div>
+                <div style={{ color: "var(--color-text)", fontSize: "13.5px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{child.title}</div>
+                <div style={{ marginTop: "4px", color: "var(--color-text-muted)", fontSize: "12px" }}>{child.media_kind === "article" ? "专栏图片" : "视频"} · {child.progress.toFixed(0)}%</div>
               </div>
               <span style={{ justifySelf: "end", color: getStateConfig(child.state).style.color, fontSize: "12px", fontWeight: 800 }}>{getStateConfig(child.state).text}</span>
               <span style={{ justifySelf: "end", display: "inline-flex", alignItems: "center", gap: "4px" }}>
                 <button type="button" onClick={() => onOpenFolder(child.task_id)} style={childTaskButtonStyle} title="打开所在目录">
                   <FolderOpen style={{ width: 14, height: 14 }} />
                 </button>
-                <button type="button" onClick={() => onDelete(child.task_id)} style={{ ...childTaskButtonStyle, color: "#dc2626" }} title="删除子任务">
+                <button type="button" onClick={() => onDelete(child.task_id)} style={{ ...childTaskButtonStyle, color: "var(--color-error-text)" }} title="删除子任务">
                   <Trash2 style={{ width: 14, height: 14 }} />
                 </button>
               </span>
@@ -1171,8 +1162,8 @@ function TaskDetailDialog({
 const iconButtonPlainStyle = {
   border: "none",
   borderRadius: "9px",
-  backgroundColor: "#f3f4f8",
-  color: "#505065",
+  backgroundColor: "var(--color-bg-tertiary)",
+  color: "var(--color-text-secondary)",
   fontSize: "20px",
   fontWeight: 800,
   cursor: "pointer",
@@ -1183,8 +1174,8 @@ const childTaskButtonStyle = {
   height: "30px",
   border: "none",
   borderRadius: "8px",
-  backgroundColor: "#f3f4f8",
-  color: "#505065",
+  backgroundColor: "var(--color-bg-tertiary)",
+  color: "var(--color-text-secondary)",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
@@ -1200,32 +1191,32 @@ function getStateConfig(state: TaskState) {
     case "Pending":
       return {
         text: "等待中",
-        style: { backgroundColor: "#f3f3f8", color: "#7a7a8c" },
+        style: { backgroundColor: "var(--color-bg-tertiary)", color: "var(--color-text-muted)" },
       };
     case "Downloading":
       return {
         text: "下载中",
-        style: { backgroundColor: "#eef2ff", color: "#6366f1" },
+        style: { backgroundColor: "var(--color-primary-light)", color: "var(--color-primary)" },
       };
     case "Merging":
       return {
         text: "合并中",
-        style: { backgroundColor: "#faf5ff", color: "#9333ea" },
+        style: { backgroundColor: "var(--color-primary-light)", color: "#9333ea" },
       };
     case "Paused":
       return {
         text: "已暂停",
-        style: { backgroundColor: "#fffbeb", color: "#d97706" },
+        style: { backgroundColor: "var(--color-warning-bg)", color: "var(--color-warning-text)" },
       };
     case "Completed":
       return {
         text: "已完成",
-        style: { backgroundColor: "#f0fdf4", color: "#16a34a" },
+        style: { backgroundColor: "var(--color-success-bg)", color: "var(--color-success-text)" },
       };
     case "Failed":
       return {
         text: "下载失败",
-        style: { backgroundColor: "#fef2f2", color: "#dc2626" },
+        style: { backgroundColor: "var(--color-error-bg)", color: "var(--color-error-text)" },
       };
   }
 }
@@ -1237,11 +1228,11 @@ function getProgressColor(state: TaskState) {
     case "Failed":
       return "#ef4444";
     case "Paused":
-      return "#d1d5db";
+      return "var(--color-border)";
     case "Merging":
       return "#9333ea";
     default:
-      return "#6366f1";
+      return "var(--color-primary)";
   }
 }
 

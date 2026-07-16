@@ -288,11 +288,11 @@ export function WatchLaterView() {
         }}
       >
         <div>
-          <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
+          <h1 style={{ fontSize: "24px", fontWeight: 800, color: "var(--color-text)", lineHeight: 1.25 }}>
             稍后再看
           </h1>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "14px", color: "#8b8b9a" }}>共 {count} 个视频</span>
+            <span style={{ fontSize: "14px", color: "var(--color-text-muted)" }}>共 {count} 个视频</span>
             <PurpleRefreshButton loading={refreshing} onClick={handleRefresh} />
           </div>
         </div>
@@ -312,8 +312,8 @@ export function WatchLaterView() {
             marginBottom: "20px",
             padding: "12px 18px",
             borderRadius: "12px",
-            backgroundColor: "#fef2f2",
-            color: "#dc2626",
+            backgroundColor: "var(--color-error-bg)",
+            color: "var(--color-error-text)",
             fontSize: "13.5px",
           }}
         >
@@ -323,7 +323,7 @@ export function WatchLaterView() {
 
       {loading ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingTop: "100px" }}>
-          <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
+          <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "var(--color-primary)" }} />
         </div>
       ) : (
         <>
@@ -335,8 +335,8 @@ export function WatchLaterView() {
               marginBottom: "18px",
               padding: "10px 16px",
               borderRadius: "13px",
-              backgroundColor: "#fff",
-              border: "1.5px solid #ececf2",
+              backgroundColor: "var(--color-bg-secondary)",
+              border: "1.5px solid var(--color-border)",
               gap: "12px",
               flexWrap: "wrap",
             }}
@@ -374,7 +374,7 @@ export function WatchLaterView() {
                     transform: "translateY(-50%)",
                     width: "15px",
                     height: "15px",
-                    color: "#b0b0bc",
+                    color: "var(--color-text-disabled)",
                   }}
                 />
                 <input
@@ -390,7 +390,7 @@ export function WatchLaterView() {
                     width: "100%",
                     padding: "10px 14px 10px 36px",
                     borderRadius: "10px",
-                    border: "1.5px solid #e2e2ea",
+                    border: "1.5px solid var(--color-border)",
                     fontSize: "13.5px",
                     outline: "none",
                   }}
@@ -469,8 +469,8 @@ export function WatchLaterView() {
                     gap: "6px",
                     padding: "8px 12px",
                     borderRadius: "12px",
-                    backgroundColor: "#fff",
-                    border: "1.5px solid #ececf2",
+                    backgroundColor: "var(--color-bg-secondary)",
+                    border: "1.5px solid var(--color-border)",
                   }}
                 >
                   <PageButton disabled={currentPage <= 1} onClick={() => runPreservingMainScroll(() => setCurrentPage((prev) => prev - 1))}>
@@ -516,7 +516,7 @@ function WatchLaterCard({
 }) {
   return (
     <motion.div
-      whileHover={{ backgroundColor: "#fafafe" }}
+      whileHover={{ backgroundColor: "var(--color-bg-subtle)" }}
       style={{
         display: "grid",
         gridTemplateColumns: `${20 * scale}px ${160 * scale}px minmax(0, 1fr)`,
@@ -525,8 +525,8 @@ function WatchLaterCard({
         rowGap: `${12 * scale}px`,
         padding: `${13 * scale}px ${16 * scale}px`,
         borderRadius: `${13 * scale}px`,
-        backgroundColor: selected ? "#f8f7ff" : "#fff",
-        border: selected ? "2px solid #c7c2ff" : "1px solid #ececf2",
+        backgroundColor: selected ? "var(--color-primary-light)" : "var(--color-bg-secondary)",
+        border: selected ? "2px solid var(--color-border-hover)" : "1px solid var(--color-border)",
       }}
     >
       {selectable ? <SelectionBox scale={scale} selected={selected} onClick={onSelect} /> : <span />}
@@ -539,7 +539,7 @@ function WatchLaterCard({
           overflow: "hidden",
           flexShrink: 0,
           position: "relative",
-          backgroundColor: "#f0f0f5",
+          backgroundColor: "var(--color-bg-tertiary)",
           cursor: "pointer",
         }}
         onClick={selectable ? onSelect : onPlay}
@@ -573,7 +573,7 @@ function WatchLaterCard({
           style={{
             fontSize: `${14.5 * scale}px`,
             fontWeight: 600,
-            color: "#1a1a2e",
+            color: "var(--color-text)",
             lineHeight: 1.4,
             display: "-webkit-box",
             WebkitLineClamp: 2,
@@ -583,7 +583,7 @@ function WatchLaterCard({
         >
           {item.title}
         </p>
-        <div style={{ display: "flex", alignItems: "center", gap: `${10 * scale}px`, fontSize: `${13 * scale}px`, color: "#7a7a8c", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: `${10 * scale}px`, fontSize: `${13 * scale}px`, color: "var(--color-text-muted)", flexWrap: "wrap" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: `${7 * scale}px`, fontWeight: 500, minWidth: 0 }}>
             <ClickableAvatar src={item.owner.face || ""} alt={item.owner.name} size={22 * scale} onClick={onOpenAuthor} />
             <button
@@ -592,7 +592,7 @@ function WatchLaterCard({
                 event.stopPropagation();
                 onOpenAuthor();
               }}
-              style={{ border: "none", background: "transparent", padding: 0, color: "#7a7a8c", fontSize: `${13 * scale}px`, fontWeight: 600, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              style={{ border: "none", background: "transparent", padding: 0, color: "var(--color-text-muted)", fontSize: `${13 * scale}px`, fontWeight: 600, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
             >
               {item.owner.name || "未知 UP"}
             </button>
@@ -677,9 +677,9 @@ function ActionButton({
         borderRadius: "10px",
         fontSize: "14px",
         fontWeight: 500,
-        color: "#505065",
-        backgroundColor: "#fff",
-        border: "1.5px solid #e2e2ea",
+        color: "var(--color-text-secondary)",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1.5px solid var(--color-border)",
         cursor: "pointer",
       }}
     >
@@ -709,9 +709,9 @@ function PageButton({
         height: "34px",
         padding: "0 10px",
         borderRadius: "8px",
-        border: active ? "none" : "1px solid #ececf2",
-        backgroundColor: active ? "#6366f1" : "#fff",
-        color: active ? "#fff" : disabled ? "#c0c0c8" : "#505065",
+        border: active ? "none" : "1px solid var(--color-border)",
+        backgroundColor: active ? "var(--color-primary)" : "var(--color-bg-secondary)",
+        color: active ? "#fff" : disabled ? "var(--color-text-disabled)" : "var(--color-text-secondary)",
         cursor: disabled ? "not-allowed" : "pointer",
         fontSize: "13.5px",
         fontWeight: active ? 600 : 500,
@@ -738,8 +738,8 @@ function SelectionBox({
         width: `${20 * scale}px`,
         height: `${20 * scale}px`,
         borderRadius: `${5 * scale}px`,
-        border: selected ? "none" : "2px solid #c8c8d2",
-        backgroundColor: selected ? "#6366f1" : "#fff",
+        border: selected ? "none" : "2px solid var(--color-text-disabled)",
+        backgroundColor: selected ? "var(--color-primary)" : "var(--color-bg-secondary)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -778,9 +778,9 @@ function IconAction({
         width: `${34 * scale}px`,
         height: `${34 * scale}px`,
         borderRadius: `${9 * scale}px`,
-        color: "#8b8b9a",
+        color: "var(--color-text-muted)",
         backgroundColor: "transparent",
-        border: "1.5px solid #e5e5ec",
+        border: "1.5px solid var(--color-border)",
         cursor: "pointer",
       }}
     >
@@ -806,17 +806,17 @@ function EmptyState({ message }: { message: string }) {
           width: "64px",
           height: "64px",
           borderRadius: "16px",
-          backgroundColor: "#f3f3f8",
+          backgroundColor: "var(--color-bg-tertiary)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           marginBottom: "16px",
         }}
       >
-        <Clock style={{ width: 28, height: 28, color: "#c0c0c8" }} />
+        <Clock style={{ width: 28, height: 28, color: "var(--color-text-disabled)" }} />
       </div>
-      <p style={{ fontSize: "16px", fontWeight: 600, color: "#505065", marginBottom: "4px" }}>暂无视频</p>
-      <p style={{ fontSize: "13.5px", color: "#9a9aa5" }}>{message}</p>
+      <p style={{ fontSize: "16px", fontWeight: 600, color: "var(--color-text-secondary)", marginBottom: "4px" }}>暂无视频</p>
+      <p style={{ fontSize: "13.5px", color: "var(--color-text-muted)" }}>{message}</p>
     </div>
   );
 }

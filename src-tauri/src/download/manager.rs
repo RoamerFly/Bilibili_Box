@@ -174,6 +174,7 @@ impl DownloadManager {
         params: CreateDownloadTaskParams,
     ) -> Result<Vec<String>, String> {
         let mut task_ids = Vec::new();
+        let mut new_task_ids = Vec::new();
 
         // 获取视频播放地址
         let bili_client = self.app.state::<Arc<crate::api::BiliClient>>();
@@ -212,17 +213,33 @@ impl DownloadManager {
             } else {
                 format!("{}_{}", params.bvid, cid)
             };
+            if self.tasks.read().get(&task_id).is_some_and(|task| {
+                matches!(
+                    task.read().state,
+                    DownloadTaskState::Pending
+                        | DownloadTaskState::Downloading
+                        | DownloadTaskState::Merging
+                )
+            }) {
+                task_ids.push(task_id);
+                continue;
+            }
+            if let Some(control) = self.controls.write().remove(&task_id) {
+                control.cancel();
+            }
             let page_episode_title =
                 page_info.and_then(|page| Self::trimmed_string(Some(&page.part)));
             let collection_title = Self::trimmed_string(params.collection_title.as_deref())
                 .or_else(|| (params.cids.len() > 1).then(|| video_info.title.clone()));
-            let episode_title = Self::trimmed_string(params.episode_title.as_deref())
-                .or_else(|| page_episode_title.clone());
-            let base_title = if params.title.trim().is_empty() {
-                video_info.title.clone()
-            } else {
-                params.title.clone()
-            };
+            let episode_title =
+                Self::trimmed_string(params.episode_title.as_deref()).or_else(|| {
+                    (video_info.pages.len() > 1 || params.cids.len() > 1)
+                        .then(|| page_episode_title.clone())
+                        .flatten()
+                });
+            let base_title = Self::trimmed_string(Some(&video_info.title))
+                .or_else(|| Self::trimmed_string(Some(&params.title)))
+                .unwrap_or_else(|| "untitled".to_string());
             let title = if collection_title.is_some() {
                 episode_title.clone().unwrap_or(base_title)
             } else if params.cids.len() > 1 {
@@ -287,11 +304,12 @@ impl DownloadManager {
                 .write()
                 .insert(task_id.clone(), Arc::new(TaskControl::new()));
 
+            new_task_ids.push(task_id.clone());
             task_ids.push(task_id);
         }
 
         // 启动下载任务
-        for task_id in &task_ids {
+        for task_id in &new_task_ids {
             self.start_download(task_id.clone());
         }
 
@@ -558,7 +576,7 @@ impl DownloadManager {
         let download_root = Config::resolve_download_dir(app, &download_dir)?;
         let output_dir = Self::output_dir_from_root(&download_root, &progress_snapshot);
         let output_stem = Self::output_stem(&progress_snapshot);
-        let temp_dir = Self::task_temp_dir(app, task_id)?;
+        let temp_dir = Self::task_temp_dir(app, &progress_snapshot)?;
         let fragment_dir = if auto_merge || audio_only {
             temp_dir.clone()
         } else {
@@ -797,9 +815,28 @@ impl DownloadManager {
         }
         Self::emit_progress_snapshot(app, task_id, task, TaskState::Downloading);
 
-        let mut file = tokio::fs::File::create(path)
+        let parent = path
+            .parent()
+            .ok_or_else(|| format!("创建文件失败: 输出路径缺少父目录 ({})", path.display()))?;
+        tokio::fs::create_dir_all(parent)
             .await
-            .map_err(|e| format!("创建文件失败: {}", e))?;
+            .map_err(|e| format!("创建文件目录失败 ({}): {}", parent.display(), e))?;
+        let mut file = match tokio::fs::File::create(path).await {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // A stale worker from an earlier task may have removed its old temporary
+                // directory. Recreate the parent and retry once before surfacing the error.
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| format!("重新创建文件目录失败 ({}): {}", parent.display(), e))?;
+                tokio::fs::File::create(path)
+                    .await
+                    .map_err(|e| format!("创建文件失败 ({}): {}", path.display(), e))?
+            }
+            Err(error) => {
+                return Err(format!("创建文件失败 ({}): {}", path.display(), error));
+            }
+        };
 
         let mut stream = response.bytes_stream();
         let mut downloaded: u64 = 0;
@@ -1314,15 +1351,24 @@ impl DownloadManager {
     }
 
     fn output_stem(progress: &DownloadProgress) -> String {
-        let name = Self::trimmed_string(progress.episode_title.as_deref())
-            .unwrap_or_else(|| progress.title.clone());
+        let name = if Self::trimmed_string(progress.collection_title.as_deref()).is_some() {
+            Self::trimmed_string(progress.episode_title.as_deref())
+                .unwrap_or_else(|| progress.title.clone())
+        } else {
+            progress.title.clone()
+        };
         Self::sanitize_path_component(&name)
     }
 
-    fn task_temp_dir(app: &AppHandle, task_id: &str) -> Result<PathBuf, String> {
+    fn task_temp_dir(app: &AppHandle, progress: &DownloadProgress) -> Result<PathBuf, String> {
+        let temp_name = if progress.created_at > 0 {
+            format!("{}_{}", progress.task_id, progress.created_at)
+        } else {
+            progress.task_id.clone()
+        };
         Ok(Config::user_cache_dir(app)?
             .join("download")
-            .join(Self::sanitize_path_component(task_id)))
+            .join(Self::sanitize_path_component(&temp_name)))
     }
 
     fn trimmed_string(value: Option<&str>) -> Option<String> {
@@ -1544,7 +1590,7 @@ impl DownloadManager {
         Self::delete_related_sidecars(&folder, &output_stem);
         Self::delete_related_sidecars(&folder, &Self::output_stem(progress));
 
-        let temp_dir = Self::task_temp_dir(&self.app, &progress.task_id)?;
+        let temp_dir = Self::task_temp_dir(&self.app, progress)?;
         if temp_dir.exists() && temp_dir.starts_with(Config::user_cache_dir(&self.app)?) {
             let _ = tokio::fs::remove_dir_all(temp_dir).await;
         }
@@ -1582,6 +1628,7 @@ impl DownloadManager {
             .collect();
 
         let sanitized = sanitized.trim().trim_matches('.').to_string();
+        let sanitized: String = sanitized.chars().take(120).collect();
         if sanitized.is_empty() {
             "untitled".to_string()
         } else {

@@ -2,15 +2,15 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 if /I not "%~1"=="__run" (
-    cmd /d /c ""%~f0" __run %*"
-    set "BUILD_EXIT_CODE=%ERRORLEVEL%"
-    if not "%BUILD_EXIT_CODE%"=="0" (
+    call "%~f0" __run %*
+    set "BUILD_EXIT_CODE=!ERRORLEVEL!"
+    if not "!BUILD_EXIT_CODE!"=="0" (
         echo.
-        echo Build failed with exit code %BUILD_EXIT_CODE%.
+        echo Build failed with exit code !BUILD_EXIT_CODE!.
         echo Press any key to close this window...
         pause >nul
     )
-    exit /b %BUILD_EXIT_CODE%
+    exit /b !BUILD_EXIT_CODE!
 )
 shift
 
@@ -57,6 +57,10 @@ if not exist "frontend\package-lock.json" (
     echo ERROR: frontend\package-lock.json was not found.
     exit /b 1
 )
+if not exist "src-tauri\Cargo.lock" (
+    echo ERROR: src-tauri\Cargo.lock was not found.
+    exit /b 1
+)
 call npm ci --no-audit --no-fund
 if errorlevel 1 (
     echo ERROR: Root dependency installation failed.
@@ -100,7 +104,7 @@ if errorlevel 1 (
 
 echo.
 echo [4/5] Building Tauri application...
-call npm run tauri -- build
+call npm run tauri -- build -- --locked
 if errorlevel 1 (
     echo ERROR: Tauri build failed.
     exit /b 1

@@ -295,11 +295,11 @@ export function BangumiView() {
         }}
       >
         <div>
-          <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
+          <h1 style={{ fontSize: "24px", fontWeight: 800, color: "var(--color-text)", lineHeight: 1.25 }}>
             追番追剧
           </h1>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "14px", color: "#8b8b9a" }}>共 {stats.all} 部内容</span>
+            <span style={{ fontSize: "14px", color: "var(--color-text-muted)" }}>共 {stats.all} 部内容</span>
             <PurpleRefreshButton loading={refreshing} onClick={handleRefresh} />
           </div>
         </div>
@@ -344,7 +344,7 @@ export function BangumiView() {
                 left: "12px",
                 width: "15px",
                 height: "15px",
-                color: "#b0b0bc",
+                color: "var(--color-text-disabled)",
                 pointerEvents: "none",
               }}
             />
@@ -374,7 +374,7 @@ export function BangumiView() {
 
       {loading ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingTop: "120px" }}>
-          <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
+          <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "var(--color-primary)" }} />
         </div>
       ) : (
         <div
@@ -436,7 +436,7 @@ export function BangumiView() {
           <aside style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
             <div style={sideCardStyle}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px 10px" }}>
-                <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#1a1a2e" }}>今日更新</h3>
+                <h3 style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-text)" }}>今日更新</h3>
                 <button
                   onClick={() => {
                     setActiveTab("following");
@@ -455,18 +455,18 @@ export function BangumiView() {
                     <TodayUpdateItem key={item.season_id} item={item} index={index} onOpen={() => handleOpenBangumiPlayer(item)} />
                   ))
                 ) : (
-                  <div style={{ fontSize: "12.5px", color: "#9a9aa5", padding: "6px 0" }}>今天还没有新的更新</div>
+                  <div style={{ fontSize: "12.5px", color: "var(--color-text-muted)", padding: "6px 0" }}>今天还没有新的更新</div>
                 )}
               </div>
             </div>
 
             <div style={{ ...sideCardStyle, padding: "16px" }}>
-              <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#1a1a2e", marginBottom: "14px" }}>追番统计</h3>
+              <h3 style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-text)", marginBottom: "14px" }}>追番统计</h3>
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <StatRow icon={<Clock style={{ width: 17, height: 17, color: "#6366f1" }} />} label="追更中" value={stats.following} unit="部" />
+                <StatRow icon={<Clock style={{ width: 17, height: 17, color: "var(--color-primary)" }} />} label="追更中" value={stats.following} unit="部" />
                 <StatRow icon={<CheckCircle2 style={{ width: 17, height: 17, color: "#22c55e" }} />} label="已完结" value={stats.finished} unit="部" />
                 <StatRow icon={<PauseCircle style={{ width: 17, height: 17, color: "#f59e0b" }} />} label="暂停" value={stats.paused} unit="部" />
-                <StatRow icon={<CalendarCheck style={{ width: 17, height: 17, color: "#8b8b9a" }} />} label="总计" value={stats.all} unit="部" isTotal />
+                <StatRow icon={<CalendarCheck style={{ width: 17, height: 17, color: "var(--color-text-muted)" }} />} label="总计" value={stats.all} unit="部" isTotal />
               </div>
             </div>
           </aside>
@@ -502,8 +502,8 @@ function BangumiCard({
         gridTemplateColumns: isGrid ? undefined : `${144 * scale}px minmax(0, 1fr)`,
         gap: isGrid ? undefined : `${14 * scale}px`,
         borderRadius: `${14 * scale}px`,
-        backgroundColor: "#fff",
-        border: "1px solid #ececf2",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1px solid var(--color-border)",
         overflow: "hidden",
         cursor: "pointer",
       }}
@@ -513,7 +513,7 @@ function BangumiCard({
           position: "relative",
           width: posterWidth,
           aspectRatio: "3 / 4",
-          backgroundColor: "#f3f4f6",
+          backgroundColor: "var(--color-bg-tertiary)",
         }}
       >
         <img
@@ -552,7 +552,7 @@ function BangumiCard({
           style={{
             fontSize: `${14 * scale}px`,
             fontWeight: 700,
-            color: "#1a1a2e",
+            color: "var(--color-text)",
             lineHeight: 1.45,
             display: "-webkit-box",
             WebkitLineClamp: 2,
@@ -566,7 +566,7 @@ function BangumiCard({
           style={{
             marginTop: `${8 * scale}px`,
             fontSize: `${12.5 * scale}px`,
-            color: "#6b7280",
+            color: "var(--color-text-muted)",
             lineHeight: 1.6,
             display: "-webkit-box",
             WebkitLineClamp: isGrid ? 2 : 3,
@@ -587,7 +587,7 @@ function BangumiCard({
             gap: `${10 * scale}px`,
           }}
         >
-          <span style={{ fontSize: `${12 * scale}px`, color: "#8b8b9a" }}>
+          <span style={{ fontSize: `${12 * scale}px`, color: "var(--color-text-muted)" }}>
             共 {item.total_count || 0} 集
           </span>
 
@@ -600,9 +600,9 @@ function BangumiCard({
               width: `${32 * scale}px`,
               height: `${32 * scale}px`,
               borderRadius: `${8 * scale}px`,
-              border: "1px solid #e2e2ea",
-              backgroundColor: "#fff",
-              color: "#6366f1",
+              border: "1px solid var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+              color: "var(--color-primary)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -615,7 +615,7 @@ function BangumiCard({
           </button>
         </div>
 
-        <div style={{ marginTop: `${8 * scale}px`, fontSize: `${11.5 * scale}px`, color: "#9a9aa5" }}>
+        <div style={{ marginTop: `${8 * scale}px`, fontSize: `${11.5 * scale}px`, color: "var(--color-text-muted)" }}>
           单击卡片进入播放页
         </div>
       </div>
@@ -638,13 +638,13 @@ function TodayUpdateItem({
       initial={{ opacity: 0, x: 8 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: 0.18 + index * 0.06, duration: 0.22 }}
-      whileHover={{ backgroundColor: "#fafafe" }}
+      whileHover={{ backgroundColor: "var(--color-bg-subtle)" }}
       style={{
         display: "flex",
         alignItems: "center",
         gap: "10px",
         padding: "8px 0",
-        borderBottom: index < 2 ? "1px solid #f0f0f5" : "none",
+        borderBottom: index < 2 ? "1px solid var(--color-bg-tertiary)" : "none",
         cursor: "pointer",
       }}
     >
@@ -654,7 +654,7 @@ function TodayUpdateItem({
           height: "56px",
           borderRadius: "8px",
           overflow: "hidden",
-          backgroundColor: "#f3f4f6",
+          backgroundColor: "var(--color-bg-tertiary)",
           flexShrink: 0,
         }}
       >
@@ -667,11 +667,11 @@ function TodayUpdateItem({
         />
       </div>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: "13px", fontWeight: 600, color: "#33334a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {item.title}
         </div>
-        <div style={{ marginTop: "3px", fontSize: "11.5px", color: "#8b8b9a" }}>{item.ep_index}</div>
-        <div style={{ marginTop: "2px", fontSize: "11px", color: "#b0b0bc" }}>{item.update_time}</div>
+        <div style={{ marginTop: "3px", fontSize: "11.5px", color: "var(--color-text-muted)" }}>{item.ep_index}</div>
+        <div style={{ marginTop: "2px", fontSize: "11px", color: "var(--color-text-disabled)" }}>{item.update_time}</div>
       </div>
     </motion.div>
   );
@@ -697,7 +697,7 @@ function StatRow({
         alignItems: "center",
         justifyContent: "space-between",
         gap: "10px",
-        ...(isTotal ? { borderTop: "1px solid #eeeef3", paddingTop: "10px" } : {}),
+        ...(isTotal ? { borderTop: "1px solid var(--color-border)", paddingTop: "10px" } : {}),
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
@@ -706,7 +706,7 @@ function StatRow({
             width: "30px",
             height: "30px",
             borderRadius: "8px",
-            backgroundColor: isTotal ? "#f5f5f8" : "#f0efff",
+            backgroundColor: isTotal ? "var(--color-bg-subtle)" : "var(--color-primary-light)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -714,10 +714,10 @@ function StatRow({
         >
           {icon}
         </div>
-        <span style={{ fontSize: "13.5px", fontWeight: 500, color: "#505065" }}>{label}</span>
+        <span style={{ fontSize: "13.5px", fontWeight: 500, color: "var(--color-text-secondary)" }}>{label}</span>
       </div>
-      <span style={{ fontSize: "15px", fontWeight: 800, color: isTotal ? "#1a1a2e" : "#33334a" }}>
-        {value} <span style={{ fontSize: "12px", fontWeight: 500, color: "#9a9aa5" }}>{unit}</span>
+      <span style={{ fontSize: "15px", fontWeight: 800, color: isTotal ? "var(--color-text)" : "var(--color-text)" }}>
+        {value} <span style={{ fontSize: "12px", fontWeight: 500, color: "var(--color-text-muted)" }}>{unit}</span>
       </span>
     </div>
   );
@@ -746,9 +746,9 @@ function ActionButton({
         borderRadius: "10px",
         fontSize: "14px",
         fontWeight: 600,
-        color: "#505065",
-        backgroundColor: "#fff",
-        border: "1px solid #e2e2ea",
+        color: "var(--color-text-secondary)",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1px solid var(--color-border)",
         cursor: "pointer",
       }}
     >
@@ -778,9 +778,9 @@ function PageButton({
         height: "36px",
         padding: "0 12px",
         borderRadius: "10px",
-        border: active ? "1px solid #6366f1" : "1px solid #e2e2ea",
-        backgroundColor: active ? "#6366f1" : "#fff",
-        color: disabled ? "#c0c0c8" : active ? "#fff" : "#505065",
+        border: active ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
+        backgroundColor: active ? "var(--color-primary)" : "var(--color-bg-secondary)",
+        color: disabled ? "var(--color-text-disabled)" : active ? "#fff" : "var(--color-text-secondary)",
         fontSize: "13px",
         fontWeight: 600,
         cursor: disabled ? "not-allowed" : "pointer",
@@ -809,17 +809,17 @@ function EmptyState({ message }: { message: string }) {
           width: "64px",
           height: "64px",
           borderRadius: "16px",
-          backgroundColor: "#f3f3f8",
+          backgroundColor: "var(--color-bg-tertiary)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           marginBottom: "16px",
         }}
       >
-        <Tv style={{ width: "28px", height: "28px", color: "#c0c0c8" }} />
+        <Tv style={{ width: "28px", height: "28px", color: "var(--color-text-disabled)" }} />
       </div>
-      <div style={{ fontSize: "16px", fontWeight: 700, color: "#505065", marginBottom: "4px" }}>暂无内容</div>
-      <div style={{ fontSize: "13.5px", color: "#9a9aa5" }}>{message}</div>
+      <div style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text-secondary)", marginBottom: "4px" }}>暂无内容</div>
+      <div style={{ fontSize: "13.5px", color: "var(--color-text-muted)" }}>{message}</div>
     </div>
   );
 }
@@ -832,9 +832,9 @@ const searchInputStyle: React.CSSProperties = {
   paddingBottom: "9px",
   borderRadius: "10px",
   fontSize: "13.5px",
-  color: "#33334a",
-  backgroundColor: "#fff",
-  border: "1.5px solid #e2e2ea",
+  color: "var(--color-text)",
+  backgroundColor: "var(--color-bg-secondary)",
+  border: "1.5px solid var(--color-border)",
   outline: "none",
   fontFamily: "inherit",
 };
@@ -843,22 +843,22 @@ const errorStyle: React.CSSProperties = {
   marginBottom: "18px",
   padding: "12px 18px",
   borderRadius: "12px",
-  backgroundColor: "#fef2f2",
-  color: "#dc2626",
+  backgroundColor: "var(--color-error-bg)",
+  color: "var(--color-error-text)",
   fontSize: "13.5px",
 };
 
 const sideCardStyle: React.CSSProperties = {
   borderRadius: "14px",
-  backgroundColor: "#fff",
-  border: "1px solid #ececf2",
+  backgroundColor: "var(--color-bg-secondary)",
+  border: "1px solid var(--color-border)",
   overflow: "hidden",
 };
 
 const moreButtonStyle: React.CSSProperties = {
   fontSize: "12.5px",
   fontWeight: 600,
-  color: "#6366f1",
+  color: "var(--color-primary)",
   backgroundColor: "transparent",
   border: "none",
   cursor: "pointer",
@@ -872,9 +872,9 @@ function tabButtonStyle(active: boolean): React.CSSProperties {
     gap: "7px",
     padding: "8px 16px",
     borderRadius: "10px",
-    border: active ? "1px solid #6366f1" : "1px solid #e2e2ea",
-    backgroundColor: active ? "#6366f1" : "#fff",
-    color: active ? "#fff" : "#505065",
+    border: active ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
+    backgroundColor: active ? "var(--color-primary)" : "var(--color-bg-secondary)",
+    color: active ? "#fff" : "var(--color-text-secondary)",
     fontSize: "13.5px",
     fontWeight: 600,
     cursor: "pointer",
@@ -890,8 +890,8 @@ function tabCountStyle(active: boolean): React.CSSProperties {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: active ? "rgba(255,255,255,0.22)" : "#f3f3f8",
-    color: active ? "#fff" : "#7a7a8c",
+    backgroundColor: active ? "rgba(255,255,255,0.22)" : "var(--color-bg-tertiary)",
+    color: active ? "#fff" : "var(--color-text-muted)",
     fontSize: "12px",
     fontWeight: 700,
   };

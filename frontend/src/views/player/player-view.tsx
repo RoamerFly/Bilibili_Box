@@ -120,6 +120,8 @@ export function PlayerView() {
   const [bangumiInfo, setBangumiInfo] = useState<BangumiInfo | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeOption[]>([]);
   const [selectedEpisode, setSelectedEpisode] = useState<EpisodeOption | null>(null);
+  const [downloadingEpisodeKey, setDownloadingEpisodeKey] = useState("");
+  const [downloadingAllEpisodes, setDownloadingAllEpisodes] = useState(false);
   const [playbackQuality, setPlaybackQuality] = useState(80);
   const [availableQualities, setAvailableQualities] = useState<number[]>([80]);
   const [playbackRate, setPlaybackRate] = useState(1);
@@ -621,39 +623,47 @@ export function PlayerView() {
     }
   };
 
-  const handleDownload = async () => {
-    if (!selectedEpisode) {
-      return;
-    }
+  const handleEpisodeDownload = async (episode: EpisodeOption) => {
+    const episodeKey = `${episode.bvid}-${episode.cid}`;
+    if (downloadingEpisodeKey || downloadingAllEpisodes) return;
+    setDownloadingEpisodeKey(episodeKey);
     try {
       const isBangumi = playerState?.kind === "bangumi";
       const downloadQuality = await requestDownloadQuality({
-        bvid: selectedEpisode.bvid,
-        cid: selectedEpisode.cid,
+        bvid: episode.bvid,
+        cid: episode.cid,
       });
       if (!downloadQuality) return;
       const taskIds = await invoke<string[]>("create_download_task", {
         params: {
-          bvid: selectedEpisode.bvid,
-          cid: selectedEpisode.cid,
+          bvid: episode.bvid,
+          cid: episode.cid,
           title:
             isBangumi
-              ? `${currentTitle} - ${selectedEpisode.title}`.trim()
+              ? `${currentTitle} - ${episode.title}`.trim()
               : currentTitle,
-          cids: [selectedEpisode.cid],
+          cids: [episode.cid],
           collection_title: isBangumi ? currentTitle : undefined,
-          episode_title: isBangumi ? selectedEpisode.title : undefined,
+          episode_title: isBangumi ? episode.title : undefined,
           download_quality: downloadQuality,
         },
       });
-      notifyDownloadQueued(taskIds, selectedEpisode.title || currentTitle);
+      notifyDownloadQueued(taskIds, episode.title || currentTitle);
     } catch (err) {
       setError(String(err));
+    } finally {
+      setDownloadingEpisodeKey("");
     }
   };
 
+  const handleDownload = async () => {
+    if (!selectedEpisode) return;
+    await handleEpisodeDownload(selectedEpisode);
+  };
+
   const handleDownloadAll = async () => {
-    if (!episodes.length) return;
+    if (!episodes.length || downloadingAllEpisodes || downloadingEpisodeKey) return;
+    setDownloadingAllEpisodes(true);
     try {
       const downloadQuality = await requestDownloadQuality(
         episodes.map((episode) => ({ bvid: episode.bvid, cid: episode.cid }))
@@ -698,6 +708,8 @@ export function PlayerView() {
       notifyDownloadQueued(taskIds, currentTitle);
     } catch (err) {
       setError(String(err));
+    } finally {
+      setDownloadingAllEpisodes(false);
     }
   };
 
@@ -816,7 +828,7 @@ export function PlayerView() {
   if (!playerState) {
     return (
       <div style={{ width: "100%", padding: "36px 44px 48px", minHeight: "100%" }}>
-        <div style={{ paddingTop: "120px", textAlign: "center", color: "#8b8b9a" }}>暂无播放内容</div>
+        <div style={{ paddingTop: "120px", textAlign: "center", color: "var(--color-text-muted)" }}>暂无播放内容</div>
       </div>
     );
   }
@@ -841,10 +853,10 @@ export function PlayerView() {
             返回
           </HeaderButton>
           <div>
-            <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
+            <h1 style={{ fontSize: "24px", fontWeight: 800, color: "var(--color-text)", lineHeight: 1.25 }}>
               通用播放页
             </h1>
-            <p style={{ fontSize: "14px", color: "#8b8b9a", marginTop: "4px" }}>{currentEpisodeTitle}</p>
+            <p style={{ fontSize: "14px", color: "var(--color-text-muted)", marginTop: "4px" }}>{currentEpisodeTitle}</p>
           </div>
         </div>
 
@@ -883,7 +895,7 @@ export function PlayerView() {
       >
         <div style={panelStyle}>
           <div style={{ padding: "0 0 14px" }}>
-            <h2 style={{ fontSize: "17px", fontWeight: 700, color: "#1a1a2e", lineHeight: 1.45 }}>
+            <h2 style={{ fontSize: "17px", fontWeight: 700, color: "var(--color-text)", lineHeight: 1.45 }}>
               {currentTitle}
             </h2>
           </div>
@@ -1069,7 +1081,7 @@ export function PlayerView() {
           ) : null}
 
           <div style={{ padding: "18px 20px" }}>
-            <p style={{ fontSize: "13.5px", color: "#6b7280", lineHeight: 1.7 }}>
+            <p style={{ fontSize: "13.5px", color: "var(--color-text-muted)", lineHeight: 1.7 }}>
               {videoInfo?.description || bangumiInfo?.evaluate || "暂无简介"}
             </p>
           </div>
@@ -1090,10 +1102,10 @@ export function PlayerView() {
                   onClick={() => openUpProfile({ mid: videoInfo.owner.mid, name: videoInfo.owner.name, face: videoInfo.owner.face })}
                   style={upHeaderTextButtonStyle}
                 >
-                  <span style={{ display: "block", color: "#1a1a2e", fontSize: "14px", fontWeight: 850, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ display: "block", color: "var(--color-text)", fontSize: "14px", fontWeight: 850, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {videoInfo.owner.name}
                   </span>
-                  <span style={{ display: "block", marginTop: "2px", color: "#8b8b9a", fontSize: "12px" }}>
+                  <span style={{ display: "block", marginTop: "2px", color: "var(--color-text-muted)", fontSize: "12px" }}>
                     UP 主
                   </span>
                 </button>
@@ -1105,7 +1117,7 @@ export function PlayerView() {
                 aspectRatio: "16 / 9",
                 borderRadius: "12px",
                 overflow: "hidden",
-                backgroundColor: "#f3f4f6",
+                backgroundColor: "var(--color-bg-tertiary)",
                 marginBottom: "14px",
               }}
             >
@@ -1132,12 +1144,24 @@ export function PlayerView() {
 
           <div style={panelStyle}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: "12px" }}>
-              <h3 style={{ fontSize: "15px", fontWeight: 700, color: "#1a1a2e" }}>
+              <h3 style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-text)" }}>
                 {playerState.kind === "bangumi" ? "剧集列表" : "分 P 列表"}
               </h3>
               {episodes.length > 1 ? (
-                <button type="button" onClick={() => void handleDownloadAll()} style={episodeActionButtonStyle}>
-                  <Download style={{ width: 13, height: 13 }} />
+                <button
+                  type="button"
+                  disabled={downloadingAllEpisodes || Boolean(downloadingEpisodeKey)}
+                  onClick={() => void handleDownloadAll()}
+                  style={{
+                    ...episodeActionButtonStyle,
+                    opacity: downloadingAllEpisodes || downloadingEpisodeKey ? 0.62 : 1,
+                  }}
+                >
+                  {downloadingAllEpisodes ? (
+                    <Loader2 className="animate-spin" style={{ width: 13, height: 13 }} />
+                  ) : (
+                    <Download style={{ width: 13, height: 13 }} />
+                  )}
                   下载所有
                 </button>
               ) : null}
@@ -1145,29 +1169,41 @@ export function PlayerView() {
             <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "420px", overflowY: "auto" }}>
               {episodes.map((episode) => {
                 const active = selectedEpisode?.cid === episode.cid;
+                const episodeKey = `${episode.bvid}-${episode.cid}`;
+                const episodeDownloading = downloadingEpisodeKey === episodeKey;
                 return (
-                  <button
+                  <div
                     key={`${episode.bvid}-${episode.cid}`}
-                    onClick={() => void handleEpisodeChange(episode)}
                     style={{
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
                       gap: "10px",
-                      padding: "10px 12px",
                       borderRadius: "10px",
-                      border: active ? "1px solid #6366f1" : "1px solid #ececf2",
-                      backgroundColor: active ? "#f5f3ff" : "#fff",
-                      cursor: "pointer",
-                      textAlign: "left",
+                      border: active ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
+                      backgroundColor: active ? "var(--color-primary-light)" : "var(--color-bg-secondary)",
+                      overflow: "hidden",
                     }}
                   >
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: "13.5px", fontWeight: 600, color: "#1a1a2e" }}>{episode.label}</div>
+                    <button
+                      type="button"
+                      onClick={() => void handleEpisodeChange(episode)}
+                      style={{
+                        minWidth: 0,
+                        flex: 1,
+                        padding: "10px 0 10px 12px",
+                        border: 0,
+                        color: "inherit",
+                        background: "transparent",
+                        cursor: "pointer",
+                        textAlign: "left",
+                      }}
+                    >
+                      <div style={{ fontSize: "13.5px", fontWeight: 700, color: "var(--color-text)" }}>{episode.label}</div>
                       <div
                         style={{
                           fontSize: "12.5px",
-                          color: "#6b7280",
+                          color: "var(--color-text-muted)",
                           marginTop: "2px",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
@@ -1176,9 +1212,43 @@ export function PlayerView() {
                       >
                         {episode.title}
                       </div>
+                    </button>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "3px", paddingRight: "8px" }}>
+                      <button
+                        type="button"
+                        aria-label={`播放 ${episode.label}`}
+                        title="播放"
+                        onClick={() => void handleEpisodeChange(episode)}
+                        style={{
+                          ...episodeItemIconButtonStyle,
+                          color: active ? "var(--color-primary)" : "var(--color-text-muted)",
+                        }}
+                      >
+                        <Play style={{ width: 14, height: 14 }} />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`下载 ${episode.label}`}
+                        title="下载本集"
+                        disabled={Boolean(downloadingEpisodeKey) || downloadingAllEpisodes || episode.cid <= 0}
+                        onClick={() => void handleEpisodeDownload(episode)}
+                        style={{
+                          ...episodeItemIconButtonStyle,
+                          color: "var(--color-primary)",
+                          opacity:
+                            (downloadingEpisodeKey && !episodeDownloading) || downloadingAllEpisodes || episode.cid <= 0
+                              ? 0.45
+                              : 1,
+                        }}
+                      >
+                        {episodeDownloading ? (
+                          <Loader2 className="animate-spin" style={{ width: 14, height: 14 }} />
+                        ) : (
+                          <Download style={{ width: 14, height: 14 }} />
+                        )}
+                      </button>
                     </div>
-                    {active ? <Play style={{ width: 14, height: 14, color: "#6366f1", flexShrink: 0 }} /> : null}
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -1256,9 +1326,9 @@ function HeaderButton({
         borderRadius: "10px",
         fontSize: "14px",
         fontWeight: 500,
-        color: "#505065",
-        backgroundColor: "#fff",
-        border: "1.5px solid #e2e2ea",
+        color: "var(--color-text-secondary)",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1.5px solid var(--color-border)",
         cursor: "pointer",
       }}
     >
@@ -1271,8 +1341,8 @@ function HeaderButton({
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
-      <span style={{ fontSize: "12.5px", color: "#8b8b9a", fontWeight: 600 }}>{label}</span>
-      <span style={{ fontSize: "13.5px", color: "#1a1a2e", fontWeight: 600 }}>{value}</span>
+      <span style={{ fontSize: "12.5px", color: "var(--color-text-muted)", fontWeight: 600 }}>{label}</span>
+      <span style={{ fontSize: "13.5px", color: "var(--color-text)", fontWeight: 600 }}>{value}</span>
     </div>
   );
 }
@@ -1380,7 +1450,7 @@ function VideoActionButton({
   count: number;
   onClick: (target: HTMLButtonElement) => void;
 }) {
-  const color = active ? "#2ea9f7" : "#666a73";
+  const color = active ? "#2ea9f7" : "var(--color-text-secondary)";
   const iconSize = 26;
   return (
     <button
@@ -1439,7 +1509,7 @@ function FavoriteDialog({
     <div style={dialogBackdropStyle} onClick={onCancel}>
       <div style={favoriteDialogStyle} onClick={(event) => event.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "14px" }}>
-          <h3 style={{ fontSize: "17px", fontWeight: 850, color: "#1a1a2e" }}>选择收藏夹</h3>
+          <h3 style={{ fontSize: "17px", fontWeight: 850, color: "var(--color-text)" }}>选择收藏夹</h3>
           <button type="button" title="关闭" onClick={onCancel} style={dialogIconButtonStyle}>
             <X style={{ width: 18, height: 18 }} />
           </button>
@@ -1450,7 +1520,7 @@ function FavoriteDialog({
             <Loader2 className="animate-spin" style={{ width: 24, height: 24 }} />
           </div>
         ) : folders.length === 0 ? (
-          <div style={{ color: "#8b8b9a", fontSize: "14px", padding: "22px 0" }}>没有可用收藏夹</div>
+          <div style={{ color: "var(--color-text-muted)", fontSize: "14px", padding: "22px 0" }}>没有可用收藏夹</div>
         ) : (
           <div style={{ display: "grid", gap: "8px", maxHeight: "360px", overflowY: "auto", paddingRight: "4px" }}>
             {folders.map((folder) => {
@@ -1467,19 +1537,19 @@ function FavoriteDialog({
                     gap: "10px",
                     padding: "11px 12px",
                     borderRadius: "10px",
-                    border: selected ? "1.5px solid #2ea9f7" : "1px solid #ececf2",
-                    backgroundColor: selected ? "#eff9ff" : "#fff",
+                    border: selected ? "1.5px solid #2ea9f7" : "1px solid var(--color-border)",
+                    backgroundColor: selected ? "var(--color-info-bg)" : "var(--color-bg-secondary)",
                     cursor: "pointer",
                     textAlign: "left",
                   }}
                 >
-                  <span style={{ ...favoriteCheckboxStyle, backgroundColor: selected ? "#2ea9f7" : "#fff", borderColor: selected ? "#2ea9f7" : "#d7d7e2" }}>
+                  <span style={{ ...favoriteCheckboxStyle, backgroundColor: selected ? "#2ea9f7" : "var(--color-bg-secondary)", borderColor: selected ? "#2ea9f7" : "var(--color-border)" }}>
                     {selected ? <Check style={{ width: 14, height: 14, color: "#fff" }} /> : null}
                   </span>
-                  <span style={{ minWidth: 0, color: "#242432", fontSize: "14px", fontWeight: 750, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ minWidth: 0, color: "var(--color-text)", fontSize: "14px", fontWeight: 750, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {folder.title}
                   </span>
-                  <span style={{ color: "#8b8b9a", fontSize: "12.5px", fontWeight: 700 }}>{formatNumber(folder.media_count)}</span>
+                  <span style={{ color: "var(--color-text-muted)", fontSize: "12.5px", fontWeight: 700 }}>{formatNumber(folder.media_count)}</span>
                 </button>
               );
             })}
@@ -1567,7 +1637,7 @@ function CoinDialog({
     <div style={dialogBackdropStyle} onClick={onCancel}>
       <div style={coinDialogStyle} onClick={(event) => event.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "14px" }}>
-          <h3 style={{ fontSize: "17px", fontWeight: 850, color: "#1a1a2e" }}>投币</h3>
+          <h3 style={{ fontSize: "17px", fontWeight: 850, color: "var(--color-text)" }}>投币</h3>
           <button type="button" title="关闭" onClick={onCancel} style={dialogIconButtonStyle}>
             <X style={{ width: 18, height: 18 }} />
           </button>
@@ -1585,12 +1655,12 @@ function CoinDialog({
               ...coinOptionStyle,
               opacity: maxMultiply < 1 ? 0.5 : 1,
               cursor: maxMultiply < 1 || disabled ? "not-allowed" : "pointer",
-              border: selected === 1 ? "2px solid #2ea9f7" : hovered === 1 ? "2px solid #2ea9f7" : "1px solid #ececf2",
-              backgroundColor: selected === 1 ? "#eff9ff" : hovered === 1 ? "#f0f8ff" : "#fff",
+              border: selected === 1 ? "2px solid #2ea9f7" : hovered === 1 ? "2px solid #2ea9f7" : "1px solid var(--color-border)",
+              backgroundColor: selected === 1 ? "var(--color-info-bg)" : hovered === 1 ? "var(--color-info-bg)" : "var(--color-bg-secondary)",
             }}
           >
             <CoinSprite src={coin22Img} active={isAnimating(1)} resetKey={animVersion} />
-            <span style={{ fontSize: "13px", fontWeight: 600, color: "#242432" }}>投1个币</span>
+            <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text)" }}>投1个币</span>
           </button>
 
           {/* 投2个币 */}
@@ -1604,17 +1674,17 @@ function CoinDialog({
               ...coinOptionStyle,
               opacity: maxMultiply < 2 ? 0.5 : 1,
               cursor: maxMultiply < 2 || disabled ? "not-allowed" : "pointer",
-              border: selected === 2 ? "2px solid #2ea9f7" : hovered === 2 ? "2px solid #2ea9f7" : "1px solid #ececf2",
-              backgroundColor: selected === 2 ? "#eff9ff" : hovered === 2 ? "#f0f8ff" : "#fff",
+              border: selected === 2 ? "2px solid #2ea9f7" : hovered === 2 ? "2px solid #2ea9f7" : "1px solid var(--color-border)",
+              backgroundColor: selected === 2 ? "var(--color-info-bg)" : hovered === 2 ? "var(--color-info-bg)" : "var(--color-bg-secondary)",
             }}
           >
             <CoinSprite src={coin33Img} active={isAnimating(2)} resetKey={animVersion} />
-            <span style={{ fontSize: "13px", fontWeight: 600, color: "#242432" }}>投2个币</span>
+            <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--color-text)" }}>投2个币</span>
           </button>
         </div>
 
         {maxMultiply === 1 && (
-          <div style={{ textAlign: "center", color: "#8b8b9a", fontSize: "12px", marginBottom: "6px" }}>
+          <div style={{ textAlign: "center", color: "var(--color-text-muted)", fontSize: "12px", marginBottom: "6px" }}>
             已投1枚，最多再投1枚
           </div>
         )}
@@ -1713,8 +1783,8 @@ async function copyText(text: string) {
 
 const panelStyle: React.CSSProperties = {
   borderRadius: "16px",
-  backgroundColor: "#fff",
-  border: "1px solid #ececf2",
+  backgroundColor: "var(--color-bg-secondary)",
+  border: "1px solid var(--color-border)",
   padding: "16px",
 };
 
@@ -1725,7 +1795,7 @@ const upHeaderButtonStyle: React.CSSProperties = {
   gap: "10px",
   padding: "0 0 14px",
   marginBottom: "14px",
-  borderBottom: "1px solid #f1f1f5",
+  borderBottom: "1px solid var(--color-bg-subtle)",
 };
 
 const upHeaderTextButtonStyle: React.CSSProperties = {
@@ -1790,8 +1860,8 @@ const favoriteDialogStyle: React.CSSProperties = {
   maxHeight: "min(620px, calc(100vh - 64px))",
   overflow: "hidden",
   borderRadius: "16px",
-  border: "1px solid #ececf2",
-  backgroundColor: "#fff",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
   boxShadow: "0 24px 60px rgba(15, 23, 42, 0.22)",
   padding: "18px",
 };
@@ -1799,10 +1869,10 @@ const favoriteDialogStyle: React.CSSProperties = {
 const dialogIconButtonStyle: React.CSSProperties = {
   width: "32px",
   height: "32px",
-  border: "1px solid #ececf2",
+  border: "1px solid var(--color-border)",
   borderRadius: "8px",
-  backgroundColor: "#fff",
-  color: "#666a73",
+  backgroundColor: "var(--color-bg-secondary)",
+  color: "var(--color-text-secondary)",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
@@ -1813,7 +1883,7 @@ const favoriteCheckboxStyle: React.CSSProperties = {
   width: "20px",
   height: "20px",
   borderRadius: "6px",
-  border: "1px solid #d7d7e2",
+  border: "1px solid var(--color-border)",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
@@ -1823,9 +1893,9 @@ const dialogSecondaryButtonStyle: React.CSSProperties = {
   height: "36px",
   padding: "0 16px",
   borderRadius: "9px",
-  border: "1px solid #e2e2ea",
-  backgroundColor: "#fff",
-  color: "#505065",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
+  color: "var(--color-text-secondary)",
   fontSize: "13.5px",
   fontWeight: 750,
   cursor: "pointer",
@@ -1847,8 +1917,8 @@ const errorStyle: React.CSSProperties = {
   marginBottom: "18px",
   padding: "12px 18px",
   borderRadius: "12px",
-  backgroundColor: "#fef2f2",
-  color: "#dc2626",
+  backgroundColor: "var(--color-error-bg)",
+  color: "var(--color-error-text)",
   fontSize: "13.5px",
 };
 
@@ -1856,7 +1926,7 @@ const warningStyle: React.CSSProperties = {
   marginBottom: "18px",
   padding: "14px 18px",
   borderRadius: "12px",
-  backgroundColor: "#fff7ed",
+  backgroundColor: "var(--color-warning-bg)",
   color: "#9a3412",
   fontSize: "13.5px",
   lineHeight: 1.7,
@@ -1967,6 +2037,19 @@ const episodeActionButtonStyle: React.CSSProperties = {
   gap: "5px",
   fontSize: "12px",
   fontWeight: 600,
+  cursor: "pointer",
+};
+
+const episodeItemIconButtonStyle: React.CSSProperties = {
+  width: "30px",
+  height: "30px",
+  flex: "0 0 30px",
+  border: 0,
+  borderRadius: "8px",
+  backgroundColor: "transparent",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
   cursor: "pointer",
 };
 

@@ -116,30 +116,30 @@ export function CommentsSection({ oid, typeId, title = "评论区", refreshKey }
     <section
       style={{
         marginTop: "22px",
-        border: "1px solid #ececf2",
-        backgroundColor: "#fff",
+        border: "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
         borderRadius: "16px",
         padding: "20px 22px",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "16px" }}>
-        <h2 style={{ display: "inline-flex", alignItems: "center", gap: "8px", color: "#1a1a2e", fontSize: "17px", fontWeight: 850 }}>
+        <h2 style={{ display: "inline-flex", alignItems: "center", gap: "8px", color: "var(--color-text)", fontSize: "17px", fontWeight: 850 }}>
           <MessageCircle style={{ width: 18, height: 18 }} />
           {title}
         </h2>
-        {total ? <span style={{ color: "#8b8b9a", fontSize: "13px", fontWeight: 700 }}>{formatNumber(total)} 条</span> : null}
+        {total ? <span style={{ color: "var(--color-text-muted)", fontSize: "13px", fontWeight: 700 }}>{formatNumber(total)} 条</span> : null}
       </div>
 
       {!canLoad ? (
-        <div style={{ color: "#9a9aa8", fontSize: "14px", padding: "14px 0" }}>当前内容没有可读取的评论区标识</div>
+        <div style={{ color: "var(--color-text-muted)", fontSize: "14px", padding: "14px 0" }}>当前内容没有可读取的评论区标识</div>
       ) : loading && comments.length === 0 ? (
-        <div style={{ height: "120px", display: "grid", placeItems: "center", color: "#6366f1" }}>
+        <div style={{ height: "120px", display: "grid", placeItems: "center", color: "var(--color-primary)" }}>
           <Loader2 className="animate-spin" style={{ width: 24, height: 24 }} />
         </div>
       ) : error && comments.length === 0 ? (
-        <div style={{ color: "#dc2626", fontSize: "14px", padding: "14px 0" }}>{error}</div>
+        <div style={{ color: "var(--color-error-text)", fontSize: "14px", padding: "14px 0" }}>{error}</div>
       ) : comments.length === 0 ? (
-        <div style={{ color: "#9a9aa8", fontSize: "14px", padding: "14px 0" }}>暂无评论</div>
+        <div style={{ color: "var(--color-text-muted)", fontSize: "14px", padding: "14px 0" }}>暂无评论</div>
       ) : (
         <div style={{ display: "grid", gap: "18px" }}>
           {comments.map((comment) => (
@@ -224,7 +224,7 @@ function CommentEntry({
         size={40}
         onClick={() => openUpProfile({ mid: currentComment.member.mid, name: currentComment.member.name, face: currentComment.member.avatar })}
       />
-      <div style={{ minWidth: 0, paddingBottom: "16px", borderBottom: "1px solid #f0f0f4" }}>
+      <div style={{ minWidth: 0, paddingBottom: "16px", borderBottom: "1px solid var(--color-bg-subtle)" }}>
         <CommentBody
           oid={oid}
           typeId={typeId}
@@ -371,8 +371,8 @@ function ReplyThread({
       </button>
 
       {expanded ? (
-        <div style={{ marginTop: "12px", display: "grid", gap: "14px", padding: "12px 14px", borderRadius: "12px", backgroundColor: "#f8f8fb" }}>
-          {error ? <div style={{ color: "#dc2626", fontSize: "13px" }}>{error}</div> : null}
+        <div style={{ marginTop: "12px", display: "grid", gap: "14px", padding: "12px 14px", borderRadius: "12px", backgroundColor: "var(--color-bg-subtle)" }}>
+          {error ? <div style={{ color: "var(--color-error-text)", fontSize: "13px" }}>{error}</div> : null}
           {replies.map((reply) => (
             <article key={reply.rpid} style={{ display: "grid", gridTemplateColumns: "30px minmax(0, 1fr)", gap: "10px" }}>
               <ClickableAvatar
@@ -415,7 +415,7 @@ function ReplyThread({
             />
           ) : null}
           {loading && replies.length > 0 ? (
-            <div style={{ display: "flex", justifyContent: "center", color: "#6366f1", padding: "4px 0" }}>
+            <div style={{ display: "flex", justifyContent: "center", color: "var(--color-primary)", padding: "4px 0" }}>
               <Loader2 className="animate-spin" style={{ width: 18, height: 18 }} />
             </div>
           ) : null}
@@ -531,7 +531,7 @@ function CommentBody({
     <>
       <div style={{ display: "flex", alignItems: "flex-start", gap: "8px", position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", minWidth: 0, flex: 1 }}>
-          <span style={{ color: "#1f2937", fontSize: compact ? "13px" : "13.5px", fontWeight: 800 }}>{comment.member.name || "匿名用户"}</span>
+          <span style={{ color: "var(--color-text)", fontSize: compact ? "13px" : "13.5px", fontWeight: 800 }}>{comment.member.name || "匿名用户"}</span>
           {comment.member.level > 0 ? (
             <span
               style={{
@@ -550,7 +550,7 @@ function CommentBody({
               LV{comment.member.level}
             </span>
           ) : null}
-          {relationText ? <span style={{ color: "#8b8b9a", fontSize: "12.5px", fontWeight: 700 }}>{relationText}</span> : null}
+          {relationText ? <span style={{ color: "var(--color-text-muted)", fontSize: "12.5px", fontWeight: 700 }}>{relationText}</span> : null}
         </div>
         <button
           type="button"
@@ -586,7 +586,7 @@ function CommentBody({
       <p
         style={{
           marginTop: compact ? "5px" : "7px",
-          color: "#242432",
+          color: "var(--color-text)",
           fontSize: compact ? "13.5px" : "14px",
           lineHeight: 1.7,
           whiteSpace: "pre-wrap",
@@ -601,7 +601,7 @@ function CommentBody({
           display: "flex",
           alignItems: "center",
           gap: compact ? "14px" : "18px",
-          color: "#8b8b9a",
+          color: "var(--color-text-muted)",
           fontSize: compact ? "12px" : "12.5px",
           fontWeight: 700,
         }}
@@ -641,7 +641,7 @@ function CommentMenuItem({
         event.stopPropagation();
         onClick();
       }}
-      style={{ ...commentMenuItemStyle, color: danger ? "#dc2626" : "#505065" }}
+      style={{ ...commentMenuItemStyle, color: danger ? "var(--color-error-text)" : "var(--color-text-secondary)" }}
     >
       {icon}
       {label}
@@ -711,16 +711,16 @@ function ReplyEditor({
           width: "100%",
           resize: "vertical",
           borderRadius: "10px",
-          border: "1px solid #dddde8",
+          border: "1px solid var(--color-border)",
           padding: "10px 12px",
-          color: "#242432",
+          color: "var(--color-text)",
           fontSize: "13px",
           lineHeight: 1.55,
           fontFamily: "inherit",
           outline: "none",
         }}
       />
-      {error ? <div style={{ color: "#dc2626", fontSize: "12.5px", fontWeight: 700 }}>{error}</div> : null}
+      {error ? <div style={{ color: "var(--color-error-text)", fontSize: "12.5px", fontWeight: 700 }}>{error}</div> : null}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
         <button type="button" disabled={submitting} onClick={onCancel} style={replySmallButtonStyle(false)}>
           取消
@@ -776,9 +776,9 @@ function loadMoreButtonStyle(loading: boolean) {
     height: "34px",
     padding: "0 14px",
     borderRadius: "9px",
-    border: "1px solid #e2e2ea",
-    backgroundColor: "#fff",
-    color: loading ? "#aaa" : "#505065",
+    border: "1px solid var(--color-border)",
+    backgroundColor: "var(--color-bg-secondary)",
+    color: loading ? "#aaa" : "var(--color-text-secondary)",
     fontSize: "13px",
     fontWeight: 700,
     cursor: loading ? "wait" : "pointer",
@@ -791,7 +791,7 @@ const replyToggleStyle = {
   gap: "6px",
   border: "none",
   backgroundColor: "transparent",
-  color: "#8b8b9a",
+  color: "var(--color-text-muted)",
   fontSize: "13px",
   fontWeight: 750,
   cursor: "pointer",
@@ -801,7 +801,7 @@ const replyToggleStyle = {
 const replyActionButtonStyle = {
   border: "none",
   backgroundColor: "transparent",
-  color: "#8b8b9a",
+  color: "var(--color-text-muted)",
   fontSize: "inherit",
   fontWeight: 700,
   cursor: "pointer",
@@ -814,7 +814,7 @@ const commentMenuButtonStyle = {
   border: "none",
   borderRadius: "8px",
   backgroundColor: "transparent",
-  color: "#8b8b9a",
+  color: "var(--color-text-muted)",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
@@ -830,8 +830,8 @@ const commentMenuStyle = {
   minWidth: "142px",
   padding: "6px",
   borderRadius: "10px",
-  border: "1px solid #ececf2",
-  backgroundColor: "#fff",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
   boxShadow: "0 16px 34px rgba(15, 23, 42, 0.14)",
   display: "grid",
   gap: "2px",
@@ -866,8 +866,8 @@ const commentToastStyle = {
   minHeight: "24px",
   padding: "0 9px",
   borderRadius: "8px",
-  backgroundColor: "#eef2ff",
-  color: "#4f46e5",
+  backgroundColor: "var(--color-primary-light)",
+  color: "var(--color-primary-hover)",
   fontSize: "12px",
   fontWeight: 800,
 } as const;
@@ -877,9 +877,9 @@ function replySmallButtonStyle(primary: boolean, disabled = false) {
     height: "32px",
     padding: "0 13px",
     borderRadius: "9px",
-    border: primary ? "1px solid #6366f1" : "1px solid #e2e2ea",
-    backgroundColor: primary ? (disabled ? "#b8b8d8" : "#6366f1") : "#fff",
-    color: primary ? "#fff" : "#505065",
+    border: primary ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
+    backgroundColor: primary ? (disabled ? "#b8b8d8" : "var(--color-primary)") : "var(--color-bg-secondary)",
+    color: primary ? "#fff" : "var(--color-text-secondary)",
     fontSize: "12.5px",
     fontWeight: 800,
     cursor: disabled ? "not-allowed" : "pointer",

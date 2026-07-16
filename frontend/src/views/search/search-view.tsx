@@ -23,7 +23,7 @@ import { useDownloadQualityPrompt, type DownloadQualityTarget } from "@/componen
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { openExternalUrl } from "@/lib/open-external";
-import { LoginDialog } from "@/components/login-dialog";
+import { loadCachedPageData, readCachedPageData, saveCachedPageData } from "@/lib/page-cache";
 import type {
   AggregateSearchResult,
   SearchDate,
@@ -67,7 +67,40 @@ const durationOptions: Array<{ value: SearchDuration; label: string }> = [
 ];
 
 type SearchResultType = "all" | "video" | "bangumi" | "film" | "live" | "article" | "user";
+type SearchCategoryType = Exclude<SearchResultType, "all">;
 const SEARCH_PREFETCH_PAGES = 2;
+const SEARCH_STATE_CACHE_KEY = "search:last-state:v1";
+const DEFAULT_CATEGORY_PAGES: Record<SearchCategoryType, number> = {
+  video: 1,
+  bangumi: 1,
+  film: 1,
+  live: 1,
+  article: 1,
+  user: 1,
+};
+const authorFaceCache = new Map<number, string>();
+const authorFaceRequests = new Map<number, Promise<string>>();
+
+function resolveAuthorFace(mid: number): Promise<string> {
+  if (mid <= 0) return Promise.resolve("");
+  const cached = authorFaceCache.get(mid);
+  if (cached !== undefined) return Promise.resolve(cached);
+  const pending = authorFaceRequests.get(mid);
+  if (pending) return pending;
+
+  const request = loadCachedPageData(`search-author-face:v1:${mid}`, async () => {
+    const profile = await invoke<{ face?: string }>("get_up_profile", { mid });
+    return profile.face?.trim() || "";
+  })
+    .catch(() => "")
+    .then((face) => {
+      authorFaceCache.set(mid, face);
+      authorFaceRequests.delete(mid);
+      return face;
+    });
+  authorFaceRequests.set(mid, request);
+  return request;
+}
 const EMPTY_SEARCH_PAGE_INFO: SearchPageInfo = {
   page: 1,
   page_size: 20,
@@ -152,13 +185,47 @@ export function SearchView() {
   const openContentDetail = useAppStore((s) => s.openContentDetail);
   const searchPageState = useAppStore((s) => s.searchPageState);
   const setSearchPageState = useAppStore((s) => s.setSearchPageState);
+  const resetSearchPageState = useAppStore((s) => s.resetSearchPageState);
   const viewMode = useAppStore((s) => s.cardViewModes.search ?? "grid");
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
   const searchRequestIdRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [loginDialogOpen, setLoginDialogOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const restoreCachedSearch = async (resetWhenMissing: boolean) => {
+      const cached = await readCachedPageData<typeof searchPageState>(SEARCH_STATE_CACHE_KEY);
+      if (cancelled) return;
+      if (cached?.result) {
+        setSearchPageState({
+          ...cached,
+          categoryPages: { ...DEFAULT_CATEGORY_PAGES, ...(cached.categoryPages ?? {}) },
+        });
+      } else if (resetWhenMissing) {
+        resetSearchPageState();
+      }
+    };
+
+    if (!useAppStore.getState().searchPageState.result) {
+      void restoreCachedSearch(false);
+    }
+    const handlePageCacheCleared = () => void restoreCachedSearch(true);
+    window.addEventListener("bilibili-box:page-cache-cleared", handlePageCacheCleared);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("bilibili-box:page-cache-cleared", handlePageCacheCleared);
+    };
+  }, [resetSearchPageState, setSearchPageState]);
+
+  useEffect(() => {
+    if (!searchPageState.result) return;
+    const timer = window.setTimeout(() => {
+      void saveCachedPageData(SEARCH_STATE_CACHE_KEY, searchPageState);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchPageState]);
   
   const [searchHistory, setSearchHistory] = useState<string[]>(() => {
     try {
@@ -191,8 +258,6 @@ export function SearchView() {
     localStorage.removeItem("bilibili_box_search_history");
   }, []);
 
-  const windControlRef = useRef(false);
-  const retryArgsRef = useRef<{ rawInput: string; filters: SearchFilters; options: any } | null>(null);
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
   const cardLayout = useCardLayout("search", viewMode);
   const {
@@ -202,11 +267,10 @@ export function SearchView() {
     activeLiveType = "room",
     lastAggregateInput,
     result,
-    currentPage,
-    loadedPages,
     loadedTypes,
     searchScope = "all",
   } = searchPageState;
+  const categoryPages = { ...DEFAULT_CATEGORY_PAGES, ...(searchPageState.categoryPages ?? {}) };
   const { pageSize, cardScale, columns } = cardLayout;
 
   const placeholder = useMemo(
@@ -224,7 +288,7 @@ export function SearchView() {
   const runSearch = useCallback(async (
     rawInput: string,
     filters: SearchFilters,
-    options: { mode?: "replace" | "append" | "merge"; targetPage?: number; pageCount?: number; searchType?: string } = {}
+    options: { mode?: "replace" | "append" | "merge"; targetPage?: number; targetType?: SearchCategoryType; pageCount?: number; searchType?: string } = {}
   ) => {
     const input = rawInput.trim();
     if (!input) {
@@ -270,15 +334,28 @@ export function SearchView() {
 
       for (let offset = 0; offset < pageCount; offset += 1) {
         const page = startPage + offset;
-        const data = await invoke<SearchResponse>("search_video", {
+        const cacheKey = [
+          "search-response:v2",
           input,
-          order: filters.order,
-          pubtime: filters.pubtime,
-          duration: filters.duration,
+          filters.order,
+          filters.pubtime,
+          filters.duration,
+          searchType ?? "all",
           page,
           pageSize,
-          searchType: searchType ?? undefined,
-        });
+        ].join(":");
+        const data = await loadCachedPageData(
+          cacheKey,
+          () => invoke<SearchResponse>("search_video", {
+            input,
+            order: filters.order,
+            pubtime: filters.pubtime,
+            duration: filters.duration,
+            page,
+            pageSize,
+            searchType: searchType ?? undefined,
+          })
+        );
         if (requestId !== searchRequestIdRef.current) return;
 
         if (data.type !== "Aggregate") {
@@ -332,6 +409,13 @@ export function SearchView() {
           ) / pageSize),
           lastAggregatePage
         );
+        const nextCategoryPages = mode === "replace"
+          ? { ...DEFAULT_CATEGORY_PAGES }
+          : { ...DEFAULT_CATEGORY_PAGES, ...(currentSearchState.categoryPages ?? {}) };
+        if (options.targetType) {
+          nextCategoryPages[options.targetType] = options.targetPage
+            ?? (mode === "append" ? nextCategoryPages[options.targetType] : 1);
+        }
         setSearchPageState({
           filters,
           result: { type: "Aggregate", ...mergedAggregate },
@@ -342,6 +426,7 @@ export function SearchView() {
           lastAggregateInput: input,
           loadedTypes: newLoadedTypes,
           activeResultType: newActiveResultType,
+          categoryPages: nextCategoryPages,
         });
       }
     } catch (err) {
@@ -349,10 +434,7 @@ export function SearchView() {
       const errStr = String(err);
       
       if (errStr.includes("WIND_CONTROL_REQUIRED:")) {
-        setError("触发风控，请通过二维码登录以完成验证...");
-        retryArgsRef.current = { rawInput, filters, options };
-        setLoginDialogOpen(true);
-        windControlRef.current = true;
+        setError("搜索请求被 B 站暂时拦截。已保留现有搜索结果，请稍后手动重试；重新登录通常不能直接解除 412 风控。");
         return;
       } else {
         setError(errStr);
@@ -394,100 +476,93 @@ export function SearchView() {
   );
 
   const handlePageChange = useCallback(
-    (page: number) => {
-      runPreservingMainScroll(() => setSearchPageState({ currentPage: page }));
+    (type: SearchCategoryType, page: number) => {
+      runPreservingMainScroll(() => setSearchPageState({
+        currentPage: page,
+        categoryPages: {
+          ...DEFAULT_CATEGORY_PAGES,
+          ...(useAppStore.getState().searchPageState.categoryPages ?? {}),
+          [type]: page,
+        },
+      }));
     },
     [setSearchPageState]
   );
 
   const handleLoadMore = useCallback(
-    (targetPage?: number) => {
+    (type: SearchCategoryType, targetPage?: number) => {
       if (!lastAggregateInput) return;
       // 搜索全部时按当前激活 tab 的类型加载更多；单类型搜索时用该类型
-      const searchType = searchScope === "all"
-        ? (TAB_TO_SEARCH_TYPE[activeResultType] ?? "video")
-        : (TAB_TO_SEARCH_TYPE[searchScope] ?? "video");
-      void runSearch(lastAggregateInput, currentFilters, { mode: "append", targetPage, searchType });
+      const searchType = TAB_TO_SEARCH_TYPE[type] ?? "video";
+      void runSearch(lastAggregateInput, currentFilters, { mode: "append", targetPage, targetType: type, searchType });
     },
-    [activeResultType, currentFilters, lastAggregateInput, runSearch, searchScope]
+    [currentFilters, lastAggregateInput, runSearch]
   );
 
   const handleTabClick = useCallback(
     (value: SearchResultType) => {
       // 搜索全部时，标签仅做结果切换，不再自动触发搜索
-      setSearchPageState({ activeResultType: value, currentPage: 1 });
+      const nextPage = value === "all"
+        ? 1
+        : (useAppStore.getState().searchPageState.categoryPages?.[value] ?? 1);
+      setSearchPageState({ activeResultType: value, currentPage: nextPage });
     },
     [setSearchPageState]
   );
 
   useEffect(() => {
     if (searchPageState.pageSize === pageSize) return;
-    setSearchPageState({ pageSize, currentPage: 1 });
+    setSearchPageState({ pageSize, currentPage: 1, categoryPages: { ...DEFAULT_CATEGORY_PAGES } });
   }, [
     pageSize,
     searchPageState.pageSize,
     setSearchPageState,
   ]);
 
-  const aggregatePageInfo = useMemo(() => {
+  const paginationByType = useMemo(() => {
     if (result?.type !== "Aggregate") return null;
-    if (activeResultType === "bangumi") return result.bangumi_page;
-    if (activeResultType === "film") return result.film_page ?? EMPTY_SEARCH_PAGE_INFO;
-    if (activeResultType === "live") return result.live_page ?? EMPTY_SEARCH_PAGE_INFO;
-    if (activeResultType === "article") return result.article_page ?? EMPTY_SEARCH_PAGE_INFO;
-    if (activeResultType === "user") return result.user_page ?? EMPTY_SEARCH_PAGE_INFO;
-    if (activeResultType === "video") return result.video_page;
-    return result.video_page.total > 0 || result.bangumi_page.total === 0
-      ? result.video_page
-      : result.bangumi_page;
-  }, [activeResultType, result]);
+    const liveItems = result.lives.filter((item) => item.badge === (activeLiveType === "room" ? "直播间" : "主播"));
+    const itemCounts: Record<SearchCategoryType, number> = {
+      video: result.videos.length,
+      bangumi: result.bangumi.length,
+      film: result.films.length,
+      live: liveItems.length,
+      article: result.articles.length,
+      user: result.users.length,
+    };
+    const pageInfos: Record<SearchCategoryType, SearchPageInfo> = {
+      video: result.video_page,
+      bangumi: result.bangumi_page,
+      film: result.film_page ?? EMPTY_SEARCH_PAGE_INFO,
+      live: result.live_page ?? EMPTY_SEARCH_PAGE_INFO,
+      article: result.article_page ?? EMPTY_SEARCH_PAGE_INFO,
+      user: result.user_page ?? EMPTY_SEARCH_PAGE_INFO,
+    };
 
-  const aggregateLoadedPageCount = useMemo(() => {
-    if (result?.type !== "Aggregate") return 0;
-    const videoPages = Math.ceil(result.videos.length / pageSize);
-    const bangumiPages = Math.ceil(result.bangumi.length / pageSize);
-    const filmPages = Math.ceil((result.films ?? []).length / pageSize);
-    const activeLiveItems = (result.lives ?? []).filter((item) => item.badge === (activeLiveType === "room" ? "直播间" : "主播"));
-    const livePages = Math.ceil(activeLiveItems.length / pageSize);
-    const articlePages = Math.ceil((result.articles ?? []).length / pageSize);
-    const userPages = Math.ceil((result.users ?? []).length / pageSize);
-    if (activeResultType === "video") return Math.max(1, videoPages);
-    if (activeResultType === "bangumi") return Math.max(1, bangumiPages);
-    if (activeResultType === "film") return Math.max(1, filmPages);
-    if (activeResultType === "live") return Math.max(1, livePages);
-    if (activeResultType === "article") return Math.max(1, articlePages);
-    if (activeResultType === "user") return Math.max(1, userPages);
-    return Math.max(1, videoPages, bangumiPages, filmPages, livePages, articlePages, userPages, loadedPages);
-  }, [activeLiveType, activeResultType, loadedPages, pageSize, result]);
-
-  const aggregateTotalPageCount = useMemo(() => {
-    if (result?.type !== "Aggregate") return 1;
-    if (activeResultType === "video") return result.video_page.page_count;
-    if (activeResultType === "bangumi") return result.bangumi_page.page_count;
-    if (activeResultType === "film") return (result.film_page ?? EMPTY_SEARCH_PAGE_INFO).page_count;
-    if (activeResultType === "live") return (result.live_page ?? EMPTY_SEARCH_PAGE_INFO).page_count;
-    if (activeResultType === "article") return (result.article_page ?? EMPTY_SEARCH_PAGE_INFO).page_count;
-    if (activeResultType === "user") return (result.user_page ?? EMPTY_SEARCH_PAGE_INFO).page_count;
-    return Math.max(result.video_page.page_count, result.bangumi_page.page_count, (result.film_page ?? EMPTY_SEARCH_PAGE_INFO).page_count, (result.live_page ?? EMPTY_SEARCH_PAGE_INFO).page_count, (result.article_page ?? EMPTY_SEARCH_PAGE_INFO).page_count, (result.user_page ?? EMPTY_SEARCH_PAGE_INFO).page_count);
-  }, [activeResultType, result]);
-
-  const aggregateCanLoadMore = useMemo(() => {
-    if (result?.type !== "Aggregate") return false;
-    const hasMoreByType = activeResultType === "video"
-      ? result.video_page.has_more
-      : activeResultType === "bangumi"
-        ? result.bangumi_page.has_more
-        : activeResultType === "film"
-          ? (result.film_page ?? EMPTY_SEARCH_PAGE_INFO).has_more
-          : activeResultType === "live"
-            ? (result.live_page ?? EMPTY_SEARCH_PAGE_INFO).has_more
-            : activeResultType === "article"
-              ? (result.article_page ?? EMPTY_SEARCH_PAGE_INFO).has_more
-              : activeResultType === "user"
-                ? (result.user_page ?? EMPTY_SEARCH_PAGE_INFO).has_more
-                : result.video_page.has_more || result.bangumi_page.has_more || (result.film_page ?? EMPTY_SEARCH_PAGE_INFO).has_more || (result.live_page ?? EMPTY_SEARCH_PAGE_INFO).has_more || (result.article_page ?? EMPTY_SEARCH_PAGE_INFO).has_more || (result.user_page ?? EMPTY_SEARCH_PAGE_INFO).has_more;
-    return hasMoreByType && aggregateLoadedPageCount < aggregateTotalPageCount;
-  }, [activeResultType, aggregateLoadedPageCount, aggregateTotalPageCount, result]);
+    return Object.fromEntries(
+      (Object.keys(itemCounts) as SearchCategoryType[]).map((type) => {
+        const loadedPageCount = Math.max(1, Math.ceil(itemCounts[type] / pageSize));
+        const totalPageCount = Math.max(1, pageInfos[type].page_count || 1);
+        const currentCategoryPage = Math.min(
+          Math.max(1, categoryPages[type] || 1),
+          loadedPageCount
+        );
+        return [type, {
+          currentPage: currentCategoryPage,
+          loadedPageCount,
+          totalPageCount,
+          total: pageInfos[type].total,
+          canLoadMore: pageInfos[type].has_more && loadedPageCount < totalPageCount,
+        }];
+      })
+    ) as Record<SearchCategoryType, {
+      currentPage: number;
+      loadedPageCount: number;
+      totalPageCount: number;
+      total: number;
+      canLoadMore: boolean;
+    }>;
+  }, [activeLiveType, categoryPages, pageSize, result]);
 
   const searchTypeTabs = useMemo(() => {
     if (result?.type !== "Aggregate") {
@@ -516,24 +591,27 @@ export function SearchView() {
 
   const visibleAggregateResult = useMemo(() => {
     if (result?.type !== "Aggregate") return null;
-    const start = (Math.max(1, currentPage) - 1) * pageSize;
     const activeLiveItems = result.lives.filter((item) => item.badge === (activeLiveType === "room" ? "直播间" : "主播"));
+    const sliceCategory = <T,>(items: T[], type: SearchCategoryType) => {
+      const loadedPageCount = Math.max(1, Math.ceil(items.length / pageSize));
+      const page = Math.min(Math.max(1, categoryPages[type] || 1), loadedPageCount);
+      const start = (page - 1) * pageSize;
+      return items.slice(start, start + pageSize);
+    };
     return {
       ...result,
-      videos: result.videos.slice(start, start + pageSize),
-      bangumi: result.bangumi.slice(start, start + pageSize),
-      films: (result.films ?? []).slice(start, start + pageSize),
-      lives: activeResultType === "live"
-        ? activeLiveItems.slice(start, start + pageSize)
-        : (result.lives ?? []).slice(start, start + pageSize),
-      articles: (result.articles ?? []).slice(start, start + pageSize),
-      users: (result.users ?? []).slice(start, start + pageSize),
+      videos: sliceCategory(result.videos, "video"),
+      bangumi: sliceCategory(result.bangumi, "bangumi"),
+      films: sliceCategory(result.films ?? [], "film"),
+      lives: sliceCategory(activeLiveItems, "live"),
+      articles: sliceCategory(result.articles ?? [], "article"),
+      users: sliceCategory(result.users ?? [], "user"),
       film_page: result.film_page ?? EMPTY_SEARCH_PAGE_INFO,
       live_page: result.live_page ?? EMPTY_SEARCH_PAGE_INFO,
       article_page: result.article_page ?? EMPTY_SEARCH_PAGE_INFO,
       user_page: result.user_page ?? EMPTY_SEARCH_PAGE_INFO,
     };
-  }, [activeLiveType, activeResultType, currentPage, pageSize, result]);
+  }, [activeLiveType, categoryPages, pageSize, result]);
 
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [multiSelectEnabled, setMultiSelectEnabled] = useState(false);
@@ -589,13 +667,6 @@ export function SearchView() {
       return next;
     });
   };
-
-  useEffect(() => {
-    if (result?.type !== "Aggregate" || aggregateLoadedPageCount <= 0) return;
-    if (currentPage > aggregateLoadedPageCount) {
-      setSearchPageState({ currentPage: aggregateLoadedPageCount });
-    }
-  }, [aggregateLoadedPageCount, currentPage, result?.type, setSearchPageState]);
 
   const queueDownload = async (
     bvid: string,
@@ -831,7 +902,7 @@ export function SearchView() {
         transition={{ duration: 0.3 }}
         style={{ marginBottom: "10px" }}
       >
-        <h1 style={{ fontSize: "20px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.2 }}>
+        <h1 style={{ fontSize: "20px", fontWeight: 800, color: "var(--color-text)", lineHeight: 1.2 }}>
           聚合搜索
         </h1>
       </motion.div>
@@ -854,7 +925,7 @@ export function SearchView() {
               left: "12px",
               width: "16px",
               height: "16px",
-              color: "#a0a0ab",
+              color: "var(--color-text-muted)",
               pointerEvents: "none",
             }}
           />
@@ -872,10 +943,10 @@ export function SearchView() {
               paddingLeft: "36px",
               paddingRight: "16px",
               borderRadius: "10px",
-              border: "1.5px solid #dcdce4",
-              backgroundColor: "#fff",
+              border: "1.5px solid var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
               fontSize: "13.5px",
-              color: "#1a1a2e",
+              color: "var(--color-text)",
               outline: "none",
               fontFamily: "inherit",
             }}
@@ -937,7 +1008,7 @@ export function SearchView() {
                       className="hover:bg-[var(--color-bg-tertiary)]"
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
-                        <History size={12} style={{ color: "#a0a0ab", flexShrink: 0 }} />
+                        <History size={12} style={{ color: "var(--color-text-muted)", flexShrink: 0 }} />
                         <span style={{ fontSize: "13px", color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {item}
                         </span>
@@ -978,9 +1049,10 @@ export function SearchView() {
           options={searchScopeOptions}
           onChange={(value) => {
             const newScope = value as SearchResultType;
+            const scopedPage = newScope === "all" ? 1 : (categoryPages[newScope] ?? 1);
             setSearchPageState({ 
               searchScope: newScope,
-              ...(result?.type === "Aggregate" ? { activeResultType: newScope, currentPage: 1 } : {})
+              ...(result?.type === "Aggregate" ? { activeResultType: newScope, currentPage: scopedPage } : {})
             });
           }}
         />
@@ -1001,7 +1073,7 @@ export function SearchView() {
             fontSize: "14px",
             fontWeight: 600,
             color: "#fff",
-            backgroundColor: loading || !searchInput.trim() ? "#c0c0c8" : "#6366f1",
+            backgroundColor: loading || !searchInput.trim() ? "var(--color-text-disabled)" : "var(--color-primary)",
             cursor: loading || !searchInput.trim() ? "not-allowed" : "pointer",
             border: "none",
             fontFamily: "inherit",
@@ -1071,7 +1143,7 @@ export function SearchView() {
                   {loaded ? (
                     <span style={tabCountBadgeStyle}>{formatSearchTabCount(count)}</span>
                   ) : (
-                    <span style={{ ...tabCountBadgeStyle, backgroundColor: "transparent", color: isActive ? "#a5a5c8" : "#b0b0c0", minWidth: "auto", padding: "0 4px" }}>·</span>
+                    <span style={{ ...tabCountBadgeStyle, backgroundColor: "transparent", color: isActive ? "#a5a5c8" : "var(--color-text-disabled)", minWidth: "auto", padding: "0 4px" }}>·</span>
                   )}
                 </button>
               );
@@ -1103,7 +1175,7 @@ export function SearchView() {
               }
             />
             <span title="排序、日期和时长对关键词视频结果生效" style={{ display: "inline-flex", alignItems: "center" }}>
-              <Info size={14} style={{ color: "#9a9aa8", cursor: "help" }} />
+              <Info size={14} style={{ color: "var(--color-text-muted)", cursor: "help" }} />
             </span>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
               
@@ -1124,7 +1196,7 @@ export function SearchView() {
                           background: "none",
                           fontSize: "12px",
                           fontWeight: 700,
-                          color: "#505065",
+                          color: "var(--color-text-secondary)",
                           padding: "4px 8px",
                           borderRadius: "6px",
                           cursor: "pointer",
@@ -1133,17 +1205,17 @@ export function SearchView() {
                           gap: "6px",
                           fontFamily: "inherit",
                         }}
-                        className="hover:bg-[#f0f0f5] hover:text-[var(--color-primary)] transition-colors"
+                        className="hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-primary)] transition-colors"
                       >
                         {allVisibleSelected ? (
                           <CheckSquare size={13} style={{ color: "var(--color-primary)" }} />
                         ) : (
-                          <Square size={13} style={{ color: "#a0a0ab" }} />
+                          <Square size={13} style={{ color: "var(--color-text-muted)" }} />
                         )}
                         {allVisibleSelected ? "取消全选" : "全选当前"}
                       </button>
                       
-                      <div style={{ width: "1px", height: "14px", backgroundColor: "#e2e2ec", margin: "0 3px" }} />
+                      <div style={{ width: "1px", height: "14px", backgroundColor: "var(--color-border)", margin: "0 3px" }} />
 
                       <button
                         type="button"
@@ -1154,7 +1226,7 @@ export function SearchView() {
                           background: "none",
                           fontSize: "12px",
                           fontWeight: 700,
-                          color: selectedKeys.size > 0 ? "var(--color-primary)" : "#a5a5b2",
+                          color: selectedKeys.size > 0 ? "var(--color-primary)" : "var(--color-text-disabled)",
                           padding: "4px 8px",
                           borderRadius: "6px",
                           cursor: batchDownloading || selectedKeys.size === 0 ? "not-allowed" : "pointer",
@@ -1163,13 +1235,13 @@ export function SearchView() {
                           gap: "6px",
                           fontFamily: "inherit",
                         }}
-                        className={selectedKeys.size > 0 ? "hover:bg-[#f0f0f5] transition-colors" : ""}
+                        className={selectedKeys.size > 0 ? "hover:bg-[var(--color-bg-tertiary)] transition-colors" : ""}
                       >
                         {batchDownloading ? <Loader2 className="animate-spin" style={{ width: 12, height: 12 }} /> : <Download style={{ width: 12, height: 12 }} />}
                         下载{selectedKeys.size > 0 ? `(${selectedKeys.size})` : ""}
                       </button>
 
-                      <div style={{ width: "1px", height: "14px", backgroundColor: "#e2e2ec", margin: "0 3px" }} />
+                      <div style={{ width: "1px", height: "14px", backgroundColor: "var(--color-border)", margin: "0 3px" }} />
 
                       <button
                         type="button"
@@ -1185,7 +1257,7 @@ export function SearchView() {
                           cursor: "pointer",
                           fontFamily: "inherit",
                         }}
-                        className="hover:bg-[#fef2f2] transition-colors"
+                        className="hover:bg-[var(--color-error-bg)] transition-colors"
                       >
                         取消
                       </button>
@@ -1199,7 +1271,7 @@ export function SearchView() {
                         backgroundColor: "transparent",
                         fontSize: "12px",
                         fontWeight: 700,
-                        color: "#505065",
+                        color: "var(--color-text-secondary)",
                         padding: "4px 8px",
                         cursor: "pointer",
                         display: "inline-flex",
@@ -1236,8 +1308,8 @@ export function SearchView() {
               marginBottom: "20px",
               padding: "12px 18px",
               borderRadius: "12px",
-              backgroundColor: "#fef2f2",
-              color: "#dc2626",
+              backgroundColor: "var(--color-error-bg)",
+              color: "var(--color-error-text)",
               fontSize: "13.5px",
             }}
           >
@@ -1291,7 +1363,11 @@ export function SearchView() {
                     viewMode={viewMode}
                     scale={cardScale}
                     activeLiveType={activeLiveType}
-                    onLiveTypeChange={(type) => setSearchPageState({ activeLiveType: type, currentPage: 1 })}
+                    onLiveTypeChange={(type) => setSearchPageState({
+                      activeLiveType: type,
+                      currentPage: 1,
+                      categoryPages: { ...categoryPages, live: 1 },
+                    })}
                     loadedCounts={{
                       video: result.videos.length,
                       bangumi: result.bangumi.length,
@@ -1311,29 +1387,35 @@ export function SearchView() {
                     onOpenBrowser={handleOpenBrowser}
                     onOpenAuthor={openUpProfile}
                     onOpenContent={openContentDetail}
+                    renderPagination={(type) => {
+                      const pagination = paginationByType?.[type];
+                      if (!pagination || Math.max(pagination.loadedPageCount, pagination.totalPageCount) <= 1) {
+                        return null;
+                      }
+                      return (
+                        <SearchPagination
+                          currentPage={pagination.currentPage}
+                          loadedPageCount={pagination.loadedPageCount}
+                          totalPageCount={pagination.totalPageCount}
+                          total={pagination.total}
+                          loading={loading}
+                          canLoadMore={pagination.canLoadMore}
+                          onPageChange={(page) => handlePageChange(type, page)}
+                          onLoadMore={(targetPage) => handleLoadMore(type, targetPage)}
+                        />
+                      );
+                    }}
                     multiSelectEnabled={multiSelectEnabled}
                     selectedKeys={selectedKeys}
                     onToggleSelection={toggleSelection}
                   />
                 </motion.div>
               ) : null}
-              {aggregatePageInfo && Math.max(aggregateLoadedPageCount, aggregateTotalPageCount) > 1 ? (
-                <SearchPagination
-                  currentPage={currentPage}
-                  loadedPageCount={aggregateLoadedPageCount}
-                  totalPageCount={aggregateTotalPageCount}
-                  total={aggregatePageInfo.total}
-                  loading={loading}
-                  canLoadMore={aggregateCanLoadMore}
-                  onPageChange={handlePageChange}
-                  onLoadMore={handleLoadMore}
-                />
-              ) : null}
             </>
           ) : null}
         </motion.div>
       ) : !loading ? (
-        <div style={{ marginTop: "84px", textAlign: "center", color: "#9a9aa5" }}>
+        <div style={{ marginTop: "84px", textAlign: "center", color: "var(--color-text-muted)" }}>
           <Search style={{ width: "56px", height: "56px", margin: "0 auto 18px", opacity: 0.35 }} />
           <p style={{ fontSize: "15px", fontWeight: 500 }}>输入内容开始搜索</p>
           <p style={{ fontSize: "13px", marginTop: "8px", opacity: 0.75 }}>
@@ -1342,24 +1424,6 @@ export function SearchView() {
         </div>
       ) : null}
       {downloadQualityDialog}
-      <LoginDialog 
-        open={loginDialogOpen} 
-        forceNewLogin={windControlRef.current}
-        onClose={(success?: boolean) => {
-          setLoginDialogOpen(false);
-          if (windControlRef.current) {
-            windControlRef.current = false;
-            if (success === true) {
-              const args = retryArgsRef.current;
-              if (args) {
-                runSearch(args.rawInput, args.filters, args.options);
-              }
-            } else {
-              setError("已取消登录，搜索中断。");
-            }
-          }
-        }} 
-      />
     </div>
   );
 }
@@ -1394,8 +1458,8 @@ function NormalVideoResult({
           gap: "20px",
           padding: "20px",
           borderRadius: "16px",
-          backgroundColor: "#fff",
-          border: "1px solid #ececf2",
+          backgroundColor: "var(--color-bg-secondary)",
+          border: "1px solid var(--color-border)",
         }}
       >
         <div
@@ -1406,7 +1470,7 @@ function NormalVideoResult({
             overflow: "hidden",
             flexShrink: 0,
             position: "relative",
-            backgroundColor: "#f0f0f5",
+            backgroundColor: "var(--color-bg-tertiary)",
             cursor: "pointer",
           }}
           onClick={() => onOpenPlayer({ bvid: video.bvid, cid: video.cid, title: video.title, pic: video.pic })}
@@ -1436,17 +1500,17 @@ function NormalVideoResult({
         </div>
 
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-          <h3 style={{ fontSize: "18px", fontWeight: 700, color: "#1a1a2e", lineHeight: 1.45, marginBottom: "10px" }}>
+          <h3 style={{ fontSize: "18px", fontWeight: 700, color: "var(--color-text)", lineHeight: 1.45, marginBottom: "10px" }}>
             {video.title}
           </h3>
 
           <div style={{ display: "flex", alignItems: "center", gap: "9px", marginBottom: "12px" }}>
             <AvatarImage src={video.owner.face} alt={video.owner.name} size={30} onClick={() => onOpenAuthor({ mid: video.owner.mid, name: video.owner.name, face: video.owner.face })} />
-            <span style={{ fontSize: "13.5px", color: "#505065", fontWeight: 500 }}>{video.owner.name}</span>
-            <span style={{ fontSize: "12.5px", color: "#9a9aa8" }}>发布于 {formatDateTime(video.pubdate)}</span>
+            <span style={{ fontSize: "13.5px", color: "var(--color-text-secondary)", fontWeight: 500 }}>{video.owner.name}</span>
+            <span style={{ fontSize: "12.5px", color: "var(--color-text-muted)" }}>发布于 {formatDateTime(video.pubdate)}</span>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "16px", fontSize: "13px", color: "#7a7a8c", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "16px", fontSize: "13px", color: "var(--color-text-muted)", flexWrap: "wrap" }}>
             <MetaPill icon={<Eye style={{ width: 13, height: 13 }} />} text={`播放 ${formatNumber(video.stat.view)}`} />
             <MetaPill icon={<ThumbsUp style={{ width: 13, height: 13 }} />} text={`点赞 ${formatNumber(video.stat.like)}`} />
             <MetaPill icon={<Star style={{ width: 13, height: 13 }} />} text={`收藏 ${formatNumber(video.stat.favorite)}`} />
@@ -1462,7 +1526,7 @@ function NormalVideoResult({
                 userSelect: "none",
                 background: "none",
                 border: "none",
-                color: "#7a7a8c",
+                color: "var(--color-text-muted)",
                 padding: 0,
                 fontSize: "13px",
               }}
@@ -1517,8 +1581,8 @@ function BangumiResult({
       style={{
         width: "100%",
         borderRadius: "16px",
-        backgroundColor: "#fff",
-        border: "1px solid #ececf2",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1px solid var(--color-border)",
         overflow: "hidden",
       }}
     >
@@ -1530,7 +1594,7 @@ function BangumiResult({
             borderRadius: "12px",
             overflow: "hidden",
             flexShrink: 0,
-            backgroundColor: "#f0f0f5",
+            backgroundColor: "var(--color-bg-tertiary)",
             cursor: "pointer",
           }}
           onClick={() => onOpenPlayer(bangumi)}
@@ -1545,10 +1609,10 @@ function BangumiResult({
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h3 style={{ fontSize: "18px", fontWeight: 700, color: "#1a1a2e", marginBottom: "10px" }}>
+          <h3 style={{ fontSize: "18px", fontWeight: 700, color: "var(--color-text)", marginBottom: "10px" }}>
             {bangumi.title}
           </h3>
-          <p style={{ fontSize: "13.5px", color: "#505065", lineHeight: 1.7 }}>
+          <p style={{ fontSize: "13.5px", color: "var(--color-text-secondary)", lineHeight: 1.7 }}>
             {bangumi.evaluate || "暂无简介"}
           </p>
           <div style={{ marginTop: "16px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
@@ -1568,8 +1632,8 @@ function BangumiResult({
         </div>
       </div>
 
-      <div style={{ borderTop: "1px solid #ececf2", padding: "20px" }}>
-        <h4 style={{ fontSize: "15px", fontWeight: 700, color: "#1a1a2e", marginBottom: "14px" }}>剧集列表</h4>
+      <div style={{ borderTop: "1px solid var(--color-border)", padding: "20px" }}>
+        <h4 style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-text)", marginBottom: "14px" }}>剧集列表</h4>
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {bangumi.episodes.map((episode) => (
             <div
@@ -1580,8 +1644,8 @@ function BangumiResult({
                 gap: "12px",
                 padding: "11px 14px",
                 borderRadius: "12px",
-                backgroundColor: "#fff",
-                border: "1px solid #ececf2",
+                backgroundColor: "var(--color-bg-secondary)",
+                border: "1px solid var(--color-border)",
               }}
             >
               <div
@@ -1591,7 +1655,7 @@ function BangumiResult({
                   borderRadius: "8px",
                   overflow: "hidden",
                   flexShrink: 0,
-                  backgroundColor: "#f0f0f5",
+                  backgroundColor: "var(--color-bg-tertiary)",
                 }}
               >
                 <img
@@ -1603,9 +1667,9 @@ function BangumiResult({
                 />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: "14px", fontWeight: 500, color: "#33334a" }}>{episode.title}</span>
+                <span style={{ fontSize: "14px", fontWeight: 500, color: "var(--color-text)" }}>{episode.title}</span>
                 {episode.long_title ? (
-                  <span style={{ fontSize: "13px", color: "#8b8b9a", marginLeft: "5px" }}>{episode.long_title}</span>
+                  <span style={{ fontSize: "13px", color: "var(--color-text-muted)", marginLeft: "5px" }}>{episode.long_title}</span>
                 ) : null}
               </div>
               <GhostActionButton
@@ -1642,6 +1706,7 @@ function AggregateResult({
   onOpenBrowser,
   onOpenAuthor,
   onOpenContent,
+  renderPagination,
   multiSelectEnabled,
   selectedKeys,
   onToggleSelection,
@@ -1673,6 +1738,7 @@ function AggregateResult({
   onOpenBrowser: (url: string) => void;
   onOpenAuthor: (author: { mid: number; name?: string; face?: string }) => void;
   onOpenContent: (content: ContentDetailState) => void;
+  renderPagination: (type: SearchCategoryType) => React.ReactNode;
   multiSelectEnabled: boolean;
   selectedKeys: Set<string>;
   onToggleSelection: (key: string) => void;
@@ -1708,6 +1774,7 @@ function AggregateResult({
               />
             ))}
           </div>
+          {renderPagination("video")}
         </>
       ) : null}
 
@@ -1729,36 +1796,47 @@ function AggregateResult({
               />
             ))}
           </div>
+          {renderPagination("bangumi")}
         </>
       ) : null}
 
       {showFilms && result.films.length ? (
-        <GenericSearchSection title="影视结果" items={result.films} loaded={loadedCounts.film} pageInfo={result.film_page} columns={columns} viewMode={viewMode} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+        <>
+          <GenericSearchSection title="影视结果" items={result.films} loaded={loadedCounts.film} pageInfo={result.film_page} columns={columns} viewMode={viewMode} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+          {renderPagination("film")}
+        </>
       ) : null}
 
       {showLives && result.lives.length ? (
         <>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginTop: "4px", flexWrap: "wrap" }}>
             <SearchSectionHeader title="直播结果" shown={displayedLives.length} loaded={loadedCounts.live} total={result.live_page.total} />
-            <div style={{ display: "inline-flex", padding: "3px", borderRadius: "10px", backgroundColor: "#f3f4f8" }}>
+            <div style={{ display: "inline-flex", padding: "3px", borderRadius: "10px", backgroundColor: "var(--color-bg-tertiary)" }}>
               <MiniSearchTab active={activeLiveType === "room"} onClick={() => onLiveTypeChange("room")}>直播间 {liveRooms.length ? formatSearchTabCount(liveRooms.length) : ""}</MiniSearchTab>
               <MiniSearchTab active={activeLiveType === "user"} onClick={() => onLiveTypeChange("user")}>主播 {liveUsers.length ? formatSearchTabCount(liveUsers.length) : ""}</MiniSearchTab>
             </div>
           </div>
           <GenericSearchGrid items={displayedLives} columns={columns} viewMode={viewMode} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+          {renderPagination("live")}
         </>
       ) : null}
 
       {showArticles && result.articles.length ? (
-        <GenericSearchSection title="专栏结果" items={result.articles} loaded={loadedCounts.article} pageInfo={result.article_page} columns={columns} viewMode={viewMode} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+        <>
+          <GenericSearchSection title="专栏结果" items={result.articles} loaded={loadedCounts.article} pageInfo={result.article_page} columns={columns} viewMode={viewMode} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+          {renderPagination("article")}
+        </>
       ) : null}
 
       {showUsers && result.users.length ? (
-        <GenericSearchSection title="用户结果" items={result.users} loaded={loadedCounts.user} pageInfo={result.user_page} columns={columns} viewMode={viewMode} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+        <>
+          <GenericSearchSection title="用户结果" items={result.users} loaded={loadedCounts.user} pageInfo={result.user_page} columns={columns} viewMode={viewMode} scale={scale} onOpenBrowser={onOpenBrowser} onOpenAuthor={onOpenAuthor} onOpenContent={onOpenContent} />
+          {renderPagination("user")}
+        </>
       ) : null}
 
       {(!showVideos || !result.videos.length) && (!showBangumi || !result.bangumi.length) && (!showFilms || !result.films.length) && (!showLives || !result.lives.length) && (!showArticles || !result.articles.length) && (!showUsers || !result.users.length) ? (
-        <div style={{ padding: "52px 0", textAlign: "center", color: "#8b8b9a", fontSize: "14px" }}>该类型暂无结果</div>
+        <div style={{ padding: "52px 0", textAlign: "center", color: "var(--color-text-muted)", fontSize: "14px" }}>该类型暂无结果</div>
       ) : null}
     </>
   );
@@ -1792,7 +1870,7 @@ function SearchPagination({
   return (
     <div style={{ display: "flex", justifyContent: "center", marginTop: "22px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-        <span style={{ fontSize: "13px", color: "#8b8b9a", marginRight: "4px" }}>
+        <span style={{ fontSize: "13px", color: "var(--color-text-muted)", marginRight: "4px" }}>
           共 {total} 条，已载入 {safePageCount}/{safeTotalPageCount} 页
         </span>
         <SearchPageButton disabled={safeCurrentPage <= 1} onClick={() => onPageChange(safeCurrentPage - 1)}>
@@ -1846,9 +1924,9 @@ function SearchPageButton({
         height: "36px",
         padding: "0 12px",
         borderRadius: "10px",
-        border: active ? "1px solid #6366f1" : "1px solid #e2e2ea",
-        backgroundColor: active ? "#6366f1" : "#fff",
-        color: disabled ? "#c0c0c8" : active ? "#fff" : "#505065",
+        border: active ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
+        backgroundColor: active ? "var(--color-primary)" : "var(--color-bg-secondary)",
+        color: disabled ? "var(--color-text-disabled)" : active ? "#fff" : "var(--color-text-secondary)",
         fontSize: "13px",
         fontWeight: 600,
         cursor: disabled ? "not-allowed" : "pointer",
@@ -1881,11 +1959,11 @@ function AggregateVideoCard({
   onOpenAuthor: (author: { mid: number; name?: string; face?: string }) => void;
 }) {
   return (
-    <div style={{ borderRadius: `${14 * scale}px`, backgroundColor: "#fff", border: selected ? "1.5px solid #6366f1" : "1px solid #ececf2", padding: `${13 * scale}px ${14 * scale}px` }}>
+    <div style={{ borderRadius: `${14 * scale}px`, backgroundColor: "var(--color-bg-secondary)", border: selected ? "1.5px solid var(--color-primary)" : "1px solid var(--color-border)", padding: `${13 * scale}px ${14 * scale}px` }}>
       <div style={{ display: "grid", gridTemplateColumns: `${Math.max(118 * scale, 148 * scale)}px minmax(0, 1fr)`, gap: `${13 * scale}px`, alignItems: "start" }}>
         <div
           onClick={selectable ? onToggleSelection : onPlay}
-          style={{ aspectRatio: "16 / 9", borderRadius: `${10 * scale}px`, overflow: "hidden", backgroundColor: "#f0f0f5", position: "relative", cursor: "pointer" }}
+          style={{ aspectRatio: "16 / 9", borderRadius: `${10 * scale}px`, overflow: "hidden", backgroundColor: "var(--color-bg-tertiary)", position: "relative", cursor: "pointer" }}
         >
           <img
             src={formatBiliImageUrl(video.pic, "@672w_378h_1c.webp")}
@@ -1916,7 +1994,7 @@ function AggregateVideoCard({
               onClick={(event) => event.stopPropagation()}
               onChange={onToggleSelection}
               aria-label={`选择视频 ${video.title}`}
-              style={{ position: "absolute", top: `${8 * scale}px`, left: `${8 * scale}px`, width: `${17 * scale}px`, height: `${17 * scale}px`, accentColor: "#6366f1", cursor: "pointer" }}
+              style={{ position: "absolute", top: `${8 * scale}px`, left: `${8 * scale}px`, width: `${17 * scale}px`, height: `${17 * scale}px`, accentColor: "var(--color-primary)", cursor: "pointer" }}
             />
           ) : null}
         </div>
@@ -1925,7 +2003,7 @@ function AggregateVideoCard({
             style={{
               fontSize: `${15 * scale}px`,
               fontWeight: 700,
-              color: "#1a1a2e",
+              color: "var(--color-text)",
               lineHeight: 1.45,
               display: "-webkit-box",
               WebkitLineClamp: 2,
@@ -1940,16 +2018,17 @@ function AggregateVideoCard({
               src={video.author_face || ""}
               alt={video.author}
               size={24 * scale}
+              mid={video.mid || 0}
               onClick={video.mid ? () => onOpenAuthor({ mid: video.mid || 0, name: video.author, face: video.author_face }) : undefined}
             />
-            <span style={{ fontSize: `${12.5 * scale}px`, color: "#505065", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span style={{ fontSize: `${12.5 * scale}px`, color: "var(--color-text-secondary)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {video.author || "未知 UP"}
             </span>
-            <span style={{ fontSize: `${12 * scale}px`, color: "#999aaa", whiteSpace: "nowrap" }}>{formatDateTime(video.pubdate)}</span>
+            <span style={{ fontSize: `${12 * scale}px`, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>{formatDateTime(video.pubdate)}</span>
           </div>
         </div>
       </div>
-      <div style={{ marginTop: `${11 * scale}px`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: `${11 * scale}px`, color: "#7a7a8c", fontSize: `${12.5 * scale}px`, flexWrap: "wrap" }}>
+      <div style={{ marginTop: `${11 * scale}px`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: `${11 * scale}px`, color: "var(--color-text-muted)", fontSize: `${12.5 * scale}px`, flexWrap: "wrap" }}>
         <MetaPill icon={<Eye style={{ width: 13 * scale, height: 13 * scale }} />} text={`播放 ${formatNumber(video.play)}`} />
         <MetaPill icon={<ThumbsUp style={{ width: 13 * scale, height: 13 * scale }} />} text={`点赞 ${formatNumber(video.like || 0)}`} />
         <MetaPill icon={<Star style={{ width: 13 * scale, height: 13 * scale }} />} text={`收藏 ${formatNumber(video.favorite || 0)}`} />
@@ -1990,9 +2069,9 @@ function AggregateBangumiCard({
   onPlay: () => void;
 }) {
   return (
-    <div style={{ borderRadius: `${14 * scale}px`, backgroundColor: "#fff", border: selected ? "1.5px solid #6366f1" : "1px solid #ececf2", padding: `${13 * scale}px ${14 * scale}px` }}>
+    <div style={{ borderRadius: `${14 * scale}px`, backgroundColor: "var(--color-bg-secondary)", border: selected ? "1.5px solid var(--color-primary)" : "1px solid var(--color-border)", padding: `${13 * scale}px ${14 * scale}px` }}>
       <div style={{ display: "grid", gridTemplateColumns: `${Math.max(92 * scale, 116 * scale)}px minmax(0, 1fr)`, gap: `${14 * scale}px`, alignItems: "start" }}>
-        <div onClick={selectable ? onToggleSelection : onPlay} style={{ aspectRatio: "3 / 4", borderRadius: `${10 * scale}px`, overflow: "hidden", backgroundColor: "#f0f0f5", cursor: "pointer", position: "relative" }}>
+        <div onClick={selectable ? onToggleSelection : onPlay} style={{ aspectRatio: "3 / 4", borderRadius: `${10 * scale}px`, overflow: "hidden", backgroundColor: "var(--color-bg-tertiary)", cursor: "pointer", position: "relative" }}>
           <img
             src={formatBiliImageUrl(bangumi.cover, "@308w_410h_1c.webp")}
             alt={bangumi.title}
@@ -2007,13 +2086,13 @@ function AggregateBangumiCard({
               onClick={(event) => event.stopPropagation()}
               onChange={onToggleSelection}
               aria-label={`选择番剧 ${bangumi.title}`}
-              style={{ position: "absolute", top: `${8 * scale}px`, left: `${8 * scale}px`, width: `${17 * scale}px`, height: `${17 * scale}px`, accentColor: "#6366f1", cursor: "pointer" }}
+              style={{ position: "absolute", top: `${8 * scale}px`, left: `${8 * scale}px`, width: `${17 * scale}px`, height: `${17 * scale}px`, accentColor: "var(--color-primary)", cursor: "pointer" }}
             />
           ) : null}
         </div>
         <div style={{ minWidth: 0 }}>
-          <h3 style={{ fontSize: `${15 * scale}px`, fontWeight: 700, color: "#1a1a2e", lineHeight: 1.45 }}>{bangumi.title}</h3>
-          <div style={{ marginTop: `${6 * scale}px`, fontSize: `${12.5 * scale}px`, color: "#8b8b9a", display: "flex", alignItems: "center", gap: `${6 * scale}px` }}>
+          <h3 style={{ fontSize: `${15 * scale}px`, fontWeight: 700, color: "var(--color-text)", lineHeight: 1.45 }}>{bangumi.title}</h3>
+          <div style={{ marginTop: `${6 * scale}px`, fontSize: `${12.5 * scale}px`, color: "var(--color-text-muted)", display: "flex", alignItems: "center", gap: `${6 * scale}px` }}>
             <Calendar style={{ width: 13 * scale, height: 13 * scale }} />
             {bangumi.index_show || "番剧"}
           </div>
@@ -2034,8 +2113,26 @@ function AggregateBangumiCard({
   );
 }
 
-function AvatarImage({ src, alt, size, onClick }: { src: string; alt: string; size: number; onClick?: () => void }) {
-  const normalizedSrc = formatBiliImageUrl(src, `@${size * 3}w_${size * 3}h_1c.webp`);
+function AvatarImage({ src, alt, size, mid = 0, onClick }: { src: string; alt: string; size: number; mid?: number; onClick?: () => void }) {
+  const [resolvedSrc, setResolvedSrc] = useState(src);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (src) {
+      setResolvedSrc(src);
+      return;
+    }
+    setResolvedSrc("");
+    if (mid <= 0) return;
+    void resolveAuthorFace(mid).then((face) => {
+      if (!cancelled && face) setResolvedSrc(face);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mid, src]);
+
+  const normalizedSrc = formatBiliImageUrl(resolvedSrc, `@${size * 3}w_${size * 3}h_1c.webp`);
   const baseStyle = {
     width: size,
     height: size,
@@ -2043,9 +2140,9 @@ function AvatarImage({ src, alt, size, onClick }: { src: string; alt: string; si
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#eef2ff",
-    color: "#6366f1",
-    border: "1.5px solid #ececf2",
+    backgroundColor: "var(--color-primary-light)",
+    color: "var(--color-primary)",
+    border: "1.5px solid var(--color-border)",
     flexShrink: 0,
     padding: 0,
     cursor: onClick ? "pointer" : "default",
@@ -2210,40 +2307,49 @@ function GenericSearchCard({
         gap: `${12 * scale}px`,
         padding: `${12 * scale}px`,
         borderRadius: `${12 * scale}px`,
-        border: "1px solid #ececf2",
-        backgroundColor: "#fff",
+        border: "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
         cursor: item.url || hasAuthor ? "pointer" : "default",
       }}
     >
-      <div style={{ position: "relative", width: "100%", aspectRatio: item.badge === "用户" ? "1 / 1" : "16 / 10", borderRadius: `${9 * scale}px`, overflow: "hidden", backgroundColor: "#eef2ff" }}>
+      <div style={{ position: "relative", width: "100%", aspectRatio: item.badge === "用户" ? "1 / 1" : "16 / 10", borderRadius: `${9 * scale}px`, overflow: "hidden", backgroundColor: "var(--color-primary-light)" }}>
         {item.cover || item.author_face ? (
           <img src={formatBiliImageUrl(item.cover || item.author_face, item.badge === "用户" ? "@128w_128h_1c.webp" : "@320w_200h_1c.webp")} alt={item.title} loading="lazy" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         ) : null}
         <span style={{ position: "absolute", left: 6, top: 6, padding: "2px 6px", borderRadius: 999, backgroundColor: "rgba(67,56,202,0.9)", color: "#fff", fontSize: 11, fontWeight: 800 }}>{item.badge}</span>
       </div>
       <div style={{ minWidth: 0 }}>
-        <h3 style={{ color: "#1a1a2e", fontSize: `${14.5 * scale}px`, fontWeight: 800, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+        <h3 style={{ color: "var(--color-text)", fontSize: `${14.5 * scale}px`, fontWeight: 800, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
           {item.title || item.author || "未命名结果"}
         </h3>
         {item.author && item.badge !== "用户" ? (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              if (hasAuthor) onOpenAuthor({ mid: item.mid, name: item.author, face: item.author_face });
-            }}
-            style={{ marginTop: 6, border: "none", background: "transparent", padding: 0, color: "#6366f1", fontSize: `${12.5 * scale}px`, fontWeight: 700, cursor: hasAuthor ? "pointer" : "default" }}
-          >
-            {item.author}
-          </button>
+          <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+            <AvatarImage
+              src={item.author_face || ""}
+              alt={item.author}
+              size={22 * scale}
+              mid={item.mid}
+              onClick={hasAuthor ? () => onOpenAuthor({ mid: item.mid, name: item.author, face: item.author_face }) : undefined}
+            />
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (hasAuthor) onOpenAuthor({ mid: item.mid, name: item.author, face: item.author_face });
+              }}
+              style={{ border: "none", background: "transparent", padding: 0, color: "var(--color-primary)", fontSize: `${12.5 * scale}px`, fontWeight: 700, cursor: hasAuthor ? "pointer" : "default" }}
+            >
+              {item.author}
+            </button>
+          </div>
         ) : null}
         {item.description ? (
-          <p style={{ marginTop: 7, color: "#6b7280", fontSize: `${12.5 * scale}px`, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.description}</p>
+          <p style={{ marginTop: 7, color: "var(--color-text-muted)", fontSize: `${12.5 * scale}px`, lineHeight: 1.5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.description}</p>
         ) : null}
         {item.stats.length ? (
           <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
             {item.stats.map((stat) => (
-              <span key={stat} style={{ padding: "2px 7px", borderRadius: 999, backgroundColor: "#f3f4f8", color: "#7a7a8c", fontSize: `${11.5 * scale}px`, fontWeight: 700 }}>{stat}</span>
+              <span key={stat} style={{ padding: "2px 7px", borderRadius: 999, backgroundColor: "var(--color-bg-tertiary)", color: "var(--color-text-muted)", fontSize: `${11.5 * scale}px`, fontWeight: 700 }}>{stat}</span>
             ))}
           </div>
         ) : null}
@@ -2256,10 +2362,10 @@ function SearchSectionHeader({ title, shown, loaded, total, children }: { title:
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "12px", marginBottom: "8px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-        <h2 style={{ fontSize: "16px", fontWeight: 700, color: "#1a1a2e" }}>{title}</h2>
+        <h2 style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text)" }}>{title}</h2>
         {children}
       </div>
-      <span style={{ fontSize: "13px", color: "#8b8b9a" }}>已显示 {shown} 个，已加载 {loaded}/{Math.max(total, loaded)} 个</span>
+      <span style={{ fontSize: "13px", color: "var(--color-text-muted)" }}>已显示 {shown} 个，已加载 {loaded}/{Math.max(total, loaded)} 个</span>
     </div>
   );
 }
@@ -2274,8 +2380,8 @@ function MiniSearchTab({ active, onClick, children }: { active: boolean; onClick
         padding: "0 11px",
         borderRadius: "8px",
         border: "none",
-        backgroundColor: active ? "#fff" : "transparent",
-        color: active ? "#4338ca" : "#666679",
+        backgroundColor: active ? "var(--color-bg-elevated)" : "transparent",
+        color: active ? "var(--color-primary-hover)" : "var(--color-text-secondary)",
         boxShadow: active ? "0 1px 4px rgba(65,65,95,0.09)" : "none",
         fontSize: "12.5px",
         fontWeight: 800,
@@ -2347,8 +2453,8 @@ function getSearchTypeLabel(type: SearchResultType) {
 function SectionHeader({ title, count }: { title: string; count: number }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "4px" }}>
-      <h2 style={{ fontSize: "16px", fontWeight: 700, color: "#1a1a2e" }}>{title}</h2>
-      <span style={{ fontSize: "13px", color: "#8b8b9a" }}>{count} 条</span>
+      <h2 style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text)" }}>{title}</h2>
+      <span style={{ fontSize: "13px", color: "var(--color-text-muted)" }}>{count} 条</span>
     </div>
   );
 }
@@ -2381,9 +2487,9 @@ function CardActionButton({
         gap: `${5 * scale}px`,
         padding: `0 ${7 * scale}px`,
         borderRadius: `${9 * scale}px`,
-        border: primary ? "1px solid #6366f1" : "1px solid #dddde8",
-        backgroundColor: primary ? "#6366f1" : "#fff",
-        color: primary ? "#fff" : "#505065",
+        border: primary ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
+        backgroundColor: primary ? "var(--color-primary)" : "var(--color-bg-secondary)",
+        color: primary ? "#fff" : "var(--color-text-secondary)",
         fontSize: `${12.5 * scale}px`,
         fontWeight: 600,
         cursor: "pointer",
@@ -2451,7 +2557,7 @@ function PrimaryActionButton({
         gap: "7px",
         padding: "9px 18px",
         borderRadius: "10px",
-        backgroundColor: "#6366f1",
+        backgroundColor: "var(--color-primary)",
         color: "#fff",
         fontSize: "14px",
         fontWeight: 600,
@@ -2493,8 +2599,8 @@ function GhostActionButton({
         gap: isSmall ? "4px" : "7px",
         padding: isSmall ? "5px 12px" : "9px 18px",
         borderRadius: isSmall ? "6px" : "10px",
-        backgroundColor: "#fff",
-        color: disabled ? "#a5a5b2" : "#505065",
+        backgroundColor: "var(--color-bg-secondary)",
+        color: disabled ? "var(--color-text-disabled)" : "var(--color-text-secondary)",
         fontSize: isSmall ? "12px" : "14px",
         fontWeight: 600,
         cursor: disabled ? "not-allowed" : "pointer",

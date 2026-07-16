@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { ArrowLeft, Download, ExternalLink, Loader2, RefreshCw, Rss, UserRound, Video } from "lucide-react";
 import { motion } from "framer-motion";
@@ -478,7 +478,7 @@ export function UpProfileView() {
 
   if (!mid) {
     return (
-      <div style={{ padding: "72px 44px", color: "#7a7a8c" }}>
+      <div style={{ padding: "72px 44px", color: "var(--color-text-muted)" }}>
         <button type="button" onClick={closeUpProfile} style={backButtonStyle}>
           <ArrowLeft style={{ width: 16, height: 16 }} />
           返回
@@ -506,22 +506,22 @@ export function UpProfileView() {
           alignItems: "center",
           padding: "22px",
           borderRadius: "16px",
-          backgroundColor: "#fff",
-          border: "1px solid #ececf2",
+          backgroundColor: "var(--color-bg-secondary)",
+          border: "1px solid var(--color-border)",
         }}
       >
         <ClickableAvatar src={displayProfile.face} alt={displayProfile.name} size={78} />
         <div style={{ minWidth: 0 }}>
-          <h1 style={{ fontSize: "24px", lineHeight: 1.2, fontWeight: 800, color: "#1a1a2e" }}>{displayProfile.name || "UP 主"}</h1>
+          <h1 style={{ fontSize: "24px", lineHeight: 1.2, fontWeight: 800, color: "var(--color-text)" }}>{displayProfile.name || "UP 主"}</h1>
           <div style={{ marginTop: "8px", display: "flex", alignItems: "flex-start", gap: "10px", flexWrap: "wrap" }}>
-            <p style={{ flex: "1 1 280px", color: "#7a7a8c", fontSize: "13.5px", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+            <p style={{ flex: "1 1 280px", color: "var(--color-text-muted)", fontSize: "13.5px", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
               {displayProfile.sign || "这个 UP 主暂时没有填写简介"}
             </p>
             <PurpleRefreshButton loading={loading} onClick={() => activeTab === "videos" ? fetchVideos(1, "replace") : fetchDynamics("", "replace")} />
           </div>
-          <div style={{ marginTop: "12px", display: "flex", gap: "16px", color: "#505065", fontSize: "13px", flexWrap: "wrap" }}>
+          <div style={{ marginTop: "12px", display: "flex", gap: "16px", color: "var(--color-text-secondary)", fontSize: "13px", flexWrap: "wrap" }}>
             {headerStats.map(([label, value]) => (
-              <span key={label}><strong style={{ color: "#1a1a2e" }}>{value}</strong> {label}</span>
+              <span key={label}><strong style={{ color: "var(--color-text)" }}>{value}</strong> {label}</span>
             ))}
           </div>
         </div>
@@ -539,13 +539,13 @@ export function UpProfileView() {
       </motion.section>
 
       {error ? (
-        <div style={{ marginTop: "18px", padding: "12px 18px", borderRadius: "12px", backgroundColor: "#fef2f2", color: "#dc2626", fontSize: "13.5px" }}>
+        <div style={{ marginTop: "18px", padding: "12px 18px", borderRadius: "12px", backgroundColor: "var(--color-error-bg)", color: "var(--color-error-text)", fontSize: "13.5px" }}>
           {error}
         </div>
       ) : null}
 
       <div style={{ marginTop: "20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
-        <div style={{ display: "flex", padding: "4px", borderRadius: "11px", backgroundColor: "#ececf4", gap: "4px" }}>
+        <div style={{ display: "flex", padding: "4px", borderRadius: "11px", backgroundColor: "var(--color-border)", gap: "4px" }}>
           <TabButton active={activeTab === "videos"} onClick={() => setActiveTab("videos")} icon={<Video style={{ width: 15, height: 15 }} />}>
             投稿
           </TabButton>
@@ -601,7 +601,7 @@ export function UpProfileView() {
 
       {loading ? (
         <div style={{ height: "260px", display: "grid", placeItems: "center" }}>
-          <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
+          <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "var(--color-primary)" }} />
         </div>
       ) : activeTab === "videos" ? (
         <>
@@ -657,8 +657,8 @@ export function UpProfileView() {
       {downloadQualityDialog}
       {downloadScopeOpen ? (
         <div style={{ position: "fixed", inset: 0, zIndex: 900, display: "grid", placeItems: "center", backgroundColor: "rgba(15,23,42,0.38)" }}>
-          <div style={{ width: "min(420px, 92vw)", padding: "22px", borderRadius: "16px", backgroundColor: "#fff", boxShadow: "0 22px 60px rgba(15,23,42,0.22)" }}>
-            <h2 style={{ fontSize: "18px", fontWeight: 850, color: "#1a1a2e" }}>选择下载内容</h2>
+          <div style={{ width: "min(420px, 92vw)", padding: "22px", borderRadius: "16px", backgroundColor: "var(--color-bg-secondary)", boxShadow: "0 22px 60px rgba(15,23,42,0.22)" }}>
+            <h2 style={{ fontSize: "18px", fontWeight: 850, color: "var(--color-text)" }}>选择下载内容</h2>
             <div style={{ marginTop: "16px", display: "grid", gap: "12px" }}>
               <label style={checkboxRowStyle}>
                 <input type="checkbox" checked={downloadVideosScope} onChange={(event) => setDownloadVideosScope(event.target.checked)} />
@@ -687,9 +687,9 @@ const backButtonStyle: CSSProperties = {
   height: "36px",
   padding: "0 13px",
   borderRadius: "10px",
-  border: "1px solid #e2e2ea",
-  backgroundColor: "#fff",
-  color: "#505065",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
+  color: "var(--color-text-secondary)",
   fontSize: "13px",
   fontWeight: 700,
   cursor: "pointer",
@@ -702,8 +702,8 @@ const checkboxRowStyle: CSSProperties = {
   gap: "10px",
   padding: "0 12px",
   borderRadius: "10px",
-  border: "1px solid #ececf2",
-  color: "#33334a",
+  border: "1px solid var(--color-border)",
+  color: "var(--color-text)",
   fontSize: "14px",
   fontWeight: 750,
   cursor: "pointer",
@@ -719,8 +719,8 @@ function TabButton({ active, icon, children, onClick }: { active: boolean; icon:
         padding: "0 14px",
         borderRadius: "8px",
         border: "none",
-        backgroundColor: active ? "#fff" : "transparent",
-        color: active ? "#4338ca" : "#666679",
+        backgroundColor: active ? "var(--color-bg-elevated)" : "transparent",
+        color: active ? "var(--color-primary-hover)" : "var(--color-text-secondary)",
         boxShadow: active ? "0 1px 4px rgba(65,65,95,0.09)" : "none",
         display: "inline-flex",
         alignItems: "center",
@@ -746,9 +746,9 @@ function ActionButton({ children, icon, disabled = false, onClick }: { children:
         height: "36px",
         padding: "0 13px",
         borderRadius: "10px",
-        border: "1px solid #e2e2ea",
-        backgroundColor: "#fff",
-        color: disabled ? "#b8b8c6" : "#505065",
+        border: "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
+        color: disabled ? "var(--color-text-disabled)" : "var(--color-text-secondary)",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
@@ -778,10 +778,10 @@ function DynamicCard({
   return (
     <div
       onClick={() => onOpen(item)}
-      style={{ display: "grid", gridTemplateColumns: previewImages.length ? "148px minmax(0, 1fr)" : "1fr", gap: "14px", padding: "15px", borderRadius: "14px", border: "1px solid #ececf2", backgroundColor: "#fff", cursor: "pointer" }}
+      style={{ display: "grid", gridTemplateColumns: previewImages.length ? "148px minmax(0, 1fr)" : "1fr", gap: "14px", padding: "15px", borderRadius: "14px", border: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-secondary)", cursor: "pointer" }}
     >
       {previewImages.length ? (
-        <div style={{ display: "grid", gridTemplateColumns: previewImages.length > 1 ? "1fr 1fr" : "1fr", gap: "4px", aspectRatio: "16 / 10", borderRadius: "10px", overflow: "hidden", backgroundColor: "#f1f1f6" }}>
+        <div style={{ display: "grid", gridTemplateColumns: previewImages.length > 1 ? "1fr 1fr" : "1fr", gap: "4px", aspectRatio: "16 / 10", borderRadius: "10px", overflow: "hidden", backgroundColor: "var(--color-bg-subtle)" }}>
           {previewImages.map((image, index) => (
             <img
               key={`${image}-${index}`}
@@ -795,27 +795,27 @@ function DynamicCard({
         </div>
       ) : null}
       <div style={{ minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", color: "#8b8b9a", fontSize: "12.5px", marginBottom: "7px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", color: "var(--color-text-muted)", fontSize: "12.5px", marginBottom: "7px" }}>
           <span>{item.type_label || "动态"}</span>
           <span>{formatDateTime(item.pub_ts)}</span>
         </div>
         {item.major_title ? (
-          <h3 style={{ fontSize: "15px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.4, marginBottom: "6px" }}>{item.major_title}</h3>
+          <h3 style={{ fontSize: "15px", fontWeight: 800, color: "var(--color-text)", lineHeight: 1.4, marginBottom: "6px" }}>{item.major_title}</h3>
         ) : null}
-        <p style={{ color: "#505065", fontSize: "13.5px", lineHeight: 1.65, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+        <p style={{ color: "var(--color-text-secondary)", fontSize: "13.5px", lineHeight: 1.65, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
           {item.text ? `动态简介: ${item.text}` : (previewImages.length ? `共 ${item.images?.length || previewImages.length} 张图片` : "这条动态暂时没有文字内容")}
         </p>
         {item.content_text ? (
-          <p style={{ marginTop: "4px", color: "#505065", fontSize: "13.5px", lineHeight: 1.65, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+          <p style={{ marginTop: "4px", color: "var(--color-text-secondary)", fontSize: "13.5px", lineHeight: 1.65, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
             内容简介: {item.content_text}
           </p>
         ) : null}
         <div style={{ marginTop: "10px", display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-          <button type="button" onClick={(event) => { event.stopPropagation(); onOpen(item); }} style={{ border: "none", background: "transparent", color: "#6366f1", fontSize: "13px", fontWeight: 700, cursor: "pointer", padding: 0 }}>
+          <button type="button" onClick={(event) => { event.stopPropagation(); onOpen(item); }} style={{ border: "none", background: "transparent", color: "var(--color-primary)", fontSize: "13px", fontWeight: 700, cursor: "pointer", padding: 0 }}>
             {item.bvid ? "播放视频" : "查看详情"}
           </button>
           {item.major_url ? (
-            <button type="button" onClick={(event) => { event.stopPropagation(); onOpenBrowser(item.major_url); }} style={{ border: "none", background: "transparent", color: "#8b8b9a", fontSize: "13px", fontWeight: 700, cursor: "pointer", padding: 0 }}>
+            <button type="button" onClick={(event) => { event.stopPropagation(); onOpenBrowser(item.major_url); }} style={{ border: "none", background: "transparent", color: "var(--color-text-muted)", fontSize: "13px", fontWeight: 700, cursor: "pointer", padding: 0 }}>
               浏览器打开
             </button>
           ) : null}
@@ -873,8 +873,8 @@ function LoadMoreButton({ loading, onClick }: { loading: boolean; onClick: () =>
 
 function EmptyState({ icon, text }: { icon: ReactElement; text: string }) {
   return (
-    <div style={{ padding: "80px 0", display: "grid", placeItems: "center", gap: "12px", color: "#8b8b9a" }}>
-      <span style={{ width: "54px", height: "54px", borderRadius: "16px", backgroundColor: "#f1f1f6", display: "grid", placeItems: "center", color: "#b0b0be" }}>
+    <div style={{ padding: "80px 0", display: "grid", placeItems: "center", gap: "12px", color: "var(--color-text-muted)" }}>
+      <span style={{ width: "54px", height: "54px", borderRadius: "16px", backgroundColor: "var(--color-bg-subtle)", display: "grid", placeItems: "center", color: "var(--color-text-disabled)" }}>
         {icon}
       </span>
       <span style={{ fontSize: "14px", fontWeight: 700 }}>{text}</span>

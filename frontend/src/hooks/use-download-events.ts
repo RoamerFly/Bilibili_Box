@@ -171,7 +171,6 @@ export function useDownloadEvents() {
   const setDownloadSpeed = useDownloadStore((s) => s.setDownloadSpeed);
   const addLog = useLogStore((s) => s.addLog);
   const stageLogRef = useRef<Record<string, string>>({});
-  const progressLogRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -215,7 +214,6 @@ export function useDownloadEvents() {
         switch (payload.event) {
           case "progress_preparing":
             console.log("[Download] 准备下载:", payload.data.task_id);
-            addLog(`准备下载：${payload.data.task_id}`, "info");
             break;
           case "progress_update": {
             const progress = payload.data.progress;
@@ -238,17 +236,13 @@ export function useDownloadEvents() {
             const lastStage = stageLogRef.current[progress.task_id];
             if (lastStage !== stageText) {
               stageLogRef.current[progress.task_id] = stageText;
-              progressLogRef.current[progress.task_id] = -1;
-              addLog(`${progress.episode_title || progress.task_id}：${stageText}`, "info");
-            }
-
-            const progressBucket = Math.floor(percent / 10);
-            if (percent > 0 && progressBucket !== progressLogRef.current[progress.task_id]) {
-              progressLogRef.current[progress.task_id] = progressBucket;
-              addLog(
-                `${progress.episode_title || progress.task_id}：${stageText} ${Math.min(100, percent).toFixed(0)}%`,
-                "info"
-              );
+              if (
+                progress.stage === "downloading_video" ||
+                progress.stage === "downloading_audio" ||
+                progress.stage === "downloading_article"
+              ) {
+                addLog(stageText, "info");
+              }
             }
             break;
           }
@@ -266,7 +260,6 @@ export function useDownloadEvents() {
         const { payload } = event;
         if (payload.event === "task_state_update") {
           console.log("[Download] 状态变更:", payload.data.task_id, "->", payload.data.state);
-          addLog(`任务状态变更：${payload.data.task_id} -> ${stageLabel(undefined, payload.data.state)}`, "info");
           if (payload.data.state === "paused" || payload.data.state === "merging") {
             setDownloadSpeed("0 B/s");
           }
@@ -277,7 +270,6 @@ export function useDownloadEvents() {
             ...(payload.data.state === "paused" ? { stage: "paused" as DownloadStage, speed: 0 } : {}),
           });
         } else if (payload.event === "task_delete") {
-          addLog(`任务已删除：${payload.data.task_id}`, "warning");
           removeTask(payload.data.task_id);
         }
       });
@@ -290,7 +282,7 @@ export function useDownloadEvents() {
         const { payload } = event;
         if (payload.event === "task_state_update") {
           console.log("[Download] 下载完成:", payload.data.task_id);
-          addLog(`下载完成：${payload.data.task_id}`, "success");
+          addLog("下载完成", "success");
           stageLogRef.current[payload.data.task_id] = "下载完成";
           setDownloadSpeed("0 B/s");
           updateTask({
@@ -313,7 +305,7 @@ export function useDownloadEvents() {
         if (payload.event === "task_state_update") {
           console.error("[Download] 下载错误:", payload.data.task_id);
           const reason = payload.data.error || "未知错误";
-          addLog(`下载失败：${payload.data.task_id}，原因：${reason}`, "error");
+          addLog(`下载失败：${reason}`, "error");
           setDownloadSpeed("0 B/s");
           updateTask({
             id: payload.data.task_id,

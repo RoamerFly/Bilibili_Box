@@ -69,11 +69,11 @@ export function ClickableAvatar({
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: "#eef2ff",
-        border: "1.5px solid #ececf2",
+        backgroundColor: "var(--color-primary-light)",
+        border: "1.5px solid var(--color-border)",
         flexShrink: 0,
         position: "relative",
-        color: "#6366f1",
+        color: "var(--color-primary)",
         padding: 0,
         cursor: onClick ? "pointer" : "default",
       }}
@@ -109,11 +109,11 @@ export function UnifiedVideoCard({
     : undefined;
 
   return (
-    <div style={{ borderRadius: `${14 * scale}px`, backgroundColor: "#fff", border: selected ? "1.5px solid #6366f1" : "1px solid #ececf2", padding: `${13 * scale}px ${14 * scale}px` }}>
+    <div style={{ borderRadius: `${14 * scale}px`, backgroundColor: "var(--color-bg-secondary)", border: selected ? "1.5px solid var(--color-primary)" : "1px solid var(--color-border)", padding: `${13 * scale}px ${14 * scale}px` }}>
       <div style={{ display: "grid", gridTemplateColumns: `${Math.max(118 * scale, 148 * scale)}px minmax(0, 1fr)`, gap: `${13 * scale}px`, alignItems: "start" }}>
         <div
           onClick={onPlay}
-          style={{ aspectRatio: "16 / 9", borderRadius: `${10 * scale}px`, overflow: "hidden", backgroundColor: "#f0f0f5", position: "relative", cursor: "pointer" }}
+          style={{ aspectRatio: "16 / 9", borderRadius: `${10 * scale}px`, overflow: "hidden", backgroundColor: "var(--color-bg-tertiary)", position: "relative", cursor: "pointer" }}
         >
           <img
             src={formatBiliImageUrl(video.pic, "@672w_378h_1c.webp")}
@@ -144,7 +144,7 @@ export function UnifiedVideoCard({
               onClick={(event) => event.stopPropagation()}
               onChange={onToggleSelection}
               aria-label={`选择视频 ${video.title}`}
-              style={{ position: "absolute", top: `${8 * scale}px`, left: `${8 * scale}px`, width: `${17 * scale}px`, height: `${17 * scale}px`, accentColor: "#6366f1", cursor: "pointer" }}
+              style={{ position: "absolute", top: `${8 * scale}px`, left: `${8 * scale}px`, width: `${17 * scale}px`, height: `${17 * scale}px`, accentColor: "var(--color-primary)", cursor: "pointer" }}
             />
           ) : null}
         </div>
@@ -153,7 +153,7 @@ export function UnifiedVideoCard({
             style={{
               fontSize: `${15 * scale}px`,
               fontWeight: 700,
-              color: "#1a1a2e",
+              color: "var(--color-text)",
               lineHeight: 1.45,
               display: "-webkit-box",
               WebkitLineClamp: 2,
@@ -178,7 +178,7 @@ export function UnifiedVideoCard({
                 background: "transparent",
                 padding: 0,
                 fontSize: `${12.5 * scale}px`,
-                color: "#505065",
+                color: "var(--color-text-secondary)",
                 fontWeight: 600,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -190,12 +190,12 @@ export function UnifiedVideoCard({
               {video.author.name || "未知 UP"}
             </button>
             {video.pubdate ? (
-              <span style={{ fontSize: `${12 * scale}px`, color: "#999aaa", whiteSpace: "nowrap" }}>{formatDateTime(video.pubdate)}</span>
+              <span style={{ fontSize: `${12 * scale}px`, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>{formatDateTime(video.pubdate)}</span>
             ) : null}
           </div>
         </div>
       </div>
-      <div style={{ marginTop: `${11 * scale}px`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: `${11 * scale}px`, color: "#7a7a8c", fontSize: `${12.5 * scale}px`, flexWrap: "wrap" }}>
+      <div style={{ marginTop: `${11 * scale}px`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: `${11 * scale}px`, color: "var(--color-text-muted)", fontSize: `${12.5 * scale}px`, flexWrap: "wrap" }}>
         <MetaPill icon={<Eye style={{ width: 13 * scale, height: 13 * scale }} />} text={`播放 ${formatNumber(video.play || 0)}`} />
         <MetaPill icon={<ThumbsUp style={{ width: 13 * scale, height: 13 * scale }} />} text={`点赞 ${formatNumber(video.like || 0)}`} />
         <MetaPill icon={<Star style={{ width: 13 * scale, height: 13 * scale }} />} text={`收藏 ${formatNumber(video.favorite || 0)}`} />
@@ -244,9 +244,9 @@ export function CardActionButton({
         gap: `${5 * scale}px`,
         padding: `0 ${7 * scale}px`,
         borderRadius: `${9 * scale}px`,
-        border: primary ? "1px solid #6366f1" : "1px solid #dddde8",
-        backgroundColor: primary ? "#6366f1" : "#fff",
-        color: primary ? "#fff" : "#505065",
+        border: primary ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
+        backgroundColor: primary ? "var(--color-primary)" : "var(--color-bg-secondary)",
+        color: primary ? "#fff" : "var(--color-text-secondary)",
         fontSize: `${12.5 * scale}px`,
         fontWeight: 600,
         cursor: "pointer",

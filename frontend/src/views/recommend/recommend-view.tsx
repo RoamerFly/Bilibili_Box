@@ -631,15 +631,15 @@ export function RecommendView() {
       initial="hidden"
       animate="show"
       className="w-full min-h-full"
-      style={{ background: "#f5f5f7" }}
+      style={{ background: "var(--color-bg)" }}
     >
       <div style={{ padding: "32px 36px 20px" }}>
         <motion.div variants={itemVariants} style={{ marginBottom: "14px" }}>
-          <h1 style={{ fontSize: "24px", color: "#1a1a2e", fontWeight: 800 }}>
+          <h1 style={{ fontSize: "24px", color: "var(--color-text)", fontWeight: 800 }}>
             推荐/关注动态
           </h1>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "13px", color: "#8b8b9a" }}>
+            <span style={{ fontSize: "13px", color: "var(--color-text-muted)" }}>
               {activeTab === "dynamic" ? "关注 UP 主的最新动态" : activeCategory === "全部" ? "首页个性化推荐" : `${activeCategory}分区近期投稿`}
             </span>
             <PurpleRefreshButton
@@ -660,7 +660,7 @@ export function RecommendView() {
             flexWrap: "wrap",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "4px", padding: "4px", borderRadius: "11px", backgroundColor: "#ececf4", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "4px", padding: "4px", borderRadius: "11px", backgroundColor: "var(--color-border)", flexShrink: 0 }}>
             <TabButton active={activeTab === "home"} onClick={() => setRecommendPageState({ activeTab: "home" })} icon={<SlidersHorizontal style={{ width: 15, height: 15 }} />}>
               首页推荐
             </TabButton>
@@ -675,11 +675,11 @@ export function RecommendView() {
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
-                backgroundColor: "#fff",
+                backgroundColor: "var(--color-bg-secondary)",
                 borderRadius: "10px",
                 padding: "8px 14px",
                 width: "290px",
-                border: "1px solid #ececf2",
+                border: "1px solid var(--color-border)",
                 boxShadow: "0 1px 6px rgba(0,0,0,0.05)",
               }}
             >
@@ -710,7 +710,7 @@ export function RecommendView() {
                   outline: "none",
                   backgroundColor: "transparent",
                   fontSize: "13px",
-                  color: "#1a1a2e",
+                  color: "var(--color-text)",
                   fontFamily: "inherit",
                 }}
               />
@@ -731,13 +731,13 @@ export function RecommendView() {
                 alignItems: "center",
                 justifyContent: "center",
                 gap: "8px",
-                backgroundColor: "#fff",
-                border: "1px solid #ececf2",
+                backgroundColor: "var(--color-bg-secondary)",
+                border: "1px solid var(--color-border)",
                 borderRadius: "10px",
                 padding: "8px 16px",
                 fontSize: "13px",
                 fontWeight: 600,
-                color: "#1a1a2e",
+                color: "var(--color-text)",
                 boxShadow: "0 1px 6px rgba(0,0,0,0.05)",
                 cursor: "pointer",
               }}
@@ -792,8 +792,8 @@ export function RecommendView() {
                 onClick={() => setRecommendPageState({ activeCategory: category.label })}
                 whileTap={{ scale: 0.96 }}
                 style={{
-                  backgroundColor: active ? "#6366f1" : "transparent",
-                  color: active ? "#fff" : "#555568",
+                  backgroundColor: active ? "var(--color-primary)" : "transparent",
+                  color: active ? "#fff" : "var(--color-text-secondary)",
                   border: "none",
                   borderRadius: "20px",
                   padding: "6px 16px",
@@ -816,13 +816,13 @@ export function RecommendView() {
                 alignItems: "center",
                 justifyContent: "center",
                 gap: "5px",
-                backgroundColor: MORE_CATEGORIES.some((category) => category.label === activeCategory) ? "#6366f1" : "transparent",
+                backgroundColor: MORE_CATEGORIES.some((category) => category.label === activeCategory) ? "var(--color-primary)" : "transparent",
                 border: "none",
                 borderRadius: "20px",
                 padding: "6px 14px",
                 fontSize: "13px",
                 fontWeight: MORE_CATEGORIES.some((category) => category.label === activeCategory) ? 600 : 500,
-                color: MORE_CATEGORIES.some((category) => category.label === activeCategory) ? "#fff" : "#555568",
+                color: MORE_CATEGORIES.some((category) => category.label === activeCategory) ? "#fff" : "var(--color-text-secondary)",
                 cursor: "pointer",
               }}
             >
@@ -848,7 +848,7 @@ export function RecommendView() {
                     position: "absolute",
                     top: "calc(100% + 6px)",
                     left: 0,
-                    backgroundColor: "#fff",
+                    backgroundColor: "var(--color-bg-secondary)",
                     borderRadius: "12px",
                     padding: "10px",
                     boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
@@ -866,12 +866,12 @@ export function RecommendView() {
                       style={{
                         width: "100%",
                         textAlign: "left",
-                        backgroundColor: activeCategory === category.label ? "#f0efff" : "transparent",
+                        backgroundColor: activeCategory === category.label ? "var(--color-primary-light)" : "transparent",
                         border: "none",
                         borderRadius: "8px",
                         padding: "7px 12px",
                         fontSize: "13px",
-                        color: activeCategory === category.label ? "#6366f1" : "#444455",
+                        color: activeCategory === category.label ? "var(--color-primary)" : "var(--color-text-secondary)",
                         cursor: "pointer",
                       }}
                     >
@@ -892,8 +892,8 @@ export function RecommendView() {
               marginBottom: "18px",
               padding: "12px 18px",
               borderRadius: "12px",
-              backgroundColor: "#fef2f2",
-              color: "#dc2626",
+              backgroundColor: "var(--color-error-bg)",
+              color: "var(--color-error-text)",
               fontSize: "13.5px",
             }}
           >
@@ -904,10 +904,10 @@ export function RecommendView() {
         {activeTab === "dynamic" ? (
           dynamicLoading ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "240px" }}>
-              <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
+              <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "var(--color-primary)" }} />
             </div>
           ) : displayedDynamicItems.length === 0 ? (
-            <div style={{ paddingTop: "100px", textAlign: "center", color: "#9a9aa5" }}>
+            <div style={{ paddingTop: "100px", textAlign: "center", color: "var(--color-text-muted)" }}>
               暂时没有关注动态，或当前账号未登录
             </div>
           ) : (
@@ -952,7 +952,7 @@ export function RecommendView() {
               </div>
               <div style={{ display: "flex", justifyContent: "center", marginTop: "22px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-                  <span style={{ fontSize: "13px", color: "#8b8b9a", padding: "0 4px" }}>
+                  <span style={{ fontSize: "13px", color: "var(--color-text-muted)", padding: "0 4px" }}>
                     已载入 {dynamicLoadedPageCount}/{dynamicTotalPageCount} 页
                   </span>
                   <PageButton disabled={currentPage <= 1} onClick={() => runPreservingMainScroll(() => setRecommendPageState({ currentPage: currentPage - 1 }))}>
@@ -986,10 +986,10 @@ export function RecommendView() {
           )
         ) : isLoading ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "200px" }}>
-            <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
+            <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "var(--color-primary)" }} />
           </div>
         ) : pagedVideos.length === 0 ? (
-          <div style={{ paddingTop: "100px", textAlign: "center", color: "#9a9aa5" }}>
+          <div style={{ paddingTop: "100px", textAlign: "center", color: "var(--color-text-muted)" }}>
             没有匹配到推荐内容
           </div>
         ) : (
@@ -1077,8 +1077,8 @@ function TabButton({
         padding: "0 14px",
         borderRadius: "8px",
         border: "none",
-        backgroundColor: active ? "#fff" : "transparent",
-        color: active ? "#4338ca" : "#666679",
+        backgroundColor: active ? "var(--color-bg-elevated)" : "transparent",
+        color: active ? "var(--color-primary-hover)" : "var(--color-text-secondary)",
         boxShadow: active ? "0 1px 4px rgba(65,65,95,0.09)" : "none",
         display: "inline-flex",
         alignItems: "center",
@@ -1098,10 +1098,10 @@ function TabButton({
 
 function DynamicTimelineLabelText({ label }: { label: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "12px", margin: "2px 0 8px", color: "#8b8b9a", fontSize: "13px", fontWeight: 850 }}>
-      <span style={{ flex: 1, height: 1, backgroundColor: "#e4e4ec" }} />
+    <div style={{ display: "flex", alignItems: "center", gap: "12px", margin: "2px 0 8px", color: "var(--color-text-muted)", fontSize: "13px", fontWeight: 850 }}>
+      <span style={{ flex: 1, height: 1, backgroundColor: "var(--color-border)" }} />
       <span>{label}</span>
-      <span style={{ flex: 1, height: 1, backgroundColor: "#e4e4ec" }} />
+      <span style={{ flex: 1, height: 1, backgroundColor: "var(--color-border)" }} />
     </div>
   );
 }
@@ -1156,8 +1156,8 @@ export function FollowingDynamicCard({
         gap: "11px",
         padding: "14px 17px",
         borderRadius: "12px",
-        border: selected ? "1.5px solid #6366f1" : "1px solid #ececf2",
-        backgroundColor: "#fff",
+        border: selected ? "1.5px solid var(--color-primary)" : "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
         cursor: "pointer",
         boxShadow: selected ? "0 10px 24px rgba(99,102,241,0.13)" : "0 8px 22px rgba(35,38,70,0.05)",
       }}
@@ -1168,7 +1168,7 @@ export function FollowingDynamicCard({
           checked={selected}
           onClick={(event) => event.stopPropagation()}
           onChange={onToggleSelection}
-          style={{ position: "absolute", left: 10, top: 10, width: 16, height: 16, accentColor: "#6366f1", zIndex: 3 }}
+          style={{ position: "absolute", left: 10, top: 10, width: 16, height: 16, accentColor: "var(--color-primary)", zIndex: 3 }}
         />
       ) : null}
 
@@ -1222,7 +1222,7 @@ export function FollowingDynamicCard({
             >
               {item.author_name || "未知 UP"}
             </button>
-            <div style={{ marginTop: "5px", display: "flex", alignItems: "center", gap: "7px", color: "#9ca3af", fontSize: "12px", fontWeight: 700, flexWrap: "wrap" }}>
+            <div style={{ marginTop: "5px", display: "flex", alignItems: "center", gap: "7px", color: "var(--color-text-muted)", fontSize: "12px", fontWeight: 700, flexWrap: "wrap" }}>
               <span>{formatDateTime(item.pub_ts)}</span>
               <span>·</span>
               <span>{actionText}</span>
@@ -1235,7 +1235,7 @@ export function FollowingDynamicCard({
               event.stopPropagation();
               if (item.major_url) onOpenBrowser(item.major_url);
             }}
-            style={{ border: "none", background: "transparent", color: "#c5c8cf", padding: 2, cursor: item.major_url ? "pointer" : "default" }}
+            style={{ border: "none", background: "transparent", color: "var(--color-border)", padding: 2, cursor: item.major_url ? "pointer" : "default" }}
           >
             <MoreVertical style={{ width: 18, height: 18 }} />
           </button>
@@ -1248,7 +1248,7 @@ export function FollowingDynamicCard({
         ) : null}
 
         {primaryText && !item.topic_name ? (
-          <p style={{ marginTop: "11px", color: "#1f2937", fontSize: "13px", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+          <p style={{ marginTop: "11px", color: "var(--color-text)", fontSize: "13px", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
             动态简介: {primaryText}
           </p>
         ) : null}
@@ -1259,14 +1259,14 @@ export function FollowingDynamicCard({
               marginTop: "12px",
               display: item.bvid || item.major_title ? "grid" : "block",
               gridTemplateColumns: item.bvid || item.major_title ? "minmax(120px, 30%) minmax(0, 1fr)" : "1fr",
-              border: "1px solid #e5e7eb",
+              border: "1px solid var(--color-border)",
               borderRadius: "8px",
               overflow: "hidden",
-              backgroundColor: "#fff",
+              backgroundColor: "var(--color-bg-secondary)",
             }}
           >
             {previewImages.length ? (
-              <div style={{ position: "relative", display: "grid", gridTemplateColumns: previewImages.length > 1 && !item.bvid ? "1fr 1fr" : "1fr", gap: item.bvid ? 0 : "3px", minHeight: item.bvid || item.major_title ? 74 : 90, backgroundColor: "#f1f1f6" }}>
+              <div style={{ position: "relative", display: "grid", gridTemplateColumns: previewImages.length > 1 && !item.bvid ? "1fr 1fr" : "1fr", gap: item.bvid ? 0 : "3px", minHeight: item.bvid || item.major_title ? 74 : 90, backgroundColor: "var(--color-bg-subtle)" }}>
                 {previewImages.map((image, index) => (
                   <img key={`${image}-${index}`} src={formatBiliImageUrl(image, previewImages.length > 1 && !item.bvid ? "@240w_240h_1c.webp" : "@448w_252h_1c.webp")} alt={item.major_title || "动态封面"} loading="lazy" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", minHeight: 0, objectFit: "cover" }} />
                 ))}
@@ -1281,18 +1281,18 @@ export function FollowingDynamicCard({
               <div style={{ padding: "14px 15px", minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "10px" }}>
                 <div>
                   {item.major_title ? (
-                    <h3 style={{ color: "#111827", fontSize: "14px", lineHeight: 1.45, fontWeight: 700, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                    <h3 style={{ color: "var(--color-text)", fontSize: "14px", lineHeight: 1.45, fontWeight: 700, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
                       {item.major_title}
                     </h3>
                   ) : null}
                   {contentText ? (
-                    <p style={{ marginTop: item.major_title ? "7px" : 0, color: "#9ca3af", fontSize: "12px", lineHeight: 1.55, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                    <p style={{ marginTop: item.major_title ? "7px" : 0, color: "var(--color-text-muted)", fontSize: "12px", lineHeight: 1.55, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
                       {item.major_title ? contentText : `内容简介: ${contentText}`}
                     </p>
                   ) : null}
                 </div>
                 {item.bvid ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: "17px", color: "#9ca3af", fontSize: "12px", fontWeight: 700 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "17px", color: "var(--color-text-muted)", fontSize: "12px", fontWeight: 700 }}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><PlaySquare style={{ width: 14, height: 14 }} />{formatNumber(item.view_count)}</span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><MessageCircle style={{ width: 14, height: 14 }} />{formatNumber(item.danmaku_count)}</span>
                   </div>
@@ -1301,14 +1301,14 @@ export function FollowingDynamicCard({
             ) : null}
           </div>
         ) : contentText ? (
-          <p style={{ marginTop: "11px", color: "#1f2937", fontSize: "13px", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+          <p style={{ marginTop: "11px", color: "var(--color-text)", fontSize: "13px", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
             内容简介: {contentText}
           </p>
         ) : (
-          <p style={{ marginTop: "11px", color: "#9ca3af", fontSize: "12px" }}>这条动态暂时没有文字内容</p>
+          <p style={{ marginTop: "11px", color: "var(--color-text-muted)", fontSize: "12px" }}>这条动态暂时没有文字内容</p>
         )}
 
-        <div style={{ marginTop: "14px", display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", color: "#6b7280", fontSize: "12.5px", fontWeight: 700 }}>
+        <div style={{ marginTop: "14px", display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", color: "var(--color-text-muted)", fontSize: "12.5px", fontWeight: 700 }}>
           <button type="button" onClick={handleCopyLink} style={dynamicActionButtonStyle}><Repeat2 style={{ width: 16, height: 16 }} />转发{item.repost_count ? ` ${formatNumber(item.repost_count)}` : ""}</button>
           <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}><MessageCircle style={{ width: 16, height: 16 }} />评论{item.comment_count ? ` ${formatNumber(item.comment_count)}` : ""}</span>
           <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}><ThumbsUp style={{ width: 16, height: 16 }} />{formatNumber(item.like_count)}</span>
@@ -1442,8 +1442,8 @@ function VideoCard({
       transition={{ duration: 0.2, delay: index * 0.01 }}
       style={{
         borderRadius: `${14 * scale}px`,
-        backgroundColor: "#fff",
-        border: "1px solid #ececf2",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1px solid var(--color-border)",
         overflow: "hidden",
       }}
     >
@@ -1456,7 +1456,7 @@ function VideoCard({
             position: "relative",
             width: "100%",
             aspectRatio: "16 / 9",
-            backgroundColor: "#e5e7eb",
+            backgroundColor: "var(--color-bg-tertiary)",
           }}
         >
           <img
@@ -1487,7 +1487,7 @@ function VideoCard({
             <div
               style={{
                 fontSize: `${14.5 * scale}px`,
-              color: "#1a1a2e",
+              color: "var(--color-text)",
               fontWeight: 700,
               lineHeight: 1.4,
               display: "-webkit-box",
@@ -1504,7 +1504,7 @@ function VideoCard({
             style={{
               marginTop: `${6 * scale}px`,
               fontSize: `${12.5 * scale}px`,
-              color: "#8b8b9a",
+              color: "var(--color-text-muted)",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -1515,12 +1515,12 @@ function VideoCard({
 
             <div style={{ marginTop: `${8 * scale}px`, display: "flex", alignItems: "center", gap: `${14 * scale}px` }}>
             <div style={{ display: "flex", alignItems: "center", gap: `${5 * scale}px` }}>
-              <Eye style={{ width: 13 * scale, height: 13 * scale, color: "#aaaabb" }} />
-              <span style={{ fontSize: `${12 * scale}px`, color: "#9999aa" }}>{video.views}</span>
+              <Eye style={{ width: 13 * scale, height: 13 * scale, color: "var(--color-text-disabled)" }} />
+              <span style={{ fontSize: `${12 * scale}px`, color: "var(--color-text-muted)" }}>{video.views}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: `${5 * scale}px` }}>
-              <ThumbsUp style={{ width: 13 * scale, height: 13 * scale, color: "#aaaabb" }} />
-              <span style={{ fontSize: `${12 * scale}px`, color: "#9999aa" }}>{video.likes}</span>
+              <ThumbsUp style={{ width: 13 * scale, height: 13 * scale, color: "var(--color-text-disabled)" }} />
+              <span style={{ fontSize: `${12 * scale}px`, color: "var(--color-text-muted)" }}>{video.likes}</span>
             </div>
           </div>
         </div>
@@ -1562,9 +1562,9 @@ function MiniButton({
         gap: `${6 * scale}px`,
         padding: `${8 * scale}px ${12 * scale}px`,
         borderRadius: `${10 * scale}px`,
-        border: "1px solid #e2e2ea",
-        backgroundColor: "#fff",
-        color: "#505065",
+        border: "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
+        color: "var(--color-text-secondary)",
         fontSize: `${13 * scale}px`,
         fontWeight: 600,
         cursor: "pointer",
@@ -1596,9 +1596,9 @@ function PageButton({
         height: "36px",
         padding: "0 12px",
         borderRadius: "10px",
-        border: active ? "1px solid #6366f1" : "1px solid #e2e2ea",
-        backgroundColor: active ? "#6366f1" : "#fff",
-        color: disabled ? "#c0c0c8" : active ? "#fff" : "#505065",
+        border: active ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
+        backgroundColor: active ? "var(--color-primary)" : "var(--color-bg-secondary)",
+        color: disabled ? "var(--color-text-disabled)" : active ? "#fff" : "var(--color-text-secondary)",
         fontSize: "13px",
         fontWeight: 600,
         cursor: disabled ? "not-allowed" : "pointer",

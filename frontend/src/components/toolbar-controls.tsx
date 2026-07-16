@@ -27,7 +27,7 @@ export function PurpleRefreshButton({ loading = false, disabled = false, onClick
         border: 0,
         borderRadius: "8px",
         background: "transparent",
-        color: inactive ? "#a0a0ae" : "#6366f1",
+        color: inactive ? "var(--color-text-muted)" : "var(--color-primary)",
         fontSize: "12.5px",
         fontWeight: 600,
         cursor: inactive ? "wait" : "pointer",

@@ -1258,66 +1258,23 @@ impl super::BiliClient {
         let search_type_str = options.search_type.as_deref().unwrap_or("all");
 
         let video_data = if search_type_str == "all" || search_type_str == "video" {
-            match self
-            .request_search_value(apply_search_headers(
-                self.api_client()
-                    .get("https://api.bilibili.com/x/web-interface/wbi/search/type")
-                    .query(&video_params)
-                    .header(
-                        "cookie",
-                        self.get_cookie_for_url(
-                            "https://api.bilibili.com/x/web-interface/wbi/search/type",
-                        ),
-                    )
-                    .header("origin", "https://search.bilibili.com"),
-                &search_referer,
-            ), &search_referer)
-            .await
-        {
-            Ok(data) => data,
-            Err(error) if error.contains("412") || error.contains("风控") || error.contains("椋庢帶") => {
-                let fallback_video_params = vec![
-                    ("search_type", "video".to_string()),
-                    ("keyword", keyword.to_string()),
-                    ("page", page.to_string()),
-                    ("page_size", page_size.to_string()),
-                    ("order", order.to_string()),
-                    ("duration", duration.to_string()),
-                    ("tids", "0".to_string()),
-                    ("platform", "pc".to_string()),
-                    ("web_location", "1430654".to_string()),
-                    ("pubtime_begin_s", pubtime_begin_s.clone()),
-                    ("pubtime_end_s", pubtime_end_s.clone()),
-                ];
-                self.request_search_value(apply_search_headers(
+            self.request_search_value(
+                apply_search_headers(
                     self.api_client()
-                        .get("https://api.bilibili.com/x/web-interface/search/type")
-                        .query(&fallback_video_params)
+                        .get("https://api.bilibili.com/x/web-interface/wbi/search/type")
+                        .query(&video_params)
                         .header(
                             "cookie",
                             self.get_cookie_for_url(
-                                "https://api.bilibili.com/x/web-interface/search/type",
+                                "https://api.bilibili.com/x/web-interface/wbi/search/type",
                             ),
                         )
                         .header("origin", "https://search.bilibili.com"),
                     &search_referer,
-                ), &search_referer)
-                .await
-                .map_err(|fallback_error| {
-                    if fallback_error.contains("412") || fallback_error.contains("风控") || fallback_error.contains("椋庢帶") {
-                        format!("WIND_CONTROL_REQUIRED:{}", search_referer)
-                    } else {
-                        format!("{error}; fallback search/type: {fallback_error}")
-                    }
-                })?
-            }
-            Err(error) => {
-                if error.contains("412") || error.contains("风控") || error.contains("椋庢帶") {
-                    return Err(format!("WIND_CONTROL_REQUIRED:{}", search_referer));
-                }
-                return Err(error);
-            }
-        }
+                ),
+                &search_referer,
+            )
+            .await?
         } else {
             json!({ "result": [], "numResults": 0, "numPages": 1 })
         };
@@ -1327,124 +1284,149 @@ impl super::BiliClient {
             self.request_search_value(
                 apply_search_headers(
                     self.api_client()
-                    .get("https://api.bilibili.com/x/web-interface/search/type")
-                    .query(&[
-                        ("search_type", "media_bangumi"),
-                        ("keyword", keyword),
-                        ("page", page_string.as_str()),
-                        ("page_size", page_size_string.as_str()),
-                    ])
-                    .header(
-                        "cookie",
-                        self.get_cookie_for_url(
-                            "https://api.bilibili.com/x/web-interface/search/type",
-                        ),
-                    )
-                    .header("origin", "https://search.bilibili.com"),
+                        .get("https://api.bilibili.com/x/web-interface/search/type")
+                        .query(&[
+                            ("search_type", "media_bangumi"),
+                            ("keyword", keyword),
+                            ("page", page_string.as_str()),
+                            ("page_size", page_size_string.as_str()),
+                        ])
+                        .header(
+                            "cookie",
+                            self.get_cookie_for_url(
+                                "https://api.bilibili.com/x/web-interface/search/type",
+                            ),
+                        )
+                        .header("origin", "https://search.bilibili.com"),
                     &search_referer,
-                ), &search_referer
+                ),
+                &search_referer,
             )
             .await?
         } else {
             json!({ "result": [], "numResults": 0, "numPages": 1 })
         };
+
         let film_data = if search_type_str == "all" || search_type_str == "media_ft" {
             tokio::time::sleep(Duration::from_millis(400)).await;
-            self.request_search_value(apply_search_headers(
-                self.api_client()
-                    .get("https://api.bilibili.com/x/web-interface/search/type")
-                    .query(&[
-                        ("search_type", "media_ft"),
-                        ("keyword", keyword),
-                        ("page", page_string.as_str()),
-                        ("page_size", page_size_string.as_str()),
-                    ])
-                    .header(
-                        "cookie",
-                        self.get_cookie_for_url(
-                            "https://api.bilibili.com/x/web-interface/search/type",
-                        ),
-                    )
-                    .header("origin", "https://search.bilibili.com"),
+            Self::optional_search_value(
+                self.request_search_value(
+                    apply_search_headers(
+                        self.api_client()
+                            .get("https://api.bilibili.com/x/web-interface/search/type")
+                            .query(&[
+                                ("search_type", "media_ft"),
+                                ("keyword", keyword),
+                                ("page", page_string.as_str()),
+                                ("page_size", page_size_string.as_str()),
+                            ])
+                            .header(
+                                "cookie",
+                                self.get_cookie_for_url(
+                                    "https://api.bilibili.com/x/web-interface/search/type",
+                                ),
+                            )
+                            .header("origin", "https://search.bilibili.com"),
+                        &search_referer,
+                    ),
+                    &search_referer,
+                )
+                .await,
                 &search_referer,
-            ), &search_referer)
-            .await
-            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }))
+            )?
         } else {
             json!({ "result": [], "numResults": 0, "numPages": 1 })
         };
+
         let live_data = if search_type_str == "all" || search_type_str == "live" {
             tokio::time::sleep(Duration::from_millis(400)).await;
-            self.request_search_value(apply_search_headers(
-                self.api_client()
-                    .get("https://api.bilibili.com/x/web-interface/search/type")
-                    .query(&[
-                        ("search_type", "live"),
-                        ("keyword", keyword),
-                        ("page", page_string.as_str()),
-                        ("page_size", page_size_string.as_str()),
-                    ])
-                    .header(
-                        "cookie",
-                        self.get_cookie_for_url(
-                            "https://api.bilibili.com/x/web-interface/search/type",
-                        ),
-                    )
-                    .header("origin", "https://search.bilibili.com"),
+            Self::optional_search_value(
+                self.request_search_value(
+                    apply_search_headers(
+                        self.api_client()
+                            .get("https://api.bilibili.com/x/web-interface/search/type")
+                            .query(&[
+                                ("search_type", "live"),
+                                ("keyword", keyword),
+                                ("page", page_string.as_str()),
+                                ("page_size", page_size_string.as_str()),
+                            ])
+                            .header(
+                                "cookie",
+                                self.get_cookie_for_url(
+                                    "https://api.bilibili.com/x/web-interface/search/type",
+                                ),
+                            )
+                            .header("origin", "https://search.bilibili.com"),
+                        &search_referer,
+                    ),
+                    &search_referer,
+                )
+                .await,
                 &search_referer,
-            ), &search_referer)
-            .await
-            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }))
+            )?
         } else {
             json!({ "result": [], "numResults": 0, "numPages": 1 })
         };
+
         let article_data = if search_type_str == "all" || search_type_str == "article" {
             tokio::time::sleep(Duration::from_millis(400)).await;
-            self.request_search_value(apply_search_headers(
-                self.api_client()
-                    .get("https://api.bilibili.com/x/web-interface/search/type")
-                    .query(&[
-                        ("search_type", "article"),
-                        ("keyword", keyword),
-                        ("page", page_string.as_str()),
-                        ("page_size", page_size_string.as_str()),
-                    ])
-                    .header(
-                        "cookie",
-                        self.get_cookie_for_url(
-                            "https://api.bilibili.com/x/web-interface/search/type",
-                        ),
-                    )
-                    .header("origin", "https://search.bilibili.com"),
+            Self::optional_search_value(
+                self.request_search_value(
+                    apply_search_headers(
+                        self.api_client()
+                            .get("https://api.bilibili.com/x/web-interface/search/type")
+                            .query(&[
+                                ("search_type", "article"),
+                                ("keyword", keyword),
+                                ("page", page_string.as_str()),
+                                ("page_size", page_size_string.as_str()),
+                            ])
+                            .header(
+                                "cookie",
+                                self.get_cookie_for_url(
+                                    "https://api.bilibili.com/x/web-interface/search/type",
+                                ),
+                            )
+                            .header("origin", "https://search.bilibili.com"),
+                        &search_referer,
+                    ),
+                    &search_referer,
+                )
+                .await,
                 &search_referer,
-            ), &search_referer)
-            .await
-            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }))
+            )?
         } else {
             json!({ "result": [], "numResults": 0, "numPages": 1 })
         };
+
         let user_data = if search_type_str == "all" || search_type_str == "bili_user" {
             tokio::time::sleep(Duration::from_millis(400)).await;
-            self.request_search_value(apply_search_headers(
-                self.api_client()
-                    .get("https://api.bilibili.com/x/web-interface/search/type")
-                    .query(&[
-                        ("search_type", "bili_user"),
-                        ("keyword", keyword),
-                        ("page", page_string.as_str()),
-                        ("page_size", page_size_string.as_str()),
-                    ])
-                    .header(
-                        "cookie",
-                        self.get_cookie_for_url(
-                            "https://api.bilibili.com/x/web-interface/search/type",
-                        ),
-                    )
-                    .header("origin", "https://search.bilibili.com"),
+            Self::optional_search_value(
+                self.request_search_value(
+                    apply_search_headers(
+                        self.api_client()
+                            .get("https://api.bilibili.com/x/web-interface/search/type")
+                            .query(&[
+                                ("search_type", "bili_user"),
+                                ("keyword", keyword),
+                                ("page", page_string.as_str()),
+                                ("page_size", page_size_string.as_str()),
+                            ])
+                            .header(
+                                "cookie",
+                                self.get_cookie_for_url(
+                                    "https://api.bilibili.com/x/web-interface/search/type",
+                                ),
+                            )
+                            .header("origin", "https://search.bilibili.com"),
+                        &search_referer,
+                    ),
+                    &search_referer,
+                )
+                .await,
                 &search_referer,
-            ), &search_referer)
-            .await
-            .unwrap_or_else(|_| json!({ "result": [], "numResults": 0, "numPages": 1 }))
+            )?
         } else {
             json!({ "result": [], "numResults": 0, "numPages": 1 })
         };
@@ -1658,8 +1640,17 @@ impl super::BiliClient {
         )
     }
 
+    fn optional_search_value(result: Result<Value, String>, referer: &str) -> Result<Value, String> {
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) if error.contains("WIND_CONTROL_REQUIRED:") || error.contains("412") => {
+                Err(format!("WIND_CONTROL_REQUIRED:{}", referer))
+            }
+            Err(_) => Ok(json!({ "result": [], "numResults": 0, "numPages": 1 })),
+        }
+    }
+
     async fn request_search_value(&self, request: RequestBuilder, referer: &str) -> Result<Value, String> {
-        let retry_request = request.try_clone();
         let response = request
             .send()
             .await
@@ -1671,43 +1662,6 @@ impl super::BiliClient {
             .map_err(|e| format!("读取响应失败: {}", e))?;
 
         if status == StatusCode::PRECONDITION_FAILED {
-            if let Some(retry_request) = retry_request {
-                let _ = self.warm_up_web_session(None).await;
-                tokio::time::sleep(Duration::from_millis(1200)).await;
-
-                let retry_response = retry_request
-                    .send()
-                    .await
-                    .map_err(|e| format!("412 重试失败: {}", e))?;
-                let retry_status = retry_response.status();
-                let retry_body = retry_response
-                    .text()
-                    .await
-                    .map_err(|e| format!("读取重试响应失败: {}", e))?;
-
-                if retry_status == StatusCode::PRECONDITION_FAILED {
-                    return Err(format!("WIND_CONTROL_REQUIRED:{}", referer));
-                }
-
-                if retry_status != StatusCode::OK {
-                    return Err(format!(
-                        "意外的状态码({}): {}",
-                        retry_status,
-                        summarize_error_body(&retry_body)
-                    ));
-                }
-
-                let bili_resp: BiliResp = serde_json::from_str(&retry_body)
-                    .map_err(|e| format!("解析响应失败: {}", e))?;
-                if bili_resp.code != 0 {
-                    return Err(format!("API 错误: {}", bili_resp.message));
-                }
-
-                return bili_resp
-                    .data
-                    .ok_or_else(|| "响应中没有 data 字段".to_string());
-            }
-
             return Err(format!("WIND_CONTROL_REQUIRED:{}", referer));
         }
 
@@ -1721,8 +1675,11 @@ impl super::BiliClient {
 
         let bili_resp: BiliResp =
             serde_json::from_str(&body).map_err(|e| format!("解析响应失败: {}", e))?;
+        if bili_resp.code == -412 {
+            return Err(format!("WIND_CONTROL_REQUIRED:{}", referer));
+        }
         if bili_resp.code != 0 {
-            return Err(format!("API 错误: {}", bili_resp.message));
+            return Err(format!("API 错误({}): {}", bili_resp.code, bili_resp.message));
         }
 
         bili_resp

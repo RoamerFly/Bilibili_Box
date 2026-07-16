@@ -24,6 +24,10 @@ fail() {
     exit 1
 }
 
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || fail "$1 was not found. Install it and add it to PATH."
+}
+
 copy_runtime_tool() {
     local tool_name="$1"
     local tool_source=""
@@ -64,8 +68,11 @@ echo "Target architecture: $(uname -m)"
 
 echo
 echo "[1/5] Installing locked dependencies..."
+require_command npm
+require_command cargo
 [[ -f "package-lock.json" ]] || fail "package-lock.json was not found."
 [[ -f "frontend/package-lock.json" ]] || fail "frontend/package-lock.json was not found."
+[[ -f "src-tauri/Cargo.lock" ]] || fail "src-tauri/Cargo.lock was not found."
 npm ci --no-audit --no-fund
 npm --prefix frontend ci --no-audit --no-fund
 
@@ -87,7 +94,7 @@ npm run build
 
 echo
 echo "[4/5] Building Tauri application..."
-npm run tauri -- build
+npm run tauri -- build -- --locked
 
 echo
 echo "[5/5] Preparing portable package in $OUTPUT_DIR..."

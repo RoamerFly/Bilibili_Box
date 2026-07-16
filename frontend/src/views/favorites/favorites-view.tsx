@@ -604,11 +604,11 @@ export function FavoritesView() {
         }}
       >
         <div>
-          <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
+          <h1 style={{ fontSize: "24px", fontWeight: 800, color: "var(--color-text)", lineHeight: 1.25 }}>
             我的点赞/收藏
           </h1>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "14px", color: "#8b8b9a" }}>
+            <span style={{ fontSize: "14px", color: "var(--color-text-muted)" }}>
               {activeSection === "likes" ? `已加载 ${likedVideos.length} 个点赞视频` : `共 ${folders.length} 个收藏夹`}
             </span>
             <PurpleRefreshButton loading={refreshing || likedLoading} onClick={handleRefresh} />
@@ -617,7 +617,7 @@ export function FavoritesView() {
       </motion.div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px", marginBottom: "18px", flexWrap: "wrap" }}>
-        <div style={{ display: "inline-flex", alignSelf: "flex-start", padding: "4px", borderRadius: "12px", backgroundColor: "#f3f4f8", flexShrink: 0 }}>
+        <div style={{ display: "inline-flex", alignSelf: "flex-start", padding: "4px", borderRadius: "12px", backgroundColor: "var(--color-bg-tertiary)", flexShrink: 0 }}>
           <SectionTab active={activeSection === "likes"} icon={<Heart style={{ width: 16, height: 16 }} />} onClick={() => setFavoritesPageState({ activeTab: "likes" })}>
             我的点赞
           </SectionTab>
@@ -627,7 +627,7 @@ export function FavoritesView() {
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "10px", flexWrap: "wrap", flex: 1 }}>
           {activeSection === "likes" ? (
-            <div style={{ display: "inline-flex", padding: "3px", borderRadius: "10px", backgroundColor: "#f3f4f8" }}>
+            <div style={{ display: "inline-flex", padding: "3px", borderRadius: "10px", backgroundColor: "var(--color-bg-tertiary)" }}>
               <MiniSourceTab active={likedSource === "web"} onClick={() => handleLikedSourceChange("web")}>
                 网页最近点赞
               </MiniSourceTab>
@@ -652,8 +652,8 @@ export function FavoritesView() {
             marginBottom: "18px",
             padding: "12px 18px",
             borderRadius: "12px",
-            backgroundColor: "#fef2f2",
-            color: "#dc2626",
+            backgroundColor: "var(--color-error-bg)",
+            color: "var(--color-error-text)",
             fontSize: "13.5px",
           }}
         >
@@ -674,10 +674,10 @@ export function FavoritesView() {
             }}
           >
             <div>
-              <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#1a1a2e" }}>
+              <h2 style={{ fontSize: "18px", fontWeight: 700, color: "var(--color-text)" }}>
                 {likedSource === "web" ? "最近点赞的视频" : "APP 点赞列表"}
               </h2>
-              <p style={{ marginTop: "3px", fontSize: "13px", color: "#8b8b9a" }}>
+              <p style={{ marginTop: "3px", fontSize: "13px", color: "var(--color-text-muted)" }}>
                 已显示 {filteredLikedMedias.length} 个{likedTotal > 0 ? `，已加载 ${likedMedias.length}/${likedTotal} 个` : ""}
               </p>
             </div>
@@ -707,7 +707,7 @@ export function FavoritesView() {
 
           {likedLoading && likedMedias.length === 0 ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingTop: "120px" }}>
-              <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
+              <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "var(--color-primary)" }} />
             </div>
             ) : filteredLikedMedias.length === 0 ? (
             <EmptyState message={searchKeyword.trim() ? `没有找到“${searchKeyword}”` : "暂时没有获取到点赞视频"} />
@@ -743,7 +743,7 @@ export function FavoritesView() {
 
               <div style={{ display: "flex", justifyContent: "center", marginTop: "18px", paddingTop: "14px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-                  <span style={{ fontSize: "13px", color: "#8b8b9a", padding: "0 4px" }}>
+                  <span style={{ fontSize: "13px", color: "var(--color-text-muted)", padding: "0 4px" }}>
                     已载入 {likedLoadedPageCount}/{likedPageCount} 页
                   </span>
                   <PageButton disabled={currentPage <= 1} onClick={() => handlePageChange(currentPage - 1)}>
@@ -778,7 +778,7 @@ export function FavoritesView() {
         </section>
       ) : loading && folders.length === 0 ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingTop: "120px" }}>
-          <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
+          <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "var(--color-primary)" }} />
         </div>
       ) : (
         <div
@@ -794,15 +794,15 @@ export function FavoritesView() {
           <section
             style={{
               borderRadius: "16px",
-              backgroundColor: "#fff",
-              border: "1px solid #ececf2",
+              backgroundColor: "var(--color-bg-secondary)",
+              border: "1px solid var(--color-border)",
               padding: "16px",
               height: "100%",
               minHeight: 0,
               overflowY: "auto",
             }}
           >
-            <h2 style={{ fontSize: "16px", fontWeight: 700, color: "#1a1a2e", marginBottom: "14px" }}>
+            <h2 style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text)", marginBottom: "14px" }}>
               收藏夹
             </h2>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
@@ -824,13 +824,13 @@ export function FavoritesView() {
                       flexDirection: "column",
                       padding: 0,
                       borderRadius: "14px",
-                      backgroundColor: active ? "#f7f7ff" : "#fff",
-                      border: active ? "1.5px solid #6366f1" : "1px solid #ececf2",
+                      backgroundColor: active ? "var(--color-primary-light)" : "var(--color-bg-secondary)",
+                      border: active ? "1.5px solid var(--color-primary)" : "1px solid var(--color-border)",
                       overflow: "hidden",
                       cursor: "pointer",
                     }}
                   >
-                    <div style={{ aspectRatio: "16 / 10", backgroundColor: "#f3f4f6" }}>
+                    <div style={{ aspectRatio: "16 / 10", backgroundColor: "var(--color-bg-tertiary)" }}>
                       {folder.cover ? (
                         <img
                           src={formatBiliImageUrl(folder.cover, "@672w_378h_1c.webp")}
@@ -841,15 +841,15 @@ export function FavoritesView() {
                         />
                       ) : (
                         <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <Folder style={{ width: 28, height: 28, color: "#c0c0c8" }} />
+                          <Folder style={{ width: 28, height: 28, color: "var(--color-text-disabled)" }} />
                         </div>
                       )}
                     </div>
                     <div style={{ padding: "12px" }}>
-                      <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#1a1a2e", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <div style={{ fontSize: "13.5px", fontWeight: 700, color: "var(--color-text)", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {folder.title}
                       </div>
-                      <div style={{ marginTop: "4px", fontSize: "12.5px", color: "#8b8b9a", textAlign: "left" }}>
+                      <div style={{ marginTop: "4px", fontSize: "12.5px", color: "var(--color-text-muted)", textAlign: "left" }}>
                         {folder.media_count} 个内容
                       </div>
                     </div>
@@ -871,10 +871,10 @@ export function FavoritesView() {
               }}
             >
               <div>
-                <h2 style={{ fontSize: "18px", fontWeight: 700, color: "#1a1a2e" }}>
+                <h2 style={{ fontSize: "18px", fontWeight: 700, color: "var(--color-text)" }}>
                   {selectedFolder?.title || "选择收藏夹"}
                 </h2>
-                <p style={{ marginTop: "3px", fontSize: "13px", color: "#8b8b9a" }}>
+                <p style={{ marginTop: "3px", fontSize: "13px", color: "var(--color-text-muted)" }}>
                   当前页显示 {pagedMedias.length} 项{searchKeyword.trim() ? `，匹配 ${filteredMedias.length} 项` : `，共 ${selectedFolder?.media_count || 0} 项`}
                 </p>
               </div>
@@ -907,7 +907,7 @@ export function FavoritesView() {
               <EmptyState message="请先选择一个收藏夹" />
             ) : loading ? (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingTop: "120px" }}>
-                <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "#6366f1" }} />
+                <Loader2 className="animate-spin" style={{ width: 32, height: 32, color: "var(--color-primary)" }} />
               </div>
             ) : filteredMedias.length === 0 ? (
               <EmptyState message={searchKeyword.trim() ? `没有找到“${searchKeyword}”` : "这个收藏夹里暂时还没有内容"} />
@@ -943,7 +943,7 @@ export function FavoritesView() {
 
                 <div style={{ display: "flex", justifyContent: "center", marginTop: "18px", paddingTop: "14px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-                    <span style={{ fontSize: "13px", color: "#8b8b9a", padding: "0 4px" }}>
+                    <span style={{ fontSize: "13px", color: "var(--color-text-muted)", padding: "0 4px" }}>
                       已载入 {loadedPageCount}/{pageCount} 页
                     </span>
                     <PageButton disabled={currentPage <= 1} onClick={() => handlePageChange(currentPage - 1)}>
@@ -1031,7 +1031,7 @@ function FavoriteCard({
           aspectRatio: "16 / 9",
           borderRadius: `${10 * scale}px`,
           overflow: "hidden",
-          backgroundColor: "#f3f4f6",
+          backgroundColor: "var(--color-bg-tertiary)",
           position: "relative",
         }}
       >
@@ -1064,7 +1064,7 @@ function FavoriteCard({
           style={{
             fontSize: `${15 * scale}px`,
             fontWeight: 700,
-            color: "#1a1a2e",
+            color: "var(--color-text)",
             lineHeight: 1.45,
             display: "-webkit-box",
             WebkitLineClamp: 2,
@@ -1074,7 +1074,7 @@ function FavoriteCard({
         >
           {media.title}
         </div>
-        <div style={{ marginTop: `${8 * scale}px`, display: "flex", alignItems: "center", gap: `${8 * scale}px`, fontSize: `${13 * scale}px`, color: "#7a7a8c" }}>
+        <div style={{ marginTop: `${8 * scale}px`, display: "flex", alignItems: "center", gap: `${8 * scale}px`, fontSize: `${13 * scale}px`, color: "var(--color-text-muted)" }}>
           <ClickableAvatar src={media.upper.face || ""} alt={media.upper.name} size={24 * scale} onClick={() => onOpenAuthor(media)} />
           <button
             type="button"
@@ -1082,7 +1082,7 @@ function FavoriteCard({
               event.stopPropagation();
               onOpenAuthor(media);
             }}
-            style={{ border: "none", background: "transparent", padding: 0, color: "#7a7a8c", fontSize: `${13 * scale}px`, fontWeight: 600, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            style={{ border: "none", background: "transparent", padding: 0, color: "var(--color-text-muted)", fontSize: `${13 * scale}px`, fontWeight: 600, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
           >
             {media.upper.name || "未知 UP"}
           </button>
@@ -1137,8 +1137,8 @@ function FavoriteCard({
         rowGap: `${10 * scale}px`,
         padding: `${14 * scale}px`,
         borderRadius: `${14 * scale}px`,
-        backgroundColor: selected ? "#f8f7ff" : "#fff",
-        border: selected ? "1.5px solid #c7c2ff" : "1px solid #ececf2",
+        backgroundColor: selected ? "var(--color-primary-light)" : "var(--color-bg-secondary)",
+        border: selected ? "1.5px solid var(--color-border-hover)" : "1px solid var(--color-border)",
         cursor: "pointer",
       }}
     >
@@ -1175,8 +1175,8 @@ function SectionTab({
         padding: "0 16px",
         borderRadius: "9px",
         border: "none",
-        backgroundColor: active ? "#fff" : "transparent",
-        color: active ? "#1a1a2e" : "#777789",
+        backgroundColor: active ? "var(--color-bg-elevated)" : "transparent",
+        color: active ? "var(--color-text)" : "var(--color-text-secondary)",
         boxShadow: active ? "0 6px 16px rgba(20, 20, 38, 0.08)" : "none",
         fontSize: "13.5px",
         fontWeight: 700,
@@ -1207,8 +1207,8 @@ function MiniSourceTab({
         padding: "0 12px",
         borderRadius: "8px",
         border: "none",
-        backgroundColor: active ? "#fff" : "transparent",
-        color: active ? "#4338ca" : "#777789",
+        backgroundColor: active ? "var(--color-bg-elevated)" : "transparent",
+        color: active ? "var(--color-primary-hover)" : "var(--color-text-secondary)",
         boxShadow: active ? "0 4px 12px rgba(20, 20, 38, 0.08)" : "none",
         fontSize: "12.5px",
         fontWeight: 750,
@@ -1230,7 +1230,7 @@ function FavoriteSearchBox({ value, onChange }: { value: string; onChange: (valu
           left: 12,
           width: 15,
           height: 15,
-          color: "#b0b0bc",
+          color: "var(--color-text-disabled)",
           pointerEvents: "none",
         }}
       />
@@ -1243,9 +1243,9 @@ function FavoriteSearchBox({ value, onChange }: { value: string; onChange: (valu
           height: 36,
           padding: "0 12px 0 36px",
           borderRadius: 10,
-          border: "1px solid #ececf2",
-          backgroundColor: "#fff",
-          color: "#1a1a2e",
+          border: "1px solid var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+          color: "var(--color-text)",
           fontSize: 13,
           fontFamily: "inherit",
           outline: "none",
@@ -1278,9 +1278,9 @@ function ActionButton({
         borderRadius: "10px",
         fontSize: "14px",
         fontWeight: 600,
-        color: "#505065",
-        backgroundColor: "#fff",
-        border: "1px solid #e2e2ea",
+        color: "var(--color-text-secondary)",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1px solid var(--color-border)",
         cursor: "pointer",
       }}
     >
@@ -1316,9 +1316,9 @@ function GhostButton({
         borderRadius: `${10 * scale}px`,
         fontSize: `${13.5 * scale}px`,
         fontWeight: 600,
-        color: disabled ? "#b9b9c7" : "#505065",
-        backgroundColor: "#fff",
-        border: "1px solid #e2e2ea",
+        color: disabled ? "var(--color-text-disabled)" : "var(--color-text-secondary)",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1px solid var(--color-border)",
         cursor: disabled ? "not-allowed" : "pointer",
         whiteSpace: "nowrap",
       }}
@@ -1349,9 +1349,9 @@ function PageButton({
         height: "36px",
         padding: "0 12px",
         borderRadius: "10px",
-        border: active ? "1px solid #6366f1" : "1px solid #e2e2ea",
-        backgroundColor: active ? "#6366f1" : "#fff",
-        color: disabled ? "#c0c0c8" : active ? "#fff" : "#505065",
+        border: active ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
+        backgroundColor: active ? "var(--color-primary)" : "var(--color-bg-secondary)",
+        color: disabled ? "var(--color-text-disabled)" : active ? "#fff" : "var(--color-text-secondary)",
         fontSize: "13px",
         fontWeight: 600,
         cursor: disabled ? "not-allowed" : "pointer",
@@ -1381,8 +1381,8 @@ function SelectionBox({
         width: `${20 * scale}px`,
         height: `${20 * scale}px`,
         borderRadius: `${6 * scale}px`,
-        border: selected ? "none" : "2px solid #c8c8d2",
-        backgroundColor: selected ? "#6366f1" : "#fff",
+        border: selected ? "none" : "2px solid var(--color-text-disabled)",
+        backgroundColor: selected ? "var(--color-primary)" : "var(--color-bg-secondary)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -1420,19 +1420,19 @@ function EmptyState({ message }: { message: string }) {
           width: "64px",
           height: "64px",
           borderRadius: "18px",
-          backgroundColor: "#f3f3f8",
+          backgroundColor: "var(--color-bg-tertiary)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           marginBottom: "16px",
         }}
       >
-        <Star style={{ width: 28, height: 28, color: "#c0c0c8" }} />
+        <Star style={{ width: 28, height: 28, color: "var(--color-text-disabled)" }} />
       </div>
-      <div style={{ fontSize: "16px", fontWeight: 700, color: "#505065", marginBottom: "6px" }}>
+      <div style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text-secondary)", marginBottom: "6px" }}>
         暂无内容
       </div>
-      <div style={{ fontSize: "13.5px", color: "#9a9aa5" }}>{message}</div>
+      <div style={{ fontSize: "13.5px", color: "var(--color-text-muted)" }}>{message}</div>
     </div>
   );
 }

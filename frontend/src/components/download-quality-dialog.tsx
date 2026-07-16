@@ -73,8 +73,9 @@ async function loadDownloadQualityOptions(targets: DownloadQualityTarget[]) {
 }
 
 function selectDefaultQuality(options: DownloadQualityOption[], preferredQuality: string) {
+  const normalizedPreferredQuality = preferredQuality.trim().toLowerCase();
   const preferredIndex = DOWNLOAD_QUALITY_OPTIONS.findIndex(
-    (option) => option.value === preferredQuality
+    (option) => option.value === normalizedPreferredQuality
   );
   if (preferredIndex < 0) {
     return options[0].value;
@@ -156,102 +157,63 @@ function DownloadQualityDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const selectedOption = options.find((option) => option.value === selectedQuality);
+
   return (
     <div
+      className="bb-download-quality-overlay"
       role="presentation"
       onClick={onCancel}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1200,
-        backgroundColor: "rgba(15, 23, 42, 0.4)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "24px",
-        backdropFilter: "blur(4px)",
-      }}
     >
       <div
+        className="bb-download-quality-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="选择下载清晰度"
         onClick={(event) => event.stopPropagation()}
-        style={{
-          width: "min(400px, 100%)",
-          borderRadius: "14px",
-          border: "1px solid var(--color-border)",
-          backgroundColor: "var(--color-bg-secondary)",
-          boxShadow: "var(--shadow-card-hover)",
-          padding: "20px",
-        }}
       >
-        <div style={{ display: "flex", alignItems: "center", justify_content: "space-between", gap: "12px", marginBottom: "18px" } as any}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <Download style={{ width: 19, height: 19, color: "var(--color-primary)" }} />
-            <h3 style={{ fontSize: "16px", fontWeight: 700, color: "var(--color-text)" }}>选择下载清晰度</h3>
+        <div className="bb-download-quality-header">
+          <div className="bb-download-quality-title-group">
+            <span className="bb-download-quality-icon">
+              <Download style={{ width: 20, height: 20 }} />
+            </span>
+            <div>
+              <h3>选择下载清晰度</h3>
+              <p>请选择本次任务优先使用的画质</p>
+            </div>
           </div>
-          <button type="button" onClick={onCancel} aria-label="关闭" style={iconButtonStyle}>
+          <button type="button" onClick={onCancel} aria-label="关闭" className="bb-download-quality-close">
             <X style={{ width: 17, height: 17 }} />
           </button>
         </div>
 
-        <Select value={selectedQuality} onValueChange={onQualityChange}>
-          <SelectTrigger className="w-full h-[42px] rounded-[9px] border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-[14px]">
-            <SelectValue placeholder="选择下载清晰度" />
-          </SelectTrigger>
-          <SelectContent className="w-full z-[1300]">
-            {options.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="bb-download-quality-field">
+          <label>下载画质</label>
+          <Select className="w-full" value={selectedQuality} onValueChange={onQualityChange}>
+            <SelectTrigger className="bb-download-quality-select-trigger">
+              <SelectValue placeholder="选择下载清晰度">{selectedOption?.label}</SelectValue>
+            </SelectTrigger>
+            <SelectContent className="w-full z-[1300]">
+              {options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-        {isBatch ? (
-          <p style={{ marginTop: "12px", color: "var(--color-text-muted)", fontSize: "12.5px", lineHeight: 1.6 }}>
-            已汇总所选内容可用画质；单个内容不支持该画质时，将使用其最高可用画质。
-          </p>
-        ) : null}
+        <p className="bb-download-quality-hint">
+          {isBatch
+            ? "已汇总全部内容的可用画质；单个视频不支持时会自动使用最接近的较低画质。"
+            : "若当前视频不支持所选画质，将自动使用最接近的较低画质。"}
+        </p>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "20px" }}>
-          <button type="button" onClick={onCancel} style={cancelButtonStyle}>取消</button>
-          <button type="button" onClick={onConfirm} style={confirmButtonStyle}>开始下载</button>
+        <div className="bb-download-quality-actions">
+          <button type="button" onClick={onCancel} className="secondary">取消</button>
+          <button type="button" onClick={onConfirm} className="primary">开始下载</button>
         </div>
       </div>
     </div>
   );
 }
-
-const iconButtonStyle: React.CSSProperties = {
-  width: "30px",
-  height: "30px",
-  border: "none",
-  borderRadius: "7px",
-  backgroundColor: "var(--color-bg-tertiary)",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: "var(--color-text-secondary)",
-  cursor: "pointer",
-};
-
-const cancelButtonStyle: React.CSSProperties = {
-  height: "38px",
-  padding: "0 16px",
-  borderRadius: "9px",
-  border: "1px solid var(--color-border)",
-  color: "var(--color-text-secondary)",
-  backgroundColor: "var(--color-bg-secondary)",
-  fontSize: "13.5px",
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-const confirmButtonStyle: React.CSSProperties = {
-  ...cancelButtonStyle,
-  border: "1px solid var(--color-primary)",
-  color: "#fff",
-  backgroundColor: "var(--color-primary)",
-};

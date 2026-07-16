@@ -137,6 +137,7 @@ export interface SearchPageState {
   lastAggregateInput: string;
   result: SearchResponse | null;
   currentPage: number;
+  categoryPages: Record<"video" | "bangumi" | "film" | "live" | "article" | "user", number>;
   pageSize: number;
   loadedPages: number;
   hasMore: boolean;
@@ -224,6 +225,14 @@ const defaultSearchPageState: SearchPageState = {
   lastAggregateInput: "",
   result: null,
   currentPage: 1,
+  categoryPages: {
+    video: 1,
+    bangumi: 1,
+    film: 1,
+    live: 1,
+    article: 1,
+    user: 1,
+  },
   pageSize: 6,
   loadedPages: 0,
   hasMore: false,

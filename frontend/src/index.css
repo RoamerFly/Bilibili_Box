@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: light;
   /* 主色 - 蓝紫色系 */
   --color-primary: #6366f1;
   --color-primary-hover: #4f46e5;
@@ -12,6 +13,7 @@
   --color-bg-secondary: #ffffff;
   --color-bg-tertiary: #f0f0f5;
   --color-bg-elevated: #ffffff;
+  --color-bg-subtle: #f8f8fb;
 
   /* Sidebar 背景（深色） */
   --color-sidebar-bg: #1c1c28;
@@ -20,11 +22,17 @@
   --color-sidebar-text: #ffffff;
   --color-sidebar-text-muted: #8b8ba0;
   --color-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --color-sidebar-shell: radial-gradient(circle at 92% 14%, rgba(146, 94, 255, 0.26) 0 1px, transparent 2px),
+    radial-gradient(circle at 76% 74%, rgba(171, 125, 255, 0.24) 0 2px, transparent 3px),
+    radial-gradient(circle at 58% 96%, rgba(69, 235, 255, 0.18), transparent 22%),
+    linear-gradient(180deg, #11144f 0%, #171653 48%, #382286 100%);
+  --color-sidebar-user-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.05)), rgba(17, 18, 76, 0.9);
 
   /* 前景色（浅色区域用） */
   --color-text: #1a1a2e;
   --color-text-secondary: #4a4a6a;
   --color-text-muted: #9090a8;
+  --color-text-disabled: #b0b0bc;
 
   /* 边框 */
   --color-border: #e8e8f0;
@@ -35,6 +43,14 @@
   --color-warning: #f59e0b;
   --color-error: #ef4444;
   --color-info: #3b82f6;
+  --color-success-bg: #f0fdf4;
+  --color-warning-bg: #fff7ed;
+  --color-error-bg: #fef2f2;
+  --color-info-bg: #eff6ff;
+  --color-success-text: #15803d;
+  --color-warning-text: #c2410c;
+  --color-error-text: #dc2626;
+  --color-info-text: #2563eb;
 
   /* BottomBar 深色区域 */
   --color-bottom-bg: #1c1c28;
@@ -51,23 +67,36 @@
   /* 毛玻璃 & 舞台效果 */
   --color-glass-bg: rgba(255, 255, 255, 0.7);
   --color-glass-border: rgba(255, 255, 255, 0.5);
+  --color-app-chrome-bg: #11144f;
   --color-app-frame-border: rgba(93, 55, 199, 0.82);
   --color-main-stage-bg: radial-gradient(circle at 16% 8%, rgba(120, 98, 255, 0.16), transparent 24%),
     radial-gradient(circle at 72% 2%, rgba(255, 126, 219, 0.2), transparent 28%),
     linear-gradient(135deg, #eef2ff 0%, #f7f2ff 48%, #edf8ff 100%);
   --shadow-main-stage: inset 0 1px 0 rgba(255, 255, 255, 0.85);
 
-  /* 底部悬浮条颜色（浅色模式） */
-  --color-bottom-pill-bg: rgba(255, 255, 255, 0.9);
-  --color-bottom-pill-border: rgba(99, 102, 241, 0.18);
-  --color-bottom-pill-text: #1a1a2e;
-  --color-bottom-pill-subtext: #505065;
-  --color-bottom-pill-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
-  --color-bottom-pill-tab-bg: rgba(0, 0, 0, 0.05);
-  --color-bottom-pill-tab-active: rgba(0, 0, 0, 0.12);
+  /* 底部悬浮胶囊沿用旧版深蓝紫下载栏的视觉语言 */
+  --color-bottom-pill-bg: linear-gradient(112deg, rgba(255, 255, 255, 0.96), rgba(244, 241, 255, 0.96) 56%, rgba(237, 248, 255, 0.97));
+  --color-bottom-pill-border: rgba(99, 102, 241, 0.2);
+  --color-bottom-pill-text: #29264d;
+  --color-bottom-pill-subtext: #716d8e;
+  --color-bottom-pill-shadow: 0 16px 42px rgba(74, 66, 160, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  --color-bottom-pill-tab-bg: rgba(99, 102, 241, 0.08);
+  --color-bottom-pill-tab-active: rgba(99, 102, 241, 0.16);
+  --color-bottom-pill-control-bg: rgba(99, 102, 241, 0.09);
+  --color-bottom-pill-control-text: #555174;
+  --color-bottom-pill-progress-track: rgba(99, 102, 241, 0.13);
+  --color-bottom-pill-log-bg: rgba(45, 40, 92, 0.06);
+  --color-bottom-pill-log-time: rgba(73, 68, 107, 0.48);
+  --color-bottom-pill-icon: #6366f1;
+  --filter-bottom-pill-icon: drop-shadow(0 0 5px rgba(99, 102, 241, 0.28));
+
+  --color-scrollbar-thumb: rgba(99, 102, 241, 0.22);
+  --color-scrollbar-thumb-hover: rgba(99, 102, 241, 0.38);
+  --color-scrollbar-track: transparent;
 }
 
 html[data-theme="dark"] {
+  color-scheme: dark;
   /* 主色 - 蓝紫色系 */
   --color-primary: #818cf8;
   --color-primary-hover: #6366f1;
@@ -78,15 +107,22 @@ html[data-theme="dark"] {
   --color-bg-secondary: #16161e;
   --color-bg-tertiary: #1f1f2e;
   --color-bg-elevated: #1e1e2d;
+  --color-bg-subtle: #20202c;
 
   /* Sidebar/BottomBar */
   --color-sidebar-bg: #0a0a0f;
   --color-sidebar-secondary: #16161e;
+  --color-sidebar-shell: radial-gradient(circle at 92% 14%, rgba(116, 91, 255, 0.12) 0 1px, transparent 2px),
+    radial-gradient(circle at 76% 74%, rgba(139, 92, 246, 0.12) 0 2px, transparent 3px),
+    radial-gradient(circle at 58% 96%, rgba(37, 99, 235, 0.1), transparent 22%),
+    linear-gradient(180deg, #070812 0%, #0b0b18 52%, #15102d 100%);
+  --color-sidebar-user-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02)), rgba(5, 6, 16, 0.94);
 
   /* 前景色（深色区域用） */
   --color-text: #e8e8ed;
   --color-text-secondary: #9b9baa;
   --color-text-muted: #7a7a8e;
+  --color-text-disabled: #5f6070;
 
   /* 边框 */
   --color-border: rgba(255, 255, 255, 0.08);
@@ -99,20 +135,40 @@ html[data-theme="dark"] {
   /* 毛玻璃 & 舞台效果 */
   --color-glass-bg: rgba(22, 22, 30, 0.7);
   --color-glass-border: rgba(255, 255, 255, 0.08);
+  --color-app-chrome-bg: #070812;
   --color-app-frame-border: rgba(93, 55, 199, 0.4);
   --color-main-stage-bg: radial-gradient(circle at 16% 8%, rgba(120, 98, 255, 0.08), transparent 24%),
     radial-gradient(circle at 72% 2%, rgba(255, 126, 219, 0.08), transparent 28%),
     linear-gradient(135deg, #0e0e14 0%, #16161e 48%, #0f0f15 100%);
   --shadow-main-stage: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 
-  /* 底部悬浮条颜色（暗色模式） */
-  --color-bottom-pill-bg: rgba(22, 22, 30, 0.92);
-  --color-bottom-pill-border: rgba(255, 255, 255, 0.08);
-  --color-bottom-pill-text: #e8e8ed;
-  --color-bottom-pill-subtext: #9b9baa;
-  --color-bottom-pill-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
-  --color-bottom-pill-tab-bg: rgba(255, 255, 255, 0.06);
-  --color-bottom-pill-tab-active: rgba(255, 255, 255, 0.14);
+  --color-success-bg: rgba(34, 197, 94, 0.12);
+  --color-warning-bg: rgba(245, 158, 11, 0.13);
+  --color-error-bg: rgba(239, 68, 68, 0.13);
+  --color-info-bg: rgba(59, 130, 246, 0.13);
+  --color-success-text: #86efac;
+  --color-warning-text: #fdba74;
+  --color-error-text: #fca5a5;
+  --color-info-text: #93c5fd;
+
+  --color-bottom-pill-bg: linear-gradient(105deg, rgba(7, 9, 37, 0.98), rgba(14, 14, 55, 0.98) 58%, rgba(27, 13, 69, 0.98));
+  --color-bottom-pill-border: rgba(142, 139, 255, 0.2);
+  --color-bottom-pill-text: #f4f4ff;
+  --color-bottom-pill-subtext: rgba(220, 225, 255, 0.66);
+  --color-bottom-pill-shadow: 0 18px 46px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  --color-bottom-pill-tab-bg: rgba(255, 255, 255, 0.07);
+  --color-bottom-pill-tab-active: rgba(132, 125, 255, 0.25);
+  --color-bottom-pill-control-bg: rgba(255, 255, 255, 0.07);
+  --color-bottom-pill-control-text: rgba(236, 240, 255, 0.8);
+  --color-bottom-pill-progress-track: rgba(255, 255, 255, 0.1);
+  --color-bottom-pill-log-bg: rgba(0, 0, 0, 0.22);
+  --color-bottom-pill-log-time: rgba(226, 232, 255, 0.34);
+  --color-bottom-pill-icon: #8bdcff;
+  --filter-bottom-pill-icon: drop-shadow(0 0 6px rgba(87, 181, 255, 0.55));
+
+  --color-scrollbar-thumb: rgba(129, 140, 248, 0.2);
+  --color-scrollbar-thumb-hover: rgba(129, 140, 248, 0.36);
+  --color-scrollbar-track: transparent;
 }
 
 * {
@@ -131,7 +187,7 @@ body {
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  background-color: var(--color-bg);
+  background-color: var(--color-app-chrome-bg);
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -140,25 +196,30 @@ body {
 #root {
   height: 100%;
   width: 100%;
+  background-color: var(--color-app-chrome-bg);
 }
 
 /* 滚动条样式 */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--color-scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 3px;
+  background: var(--color-scrollbar-thumb);
+  border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-border-hover);
+  background: var(--color-scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* 选中文本样式 */
@@ -235,12 +296,12 @@ body {
 
 /* BiliBox home shell */
 .bb-app-frame {
-  background:
-    radial-gradient(circle at 2% 0%, rgba(125, 90, 255, 0.55), transparent 22%),
-    linear-gradient(135deg, #0a0d36 0%, #151053 36%, #29157a 100%);
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--color-app-chrome-bg);
   border: 2px solid var(--color-app-frame-border);
   border-radius: 16px;
-  color: #111743;
+  color: var(--color-text);
 }
 
 .bb-main-stage {
@@ -251,6 +312,21 @@ body {
 
 .bb-main-scroll {
   scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+}
+
+.bb-view-stack,
+.bb-view-layer {
+  width: 100%;
+  min-height: 100%;
+}
+
+.bb-view-layer {
+  display: none;
+}
+
+.bb-view-layer.active {
+  display: block;
 }
 
 .bb-window-drag-strip {
@@ -350,11 +426,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(circle at 92% 14%, rgba(146, 94, 255, 0.26) 0 1px, transparent 2px),
-    radial-gradient(circle at 76% 74%, rgba(171, 125, 255, 0.24) 0 2px, transparent 3px),
-    radial-gradient(circle at 58% 96%, rgba(69, 235, 255, 0.18), transparent 22%),
-    linear-gradient(180deg, #070934 0%, #0c0d3a 48%, #1d1262 100%);
+  background: var(--color-sidebar-shell);
 }
 
 .bb-sidebar::before {
@@ -486,9 +558,7 @@ body {
   width: 100%;
   border: 0;
   border-radius: 0 20px 0 0;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.04)),
-    rgba(9, 12, 58, 0.88);
+  background: var(--color-sidebar-user-bg);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
   color: white;
   display: flex;
@@ -701,11 +771,11 @@ body {
   bottom: 84px;
   z-index: 80;
   padding: 12px 18px;
-  border: 1px solid #ddd9ff;
+  border: 1px solid var(--color-border);
   border-radius: 12px;
-  background: #fff;
+  background: var(--color-bg-elevated);
   box-shadow: 0 10px 30px rgb(30 27 75 / 14%);
-  color: #505065;
+  color: var(--color-text-secondary);
   font-size: 14px;
   font-weight: 600;
 }
@@ -1116,13 +1186,272 @@ body {
 }
 
 .bb-empty-panel strong {
-  color: #273071;
+  color: var(--color-text);
   font-size: 15px;
+}
+
+html[data-theme="dark"] .bb-sidebar::before {
+  opacity: 0.28;
+}
+
+html[data-theme="dark"] .bb-hero {
+  border-color: var(--color-border);
+  background: linear-gradient(105deg, rgba(30, 32, 62, 0.94), rgba(24, 32, 52, 0.92) 42%, rgba(48, 25, 61, 0.9));
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+html[data-theme="dark"] .bb-hero h1,
+html[data-theme="dark"] .bb-quick-section h2,
+html[data-theme="dark"] .bb-panel-title,
+html[data-theme="dark"] .bb-recent-copy strong,
+html[data-theme="dark"] .bb-queue-title {
+  color: var(--color-text);
+}
+
+html[data-theme="dark"] .bb-hero p,
+html[data-theme="dark"] .bb-quick-copy small,
+html[data-theme="dark"] .bb-recent-copy span,
+html[data-theme="dark"] .bb-queue-meta,
+html[data-theme="dark"] .bb-task-time,
+html[data-theme="dark"] .bb-empty-panel {
+  color: var(--color-text-muted);
+}
+
+html[data-theme="dark"] .bb-hero-pill {
+  color: #a5b4fc;
+  background: rgba(129, 140, 248, 0.1);
+  border-color: rgba(129, 140, 248, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+html[data-theme="dark"] .bb-hero-visual::before {
+  opacity: 0.32;
+}
+
+html[data-theme="dark"] .bb-stat-card {
+  border-color: var(--color-border);
+  background: linear-gradient(135deg, var(--color-bg-secondary), color-mix(in srgb, var(--stat-color), transparent 88%));
+  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+html[data-theme="dark"] .bb-stat-label {
+  color: var(--color-text-secondary);
+}
+
+html[data-theme="dark"] .bb-stat-value {
+  color: var(--color-text);
+}
+
+html[data-theme="dark"] .bb-stat-note {
+  color: color-mix(in srgb, var(--stat-color), white 34%);
+  background: color-mix(in srgb, var(--stat-color), transparent 84%);
+}
+
+html[data-theme="dark"] .bb-quick-card,
+html[data-theme="dark"] .bb-home-panel {
+  color: var(--color-text);
+  border-color: var(--color-border);
+  background: color-mix(in srgb, var(--color-bg-secondary), transparent 10%);
+  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+html[data-theme="dark"] .bb-quick-copy strong {
+  color: var(--color-text);
+}
+
+html[data-theme="dark"] .bb-quick-arrow,
+html[data-theme="dark"] .bb-panel-header button,
+html[data-theme="dark"] .bb-task-more,
+html[data-theme="dark"] .bb-progress-percent,
+html[data-theme="dark"] .bb-queue-pause {
+  color: #a5b4fc;
+}
+
+html[data-theme="dark"] .bb-recent-item + .bb-recent-item,
+html[data-theme="dark"] .bb-queue-item + .bb-queue-item {
+  border-top-color: var(--color-border);
+}
+
+html[data-theme="dark"] .bb-task-done {
+  color: var(--color-success-text);
+  background: var(--color-success-bg);
+}
+
+html[data-theme="dark"] .bb-queue-pause {
+  border-color: var(--color-border);
+  background: var(--color-bg-tertiary);
 }
 
 .bb-empty-panel span {
   font-size: 12px;
   font-weight: 600;
+}
+
+/* Download quality dialog */
+.bb-download-quality-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+}
+
+.bb-download-quality-dialog {
+  width: min(440px, 100%);
+  padding: 22px;
+  overflow: visible;
+  border: 1px solid var(--color-glass-border);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--color-bg-secondary) 96%, transparent);
+  box-shadow: 0 24px 70px rgba(25, 22, 70, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.bb-download-quality-header,
+.bb-download-quality-title-group,
+.bb-download-quality-actions {
+  display: flex;
+  align-items: center;
+}
+
+.bb-download-quality-header {
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.bb-download-quality-title-group {
+  min-width: 0;
+  gap: 12px;
+}
+
+.bb-download-quality-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.bb-download-quality-title-group h3 {
+  color: var(--color-text);
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.bb-download-quality-title-group p {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bb-download-quality-close {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border: 0;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  cursor: pointer;
+  transition: color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
+}
+
+.bb-download-quality-close:hover {
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.bb-download-quality-close:active {
+  transform: scale(0.94);
+}
+
+.bb-download-quality-field label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.bb-download-quality-select-trigger {
+  width: 100%;
+  height: 46px;
+  padding-inline: 14px;
+  border-radius: 11px;
+  border-color: var(--color-border);
+  background: var(--color-bg-subtle);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.bb-download-quality-hint {
+  min-height: 38px;
+  margin-top: 12px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  color: var(--color-text-muted);
+  background: var(--color-primary-light);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.bb-download-quality-actions {
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.bb-download-quality-actions button {
+  height: 40px;
+  min-width: 86px;
+  padding: 0 18px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.bb-download-quality-actions button:active {
+  transform: scale(0.97);
+}
+
+.bb-download-quality-actions .secondary {
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+}
+
+.bb-download-quality-actions .secondary:hover {
+  border-color: var(--color-border-hover);
+  background: var(--color-bg-tertiary);
+}
+
+.bb-download-quality-actions .primary {
+  border: 1px solid var(--color-primary);
+  color: #fff;
+  background: linear-gradient(135deg, var(--color-primary), #7c4dff);
+  box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.24);
+}
+
+.bb-download-quality-actions .primary:hover {
+  background: linear-gradient(135deg, var(--color-primary-hover), #6d3ff0);
+}
+
+html[data-theme="dark"] .bb-download-quality-dialog {
+  box-shadow: 0 26px 76px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 /* Bottom bar */
@@ -1341,31 +1670,31 @@ body {
   border-radius: 9px;
   display: grid;
   place-items: center;
-  color: #dfe5ff;
-  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-bottom-pill-control-text);
+  background: var(--color-bottom-pill-control-bg);
   font-size: 12px;
   font-weight: 900;
 }
 
 .bb-bottom-task-state.downloading,
 .bb-bottom-task-state.pending {
-  color: #cbd8ff;
-  background: rgba(80, 110, 255, 0.22);
+  color: var(--color-primary);
+  background: var(--color-primary-light);
 }
 
 .bb-bottom-task-state.merging {
-  color: #f5d0fe;
-  background: rgba(192, 132, 252, 0.2);
+  color: #a855f7;
+  background: rgba(168, 85, 247, 0.14);
 }
 
 .bb-bottom-task-state.completed {
-  color: #9ef4c3;
-  background: rgba(34, 197, 94, 0.18);
+  color: var(--color-success-text);
+  background: var(--color-success-bg);
 }
 
 .bb-bottom-task-state.error {
-  color: #fecaca;
-  background: rgba(239, 68, 68, 0.16);
+  color: var(--color-error-text);
+  background: var(--color-error-bg);
 }
 
 .bb-bottom-task-copy {
@@ -1375,7 +1704,7 @@ body {
 
 .bb-bottom-task-copy strong {
   display: block;
-  color: white;
+  color: var(--color-bottom-pill-text);
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1386,7 +1715,7 @@ body {
   display: flex;
   gap: 7px;
   margin-top: 4px;
-  color: rgba(226, 232, 255, 0.58);
+  color: var(--color-bottom-pill-subtext);
   font-size: 11px;
 }
 
@@ -1395,7 +1724,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #fecaca;
+  color: var(--color-error-text);
 }
 
 .bb-bottom-task-progress {
@@ -1403,7 +1732,7 @@ body {
   height: 5px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--color-bottom-pill-progress-track);
 }
 
 .bb-bottom-task-progress span {
@@ -1415,7 +1744,7 @@ body {
 
 .bb-bottom-task em {
   width: 45px;
-  color: rgba(236, 240, 255, 0.75);
+  color: var(--color-bottom-pill-subtext);
   text-align: right;
   font-size: 12px;
   font-style: normal;
@@ -1449,8 +1778,8 @@ body {
   height: 30px;
   border: 0;
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.72);
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-bottom-pill-control-text);
+  background: var(--color-bottom-pill-control-bg);
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -1462,31 +1791,31 @@ body {
   overflow-y: auto;
   border-radius: 12px;
   padding: 10px;
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--color-bottom-pill-log-bg);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   line-height: 1.7;
 }
 
 .bb-bottom-log {
-  color: rgba(226, 232, 255, 0.76);
+  color: var(--color-bottom-pill-subtext);
 }
 
 .bb-bottom-log span {
-  color: rgba(226, 232, 255, 0.34);
+  color: var(--color-bottom-pill-log-time);
   margin-right: 8px;
 }
 
 .bb-bottom-log.success {
-  color: #86efac;
+  color: var(--color-success-text);
 }
 
 .bb-bottom-log.warning {
-  color: #fde68a;
+  color: var(--color-warning-text);
 }
 
 .bb-bottom-log.error {
-  color: #fca5a5;
+  color: var(--color-error-text);
 }
 
 .bb-bottom-log-more,
@@ -1495,7 +1824,7 @@ body {
   min-height: 86px;
   display: grid;
   place-items: center;
-  color: rgba(226, 232, 255, 0.56);
+  color: var(--color-bottom-pill-subtext);
   font-weight: 700;
 }
 

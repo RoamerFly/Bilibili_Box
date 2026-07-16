@@ -55,7 +55,7 @@ export function PageCardControls({
               onChange={(event) => setCardScale(layoutKey, Number(event.target.value))}
               style={{
                 ...rangeStyle,
-                background: `linear-gradient(90deg, #6366f1 ${((safeScale - 0.7) / 0.9) * 100}%, #e5e7eb ${((safeScale - 0.7) / 0.9) * 100}%)`,
+                background: `linear-gradient(90deg, var(--color-primary) ${((safeScale - 0.7) / 0.9) * 100}%, var(--color-border) ${((safeScale - 0.7) / 0.9) * 100}%)`,
               }}
             />
             <span style={scaleValueStyle}>{Math.round(safeScale * 100)}%</span>
@@ -87,9 +87,9 @@ function ModeButton({
         width: 32,
         height: 32,
         borderRadius: 8,
-        border: active ? "1px solid #6366f1" : "1px solid transparent",
-        backgroundColor: active ? "#fff" : "transparent",
-        color: active ? "#6366f1" : "#505065",
+        border: active ? "1px solid var(--color-primary)" : "1px solid transparent",
+        backgroundColor: active ? "var(--color-bg-elevated)" : "transparent",
+        color: active ? "var(--color-primary)" : "var(--color-text-secondary)",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
@@ -114,11 +114,11 @@ function Stepper({
 }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, opacity: disabled ? 0.55 : 1 }}>
-      <span style={{ color: "#6b7280", fontSize: 12, fontWeight: 800 }}>{label}</span>
+      <span style={{ color: "var(--color-text-muted)", fontSize: 12, fontWeight: 800 }}>{label}</span>
       <button type="button" disabled={disabled || value <= 1} onClick={() => onChange(value - 1)} style={smallButtonStyle(disabled || value <= 1)}>
         <Minus style={{ width: 12, height: 12 }} />
       </button>
-      <span style={{ width: 18, textAlign: "center", color: "#1a1a2e", fontSize: 13, fontWeight: 850, fontVariantNumeric: "tabular-nums" }}>
+      <span style={{ width: 18, textAlign: "center", color: "var(--color-text)", fontSize: 13, fontWeight: 850, fontVariantNumeric: "tabular-nums" }}>
         {value}
       </span>
       <button type="button" disabled={disabled || value >= 8} onClick={() => onChange(value + 1)} style={smallButtonStyle(disabled || value >= 8)}>
@@ -141,7 +141,7 @@ const modeGroupStyle: React.CSSProperties = {
   gap: 2,
   padding: 3,
   borderRadius: 10,
-  backgroundColor: "#f3f4f8",
+  backgroundColor: "var(--color-bg-tertiary)",
 };
 
 const stepperGroupStyle: React.CSSProperties = {
@@ -151,8 +151,8 @@ const stepperGroupStyle: React.CSSProperties = {
   height: 38,
   padding: "0 10px",
   borderRadius: 10,
-  border: "1px solid #ececf2",
-  backgroundColor: "#fff",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
   boxShadow: "0 1px 6px rgba(0,0,0,0.04)",
 };
 
@@ -162,7 +162,7 @@ const scaleGroupStyle: React.CSSProperties = {
 };
 
 const titleStyle: React.CSSProperties = {
-  color: "#505065",
+  color: "var(--color-text-secondary)",
   fontSize: 12.5,
   fontWeight: 800,
   whiteSpace: "nowrap",
@@ -172,7 +172,7 @@ const rangeStyle: React.CSSProperties = {
   width: 112,
   height: 5,
   borderRadius: 999,
-  accentColor: "#6366f1",
+  accentColor: "var(--color-primary)",
   outline: "none",
   cursor: "pointer",
 };
@@ -180,7 +180,7 @@ const rangeStyle: React.CSSProperties = {
 const scaleValueStyle: React.CSSProperties = {
   minWidth: 40,
   textAlign: "right",
-  color: "#1a1a2e",
+  color: "var(--color-text)",
   fontSize: 13,
   fontWeight: 850,
   fontVariantNumeric: "tabular-nums",
@@ -191,9 +191,9 @@ function smallButtonStyle(disabled: boolean): React.CSSProperties {
     width: 22,
     height: 22,
     borderRadius: 7,
-    border: "1px solid #e2e2ea",
-    backgroundColor: "#fff",
-    color: disabled ? "#c9c9d4" : "#505065",
+    border: "1px solid var(--color-border)",
+    backgroundColor: "var(--color-bg-secondary)",
+    color: disabled ? "var(--color-text-disabled)" : "var(--color-text-secondary)",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useEffect, useState, type MouseEvent } from "react";
-import { useAppStore } from "@/stores/app-store";
+import { useAppStore, type ViewType } from "@/stores/app-store";
 import { useConfigWatch } from "@/hooks/use-config-watch";
 import { useDownloadEvents } from "@/hooks/use-download-events";
 import { Sidebar } from "./sidebar";
@@ -35,6 +35,11 @@ interface UserInfo {
   [key: string]: unknown;
 }
 
+const CACHEABLE_VIEWS: ViewType[] = [
+  "home", "recommend", "search", "favorites", "watchlater",
+  "history", "bangumi", "downloads", "settings",
+];
+
 export function AppShell() {
   const currentView = useAppStore((s) => s.currentView);
   const setConfig = useAppStore((s) => s.setConfig);
@@ -44,9 +49,15 @@ export function AppShell() {
   const theme = useAppStore((s) => s.config?.theme) as string | undefined;
   const scrollRef = useRef<HTMLDivElement>(null);
   const previousViewRef = useRef(currentView);
+  const visitedViewsRef = useRef<Set<ViewType>>(new Set([currentView]));
+  const scrollPositionsRef = useRef<Partial<Record<ViewType, number>>>({});
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [noticeText, setNoticeText] = useState("正在实现中，敬请期待");
   const [accountViewVersion, setAccountViewVersion] = useState(0);
+
+  if (CACHEABLE_VIEWS.includes(currentView)) {
+    visitedViewsRef.current.add(currentView);
+  }
 
   // 启用 config watch - 监听 sessdata 变化自动获取/清除用户信息
   useConfigWatch();
@@ -87,19 +98,19 @@ export function AppShell() {
   useLayoutEffect(() => {
     const previousView = previousViewRef.current;
     const scroller = scrollRef.current;
-    if (previousView === "recommend" && previousView !== currentView && scroller) {
-      setRecommendPageState({ scrollTop: scroller.scrollTop });
+    if (previousView !== currentView && scroller) {
+      scrollPositionsRef.current[previousView] = scroller.scrollTop;
+      if (previousView === "recommend") {
+        setRecommendPageState({ scrollTop: scroller.scrollTop });
+      }
     }
 
     if (previousView !== currentView) {
-      if (currentView === "recommend") {
-        const scrollTop = useAppStore.getState().recommendPageState.scrollTop;
-        window.requestAnimationFrame(() => {
-          scrollRef.current?.scrollTo({ top: scrollTop, behavior: "auto" });
-        });
-      } else {
-        scroller?.scrollTo({ top: 0, behavior: "auto" });
-      }
+      const savedScrollTop = scrollPositionsRef.current[currentView]
+        ?? (currentView === "recommend" ? useAppStore.getState().recommendPageState.scrollTop : 0);
+      window.requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ top: savedScrollTop, behavior: "auto" });
+      });
     }
 
     previousViewRef.current = currentView;
@@ -147,6 +158,9 @@ export function AppShell() {
 
   useEffect(() => {
     const handleAccountSwitched = () => {
+      const activeView = useAppStore.getState().currentView;
+      visitedViewsRef.current = new Set(CACHEABLE_VIEWS.includes(activeView) ? [activeView] : []);
+      scrollPositionsRef.current = {};
       setAccountViewVersion((version) => version + 1);
       scrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
     };
@@ -170,9 +184,22 @@ export function AppShell() {
           className="bb-main-scroll flex-1 overflow-x-hidden overflow-y-auto"
           style={{ paddingBottom: "60px" }}
         >
-          <AnimatePresence initial={false} mode="wait">
-            {renderView(currentView, accountViewVersion)}
-          </AnimatePresence>
+          <div className="bb-view-stack">
+            {CACHEABLE_VIEWS.filter((view) => visitedViewsRef.current.has(view)).map((view) => (
+              <div
+                key={`${view}:${accountViewVersion}`}
+                className={view === currentView ? "bb-view-layer active" : "bb-view-layer"}
+                aria-hidden={view !== currentView}
+              >
+                {renderView(view, accountViewVersion)}
+              </div>
+            ))}
+            {!CACHEABLE_VIEWS.includes(currentView) ? (
+              <AnimatePresence initial={false} mode="sync">
+                <div className="bb-view-layer active">{renderView(currentView, accountViewVersion)}</div>
+              </AnimatePresence>
+            ) : null}
+          </div>
         </motion.div>
         <BottomBar />
         <AnimatePresence>

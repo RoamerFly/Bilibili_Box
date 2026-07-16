@@ -132,12 +132,12 @@ export function BottomBar() {
           padding: "0 8px",
           cursor: "pointer",
           userSelect: "none",
-          borderBottom: expanded ? "1px solid rgba(255, 255, 255, 0.08)" : "none",
+          borderBottom: expanded ? "1px solid var(--color-bottom-pill-border)" : "none",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0, flex: 1 }}>
-          <Download size={13} style={{ color: "var(--color-primary)", flexShrink: 0 }} />
-          <span style={{ fontSize: "11px", color: "var(--color-sidebar-text-muted)", fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <Download size={13} style={{ color: "var(--color-bottom-pill-icon)", flexShrink: 0, filter: "var(--filter-bottom-pill-icon)" }} />
+          <span style={{ fontSize: "11px", color: "var(--color-bottom-pill-subtext)", fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {expanded ? fullText : compactText}
           </span>
         </div>
@@ -152,8 +152,8 @@ export function BottomBar() {
                 height: "24px",
                 borderRadius: "5px",
                 border: "none",
-                backgroundColor: "rgba(255, 255, 255, 0.06)",
-                color: "rgba(255, 255, 255, 0.8)",
+                backgroundColor: "var(--color-bottom-pill-control-bg)",
+                color: "var(--color-bottom-pill-control-text)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -172,8 +172,8 @@ export function BottomBar() {
               height: "24px",
               borderRadius: "5px",
               border: "none",
-              backgroundColor: "rgba(255, 255, 255, 0.06)",
-              color: "rgba(255, 255, 255, 0.8)",
+              backgroundColor: "var(--color-bottom-pill-control-bg)",
+              color: "var(--color-bottom-pill-control-text)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",

@@ -159,7 +159,7 @@ export function ContentDetailView() {
 
   if (!content) {
     return (
-      <div style={{ padding: "72px 44px", color: "#7a7a8c" }}>
+      <div style={{ padding: "72px 44px", color: "var(--color-text-muted)" }}>
         <button type="button" onClick={closeContentDetail} style={backButtonStyle}>
           <ArrowLeft style={{ width: 16, height: 16 }} />
           返回
@@ -196,7 +196,7 @@ export function ContentDetailView() {
   })();
 
   return (
-    <div style={{ width: "100%", minHeight: "100%", padding: "36px 44px 56px", backgroundColor: "#f5f5f7" }}>
+    <div style={{ width: "100%", minHeight: "100%", padding: "36px 44px 56px", backgroundColor: "var(--color-bg)" }}>
       <div style={{ display: "grid", justifyItems: "start", gap: "8px" }}>
         <button type="button" onClick={closeContentDetail} style={backButtonStyle}>
           <ArrowLeft style={{ width: 16, height: 16 }} />
@@ -214,8 +214,8 @@ export function ContentDetailView() {
         animate={{ opacity: 1, y: 0 }}
         style={{
           marginTop: "18px",
-          border: "1px solid #ececf2",
-          backgroundColor: "#fff",
+          border: "1px solid var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
           borderRadius: "16px",
           padding: "24px",
         }}
@@ -231,10 +231,10 @@ export function ContentDetailView() {
               />
             ) : null}
             <div style={{ minWidth: 0 }}>
-              <div style={{ color: "#1a1a2e", fontSize: "14px", fontWeight: 800 }}>
+              <div style={{ color: "var(--color-text)", fontSize: "14px", fontWeight: 800 }}>
                 {displayAuthor?.name || getContentFallbackAuthor(content.kind)}
               </div>
-              <div style={{ marginTop: "3px", display: "flex", alignItems: "center", gap: "8px", color: "#8b8b9a", fontSize: "12.5px", flexWrap: "wrap" }}>
+              <div style={{ marginTop: "3px", display: "flex", alignItems: "center", gap: "8px", color: "var(--color-text-muted)", fontSize: "12.5px", flexWrap: "wrap" }}>
                 <span>{content.typeLabel || getContentTypeLabel(content.kind)}</span>
                 {content.pubTs ? <span>{formatDateTime(content.pubTs)}</span> : null}
               </div>
@@ -267,7 +267,7 @@ export function ContentDetailView() {
               <button
                 type="button"
                 onClick={() => openPlayer({ kind: "bangumi", seasonId: content.seasonId, title: displayTitle, cover: displayCover })}
-                style={{ ...iconButtonStyle, color: "#fff", backgroundColor: "#6366f1", borderColor: "#6366f1" }}
+                style={{ ...iconButtonStyle, color: "#fff", backgroundColor: "var(--color-primary)", borderColor: "var(--color-primary)" }}
                 title="播放影视内容"
               >
                 <Play style={{ width: 16, height: 16 }} />
@@ -277,27 +277,27 @@ export function ContentDetailView() {
           </div>
         </div>
 
-        <h1 style={{ marginTop: "22px", color: "#1a1a2e", fontSize: "24px", lineHeight: 1.35, fontWeight: 850 }}>
+        <h1 style={{ marginTop: "22px", color: "var(--color-text)", fontSize: "24px", lineHeight: 1.35, fontWeight: 850 }}>
           {displayTitle}
         </h1>
 
         {articleLoading ? (
-          <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "8px", color: "#6366f1", fontSize: "14px", fontWeight: 800 }}>
+          <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "8px", color: "var(--color-primary)", fontSize: "14px", fontWeight: 800 }}>
             <Loader2 className="animate-spin" style={{ width: 17, height: 17 }} />
             正在加载专栏正文
           </div>
         ) : null}
         {articleError ? (
-          <div style={{ marginTop: "12px", color: "#dc2626", fontSize: "13px", fontWeight: 700 }}>{articleError}</div>
+          <div style={{ marginTop: "12px", color: "var(--color-error-text)", fontSize: "13px", fontWeight: 700 }}>{articleError}</div>
         ) : null}
         {content.kind === "articleList" && collectionLoading ? (
-          <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "8px", color: "#6366f1", fontSize: "14px", fontWeight: 800 }}>
+          <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "8px", color: "var(--color-primary)", fontSize: "14px", fontWeight: 800 }}>
             <Loader2 className="animate-spin" style={{ width: 17, height: 17 }} />
             正在加载文集
           </div>
         ) : null}
         {collectionError ? (
-          <div style={{ marginTop: "12px", color: "#dc2626", fontSize: "13px", fontWeight: 700 }}>{collectionError}</div>
+          <div style={{ marginTop: "12px", color: "var(--color-error-text)", fontSize: "13px", fontWeight: 700 }}>{collectionError}</div>
         ) : null}
 
         {content.kind === "articleList" && displayCover ? (
@@ -306,17 +306,17 @@ export function ContentDetailView() {
             alt={`${displayTitle} 背景封面`}
             loading="lazy"
             referrerPolicy="no-referrer"
-            style={{ marginTop: "18px", width: "100%", maxHeight: "260px", objectFit: "cover", borderRadius: "14px", backgroundColor: "#f1f1f6" }}
+            style={{ marginTop: "18px", width: "100%", maxHeight: "260px", objectFit: "cover", borderRadius: "14px", backgroundColor: "var(--color-bg-subtle)" }}
           />
         ) : null}
 
         {displayText || displayContentText ? (
-          <div style={{ marginTop: "14px", display: "grid", gap: "8px", color: "#3f3f52", fontSize: "15px", lineHeight: 1.75 }}>
+          <div style={{ marginTop: "14px", display: "grid", gap: "8px", color: "var(--color-text-secondary)", fontSize: "15px", lineHeight: 1.75 }}>
             {displayText ? <p style={{ whiteSpace: "pre-wrap" }}>动态简介: {displayText}</p> : null}
             {displayContentText ? <p style={{ whiteSpace: "pre-wrap" }}>{displayContentText}</p> : null}
           </div>
         ) : content.kind !== "articleList" ? (
-          <div style={{ marginTop: "16px", color: "#8b8b9a", fontSize: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+          <div style={{ marginTop: "16px", color: "var(--color-text-muted)", fontSize: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
             {content.kind === "image" ? <ImageIcon style={{ width: 17, height: 17 }} /> : <Link2 style={{ width: 17, height: 17 }} />}
             这条内容没有文字说明
           </div>
@@ -354,10 +354,10 @@ export function ContentDetailView() {
               <BookOpen style={{ width: 17, height: 17 }} />
               收录于文集
             </span>
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#242432", fontWeight: 850 }}>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--color-text)", fontWeight: 850 }}>
               {articleInfo.collection.title}
             </span>
-            <span style={{ marginLeft: "auto", color: "#8b8b9a" }}>
+            <span style={{ marginLeft: "auto", color: "var(--color-text-muted)" }}>
               {articleInfo.collection.count_text || "查看"}
             </span>
           </button>
@@ -394,7 +394,7 @@ export function ContentDetailView() {
               {images.map((image, index) => (
                 <figure key={`${image.url}-${index}`} style={{ margin: 0, display: "grid", gap: "10px" }}>
                   {image.title ? (
-                    <figcaption style={{ color: "#242432", fontSize: "18px", lineHeight: 1.55, fontWeight: 850 }}>
+                    <figcaption style={{ color: "var(--color-text)", fontSize: "18px", lineHeight: 1.55, fontWeight: 850 }}>
                       {image.title}
                     </figcaption>
                   ) : null}
@@ -409,7 +409,7 @@ export function ContentDetailView() {
                       alt={image.title || `${displayTitle} 图片 ${index + 1}`}
                       loading="lazy"
                       referrerPolicy="no-referrer"
-                      style={{ display: "block", width: "100%", maxHeight: "720px", objectFit: "contain", backgroundColor: "#f1f1f6" }}
+                      style={{ display: "block", width: "100%", maxHeight: "720px", objectFit: "contain", backgroundColor: "var(--color-bg-subtle)" }}
                     />
                   </button>
                 </figure>
@@ -437,7 +437,7 @@ export function ContentDetailView() {
                     alt={`${content.title || "动态图片"} ${index + 1}`}
                     loading="lazy"
                     referrerPolicy="no-referrer"
-                    style={{ width: "100%", borderRadius: "12px", objectFit: "cover", backgroundColor: "#f1f1f6" }}
+                    style={{ width: "100%", borderRadius: "12px", objectFit: "cover", backgroundColor: "var(--color-bg-subtle)" }}
                   />
                 </button>
               ))}
@@ -464,7 +464,7 @@ export function ContentDetailView() {
               src={formatBiliImageUrl(previewImage.url, "@1600w.webp")}
               alt={previewImage.title || "大图预览"}
               referrerPolicy="no-referrer"
-              style={{ maxWidth: "100%", maxHeight: previewImage.title ? "84vh" : "90vh", objectFit: "contain", borderRadius: "12px", backgroundColor: "#fff" }}
+              style={{ maxWidth: "100%", maxHeight: previewImage.title ? "84vh" : "90vh", objectFit: "contain", borderRadius: "12px", backgroundColor: "var(--color-bg-secondary)" }}
             />
             {previewImage.title ? <figcaption style={{ color: "#fff", fontSize: "14px", lineHeight: 1.6, textAlign: "center" }}>{previewImage.title}</figcaption> : null}
           </figure>
@@ -560,7 +560,7 @@ function LivePlayerBlock({
           <div>
             <Play style={{ width: 34, height: 34, margin: "0 auto 10px" }} />
             <div style={{ fontSize: "14px", fontWeight: 800 }}>{error || "暂时无法获取直播播放地址"}</div>
-            <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#9ca3af" }}>可以使用右上角浏览器按钮作为备用入口</div>
+            <div style={{ marginTop: "6px", fontSize: "12.5px", color: "var(--color-text-muted)" }}>可以使用右上角浏览器按钮作为备用入口</div>
           </div>
         </div>
       )}
@@ -586,8 +586,8 @@ function ArticleCollectionBlock({
   return (
     <div style={{ marginTop: "22px", display: "grid", gap: "12px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-        <h2 style={{ color: "#1a1a2e", fontSize: "17px", fontWeight: 850 }}>文集内容</h2>
-        <span style={{ color: "#8b8b9a", fontSize: "13px", fontWeight: 750 }}>
+        <h2 style={{ color: "var(--color-text)", fontSize: "17px", fontWeight: 850 }}>文集内容</h2>
+        <span style={{ color: "var(--color-text-muted)", fontSize: "13px", fontWeight: 750 }}>
           {info.count_text || `${info.articles.length} 篇`}
         </span>
       </div>
@@ -606,16 +606,16 @@ function ArticleCollectionBlock({
                   src={formatBiliImageUrl(item.cover, "@240w_150h_1c.webp")}
                   alt={item.title}
                   referrerPolicy="no-referrer"
-                  style={{ width: 96, height: 60, borderRadius: 8, objectFit: "cover", backgroundColor: "#f1f1f6", flexShrink: 0 }}
+                  style={{ width: 96, height: 60, borderRadius: 8, objectFit: "cover", backgroundColor: "var(--color-bg-subtle)", flexShrink: 0 }}
                 />
               ) : (
-                <div style={{ width: 96, height: 60, borderRadius: 8, backgroundColor: "#f1f1f6", display: "grid", placeItems: "center", color: "#9ca3af", flexShrink: 0 }}>
+                <div style={{ width: 96, height: 60, borderRadius: 8, backgroundColor: "var(--color-bg-subtle)", display: "grid", placeItems: "center", color: "var(--color-text-muted)", flexShrink: 0 }}>
                   <BookOpen style={{ width: 22, height: 22 }} />
                 </div>
               )}
               <span style={{ minWidth: 0, display: "grid", gap: "5px", textAlign: "left" }}>
-                <span style={{ color: "#242432", fontSize: "14px", fontWeight: 850, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</span>
-                <span style={{ color: "#8b8b9a", fontSize: "12.5px", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                <span style={{ color: "var(--color-text)", fontSize: "14px", fontWeight: 850, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</span>
+                <span style={{ color: "var(--color-text-muted)", fontSize: "12.5px", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
                   {item.summary || (item.pubdate ? formatDateTime(item.pubdate) : "点击查看专栏详情")}
                 </span>
               </span>
@@ -623,7 +623,7 @@ function ArticleCollectionBlock({
           ))}
         </div>
       ) : (
-        <div style={{ padding: "18px", borderRadius: "12px", backgroundColor: "#f8f8fb", color: "#8b8b9a", fontSize: "13.5px", fontWeight: 750 }}>
+        <div style={{ padding: "18px", borderRadius: "12px", backgroundColor: "var(--color-bg-subtle)", color: "var(--color-text-muted)", fontSize: "13.5px", fontWeight: 750 }}>
           这个文集暂时没有读取到文章列表
         </div>
       )}
@@ -692,9 +692,9 @@ const backButtonStyle = {
   height: "36px",
   padding: "0 13px",
   borderRadius: "10px",
-  border: "1px solid #e2e2ea",
-  backgroundColor: "#fff",
-  color: "#505065",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
+  color: "var(--color-text-secondary)",
   fontSize: "13px",
   fontWeight: 700,
   cursor: "pointer",
@@ -704,9 +704,9 @@ const contentBackButtonStyle = {
   height: "28px",
   padding: "0 10px",
   borderRadius: "8px",
-  border: "1px solid #e7e7ef",
-  backgroundColor: "#fff",
-  color: "#6f6f82",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
+  color: "var(--color-text-secondary)",
   fontSize: "12px",
   fontWeight: 750,
   cursor: "pointer",
@@ -716,9 +716,9 @@ const iconButtonStyle = {
   height: "36px",
   padding: "0 13px",
   borderRadius: "10px",
-  border: "1px solid #e2e2ea",
-  backgroundColor: "#fff",
-  color: "#505065",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
+  color: "var(--color-text-secondary)",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
@@ -735,9 +735,9 @@ const collectionLinkStyle = {
   width: "100%",
   padding: "0 14px",
   borderRadius: "10px",
-  border: "1px solid #ececf2",
-  backgroundColor: "#f8f8fb",
-  color: "#505065",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-subtle)",
+  color: "var(--color-text-secondary)",
   display: "flex",
   alignItems: "center",
   gap: "12px",
@@ -752,8 +752,8 @@ const articleListItemStyle = {
   minHeight: "78px",
   padding: "9px",
   borderRadius: "10px",
-  border: "1px solid #ececf2",
-  backgroundColor: "#fff",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-secondary)",
   display: "flex",
   alignItems: "center",
   gap: "12px",

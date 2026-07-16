@@ -433,11 +433,11 @@ export function HistoryView() {
         }}
       >
         <div>
-          <h1 style={{ fontSize: "24px", fontWeight: 800, color: "#1a1a2e", lineHeight: 1.25 }}>
+          <h1 style={{ fontSize: "24px", fontWeight: 800, color: "var(--color-text)", lineHeight: 1.25 }}>
             观看历史
           </h1>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "8px", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "14px", color: "#8b8b9a" }}>共 {total} 条记录</span>
+            <span style={{ fontSize: "14px", color: "var(--color-text-muted)" }}>共 {total} 条记录</span>
             <PurpleRefreshButton loading={refreshing} onClick={handleRefresh} />
           </div>
         </div>
@@ -452,7 +452,7 @@ export function HistoryView() {
                 transform: "translateY(-50%)",
                 width: "15px",
                 height: "15px",
-                color: "#b0b0bc",
+                color: "var(--color-text-disabled)",
               }}
             />
             <input
@@ -468,7 +468,7 @@ export function HistoryView() {
                 width: "100%",
                 padding: "10px 14px 10px 36px",
                 borderRadius: "10px",
-                border: "1.5px solid #e2e2ea",
+                border: "1.5px solid var(--color-border)",
                 fontSize: "13.5px",
                 outline: "none",
               }}
@@ -509,8 +509,8 @@ export function HistoryView() {
             marginBottom: "18px",
             padding: "12px 18px",
             borderRadius: "12px",
-            backgroundColor: "#fef2f2",
-            color: "#dc2626",
+            backgroundColor: "var(--color-error-bg)",
+            color: "var(--color-error-text)",
             fontSize: "13.5px",
           }}
         >
@@ -526,8 +526,8 @@ export function HistoryView() {
           marginBottom: "18px",
           padding: "10px 16px",
           borderRadius: "13px",
-          backgroundColor: "#fff",
-          border: "1.5px solid #ececf2",
+          backgroundColor: "var(--color-bg-secondary)",
+          border: "1.5px solid var(--color-border)",
           gap: "12px",
           flexWrap: "wrap",
         }}
@@ -578,7 +578,7 @@ export function HistoryView() {
 
       {loading ? (
         <div style={{ paddingTop: "120px", display: "flex", justifyContent: "center" }}>
-          <RefreshCw className="animate-spin" style={{ width: 28, height: 28, color: "#6366f1" }} />
+          <RefreshCw className="animate-spin" style={{ width: 28, height: 28, color: "var(--color-primary)" }} />
         </div>
       ) : items.length === 0 ? (
         <EmptyState message="没有找到符合条件的历史记录" />
@@ -627,11 +627,11 @@ export function HistoryView() {
                 gap: "6px",
                 padding: "8px 12px",
                 borderRadius: "12px",
-                backgroundColor: "#fff",
-                border: "1.5px solid #ececf2",
+                backgroundColor: "var(--color-bg-secondary)",
+                border: "1.5px solid var(--color-border)",
               }}
             >
-              <span style={{ fontSize: "13px", color: "#8b8b9a", padding: "0 4px" }}>
+              <span style={{ fontSize: "13px", color: "var(--color-text-muted)", padding: "0 4px" }}>
                 已载入 {loadedPageCount}/{pageCount} 页
               </span>
               <PageButton disabled={currentPage <= 1} onClick={() => handlePageChange(currentPage - 1)}>
@@ -695,7 +695,7 @@ function FilterMenu({
           padding: "7px 14px",
           borderRadius: "9px",
           fontSize: "13.5px",
-          color: "#505065",
+          color: "var(--color-text-secondary)",
           backgroundColor: "transparent",
           border: "none",
           cursor: "pointer",
@@ -715,8 +715,8 @@ function FilterMenu({
               top: "calc(100% + 6px)",
               left: 0,
               minWidth: "150px",
-              backgroundColor: "#fff",
-              border: "1.5px solid #ececf2",
+              backgroundColor: "var(--color-bg-secondary)",
+              border: "1.5px solid var(--color-border)",
               borderRadius: "11px",
               padding: "5px",
               boxShadow: "0 8px 24px rgba(0,0,0,0.09)",
@@ -738,8 +738,8 @@ function FilterMenu({
                   borderRadius: "8px",
                   border: "none",
                   cursor: "pointer",
-                  backgroundColor: value === option.value ? "#f3f0ff" : "transparent",
-                  color: value === option.value ? "#6366f1" : "#505065",
+                  backgroundColor: value === option.value ? "var(--color-primary-light)" : "transparent",
+                  color: value === option.value ? "var(--color-primary)" : "var(--color-text-secondary)",
                   fontWeight: value === option.value ? 600 : 400,
                 }}
               >
@@ -786,8 +786,8 @@ function HistoryCard({
         rowGap: `${12 * scale}px`,
         padding: `${13 * scale}px ${16 * scale}px`,
         borderRadius: `${13 * scale}px`,
-        backgroundColor: "#fff",
-        border: "1px solid #ececf2",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1px solid var(--color-border)",
       }}
     >
       <div
@@ -799,7 +799,7 @@ function HistoryCard({
           position: "relative",
           flexShrink: 0,
           cursor: "pointer",
-          backgroundColor: "#f0f0f5",
+          backgroundColor: "var(--color-bg-tertiary)",
         }}
         onClick={selectable ? onToggleSelection : onPlay}
       >
@@ -820,7 +820,7 @@ function HistoryCard({
               height: `${24 * scale}px`,
               borderRadius: `${7 * scale}px`,
               border: selected ? "none" : "1.5px solid rgba(255,255,255,0.88)",
-              backgroundColor: selected ? "#6366f1" : "rgba(0,0,0,0.48)",
+              backgroundColor: selected ? "var(--color-primary)" : "rgba(0,0,0,0.48)",
               color: "#fff",
               display: "grid",
               placeItems: "center",
@@ -862,7 +862,7 @@ function HistoryCard({
           style={{
             fontSize: `${14.5 * scale}px`,
             fontWeight: 600,
-            color: "#1a1a2e",
+            color: "var(--color-text)",
             lineHeight: 1.4,
             display: "-webkit-box",
             WebkitLineClamp: 2,
@@ -872,7 +872,7 @@ function HistoryCard({
         >
           {item.title}
         </p>
-        <div style={{ marginTop: `${8 * scale}px`, fontSize: `${13 * scale}px`, color: "#7a7a8c", display: "flex", gap: `${12 * scale}px`, flexWrap: "wrap" }}>
+        <div style={{ marginTop: `${8 * scale}px`, fontSize: `${13 * scale}px`, color: "var(--color-text-muted)", display: "flex", gap: `${12 * scale}px`, flexWrap: "wrap" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: `${7 * scale}px`, minWidth: 0 }}>
             <ClickableAvatar src={item.author.face || ""} alt={item.author.name} size={22 * scale} onClick={onOpenAuthor} />
             <button
@@ -881,7 +881,7 @@ function HistoryCard({
                 event.stopPropagation();
                 onOpenAuthor();
               }}
-              style={{ border: "none", background: "transparent", padding: 0, color: "#7a7a8c", fontSize: `${13 * scale}px`, fontWeight: 600, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              style={{ border: "none", background: "transparent", padding: 0, color: "var(--color-text-muted)", fontSize: `${13 * scale}px`, fontWeight: 600, cursor: "pointer", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
             >
               {item.author.name || "未知 UP"}
             </button>
@@ -933,9 +933,9 @@ function ActionButton({
         borderRadius: "10px",
         fontSize: "14px",
         fontWeight: 500,
-        color: "#505065",
-        backgroundColor: "#fff",
-        border: "1.5px solid #e2e2ea",
+        color: "var(--color-text-secondary)",
+        backgroundColor: "var(--color-bg-secondary)",
+        border: "1.5px solid var(--color-border)",
         cursor: "pointer",
       }}
     >
@@ -965,9 +965,9 @@ function PageButton({
         height: "34px",
         padding: "0 10px",
         borderRadius: "8px",
-        border: active ? "none" : "1px solid #ececf2",
-        backgroundColor: active ? "#6366f1" : "#fff",
-        color: active ? "#fff" : disabled ? "#c0c0c8" : "#505065",
+        border: active ? "none" : "1px solid var(--color-border)",
+        backgroundColor: active ? "var(--color-primary)" : "var(--color-bg-secondary)",
+        color: active ? "#fff" : disabled ? "var(--color-text-disabled)" : "var(--color-text-secondary)",
         cursor: disabled ? "not-allowed" : "pointer",
         fontSize: "13.5px",
         fontWeight: active ? 600 : 500,
@@ -1000,9 +1000,9 @@ function IconAction({
         width: `${34 * scale}px`,
         height: `${34 * scale}px`,
         borderRadius: `${9 * scale}px`,
-        border: "1.5px solid #e5e5ec",
+        border: "1.5px solid var(--color-border)",
         backgroundColor: "transparent",
-        color: "#8b8b9a",
+        color: "var(--color-text-muted)",
         cursor: "pointer",
       }}
     >
@@ -1020,11 +1020,11 @@ function EmptyState({ message }: { message: string }) {
         alignItems: "center",
         justifyContent: "center",
         paddingTop: "90px",
-        color: "#9a9aa5",
+        color: "var(--color-text-muted)",
       }}
     >
-      <History style={{ width: 32, height: 32, marginBottom: "12px", color: "#c0c0c8" }} />
-      <p style={{ fontSize: "15px", fontWeight: 600, color: "#505065" }}>暂无记录</p>
+      <History style={{ width: 32, height: 32, marginBottom: "12px", color: "var(--color-text-disabled)" }} />
+      <p style={{ fontSize: "15px", fontWeight: 600, color: "var(--color-text-secondary)" }}>暂无记录</p>
       <p style={{ marginTop: "4px", fontSize: "13.5px" }}>{message}</p>
     </div>
   );
