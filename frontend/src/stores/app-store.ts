@@ -131,6 +131,7 @@ export interface AppConfig {
 
 export interface SearchPageState {
   input: string;
+  searchBackend: "api" | "web";
   filters: SearchFilters;
   activeResultType: "all" | "video" | "bangumi" | "film" | "live" | "article" | "user";
   activeLiveType: "room" | "user";
@@ -219,6 +220,7 @@ const defaultSearchFilters: SearchFilters = {
 
 const defaultSearchPageState: SearchPageState = {
   input: "",
+  searchBackend: "api",
   filters: defaultSearchFilters,
   activeResultType: "all",
   activeLiveType: "room",

@@ -1,6 +1,7 @@
 use chrono::{Duration as ChronoDuration, Local, TimeZone};
 use reqwest::{RequestBuilder as RawRequestBuilder, StatusCode};
 use reqwest_middleware::RequestBuilder;
+use scraper::{ElementRef, Html, Selector};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -1062,6 +1063,80 @@ impl super::BiliClient {
 
         let video_info = self.get_normal_info(&bvid).await?;
         Ok(SearchResult::Normal(video_info))
+    }
+
+    /// 使用 B 站公开搜索网页的服务端渲染 HTML 搜索。
+    ///
+    /// 该入口仅供用户在 API 触发 412 后主动选择，不会由 API 搜索自动调用。
+    pub async fn search_video_from_web(
+        &self,
+        input: &str,
+        options: SearchVideoOptions,
+    ) -> Result<SearchResult, String> {
+        let keyword = input.trim();
+        if keyword.is_empty() {
+            return Err("请输入网页搜索关键词".to_string());
+        }
+
+        let search_type = options.search_type.as_deref().unwrap_or("all");
+        let route = match search_type {
+            "all" | "video" => "all",
+            "media_bangumi" => "bangumi",
+            "media_ft" => "pgc",
+            "live" => "live",
+            "article" => "article",
+            "bili_user" => "upuser",
+            _ => "all",
+        };
+        let page = options.page.unwrap_or(1).max(1);
+        let page_size = options.page_size.unwrap_or(20).clamp(1, 50);
+        let order = normalize_search_order(options.order.as_deref()).to_string();
+        let duration = normalize_search_duration(options.duration.as_deref()).to_string();
+        let (pubtime_begin_s, pubtime_end_s) = search_pubtime_range(options.pubtime.as_deref());
+        let endpoint = format!("https://search.bilibili.com/{route}");
+        let referer = format!(
+            "{endpoint}?keyword={}",
+            url::form_urlencoded::byte_serialize(keyword.as_bytes()).collect::<String>()
+        );
+
+        let response = self
+            .api_client()
+            .get(&endpoint)
+            .query(&[
+                ("keyword", keyword.to_string()),
+                ("page", page.to_string()),
+                ("order", order),
+                ("duration", duration),
+                ("pubtime_begin_s", pubtime_begin_s),
+                ("pubtime_end_s", pubtime_end_s),
+            ])
+            .header("cookie", self.get_cookie_for_url(&endpoint))
+            .header("referer", "https://www.bilibili.com/")
+            .header(
+                "user-agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            )
+            .send()
+            .await
+            .map_err(|error| format!("网页搜索请求失败: {error}"))?;
+        let status = response.status();
+        let html = response
+            .text()
+            .await
+            .map_err(|error| format!("读取网页搜索结果失败: {error}"))?;
+
+        if status == StatusCode::PRECONDITION_FAILED {
+            return Err(format!("WEB_SEARCH_BLOCKED:{referer}"));
+        }
+        if status != StatusCode::OK {
+            return Err(format!(
+                "网页搜索返回异常状态码({status}): {}",
+                summarize_error_body(&html)
+            ));
+        }
+
+        let result = parse_web_search_html(&html, keyword, search_type, page, page_size)?;
+        Ok(SearchResult::Aggregate(result))
     }
 
     async fn search_by_aid(&self, aid: i64) -> Result<SearchResult, String> {
@@ -2159,6 +2234,495 @@ fn parse_bangumi_search_result(data: Value) -> Result<BangumiSearchResult, Strin
     })
 }
 
+fn parse_web_search_html(
+    html: &str,
+    keyword: &str,
+    search_type: &str,
+    requested_page: i64,
+    requested_page_size: i64,
+) -> Result<AggregateSearchResult, String> {
+    let document = Html::parse_document(html);
+    let mut videos = if matches!(search_type, "all" | "video") {
+        parse_web_video_results(&document)
+    } else {
+        Vec::new()
+    };
+    let mut bangumi = if search_type == "media_bangumi" {
+        parse_web_bangumi_results(&document)
+    } else {
+        Vec::new()
+    };
+    let mut films = if search_type == "media_ft" {
+        parse_web_generic_results(&document, WebGenericKind::Film)
+    } else {
+        Vec::new()
+    };
+    let mut lives = if search_type == "live" {
+        parse_web_live_results(&document)
+    } else {
+        Vec::new()
+    };
+    let mut articles = if search_type == "article" {
+        parse_web_generic_results(&document, WebGenericKind::Article)
+    } else {
+        Vec::new()
+    };
+    let mut users = if search_type == "bili_user" {
+        parse_web_user_results(&document)
+    } else {
+        Vec::new()
+    };
+
+    let available_counts = [
+        videos.len(),
+        bangumi.len(),
+        films.len(),
+        lives.len(),
+        articles.len(),
+        users.len(),
+    ];
+    if available_counts.iter().all(|count| *count == 0) {
+        let text = document.root_element().text().collect::<String>();
+        if !text.contains("搜索结果为空")
+            && !text.contains("没有找到")
+            && !text.contains("暂无相关")
+        {
+            return Err("网页已打开，但没有返回可解析的服务端搜索结果；可改为在浏览器中查看".to_string());
+        }
+    }
+
+    let limit = requested_page_size.max(1) as usize;
+    videos.truncate(limit);
+    bangumi.truncate(limit);
+    films.truncate(limit);
+    lives.truncate(limit);
+    articles.truncate(limit);
+    users.truncate(limit);
+
+    let page_info = |available: usize| {
+        if available == 0 {
+            SearchPageInfo {
+                page: requested_page.max(1),
+                page_size: requested_page_size.max(1),
+                total: 0,
+                page_count: 1,
+                has_more: false,
+            }
+        } else {
+            parse_web_page_info(
+                &document,
+                available as i64,
+                requested_page,
+                requested_page_size,
+            )
+        }
+    };
+
+    Ok(AggregateSearchResult {
+        keyword: keyword.to_string(),
+        video_page: page_info(available_counts[0]),
+        bangumi_page: page_info(available_counts[1]),
+        film_page: page_info(available_counts[2]),
+        live_page: page_info(available_counts[3]),
+        article_page: page_info(available_counts[4]),
+        user_page: page_info(available_counts[5]),
+        videos,
+        bangumi,
+        films,
+        lives,
+        articles,
+        users,
+    })
+}
+
+fn parse_web_video_results(document: &Html) -> Vec<KeywordVideoResult> {
+    let card_selector = Selector::parse(".bili-video-card__wrap").expect("valid video card selector");
+    let link_selector = Selector::parse("a[href*='/video/BV']").expect("valid video link selector");
+    let title_selector = Selector::parse(".bili-video-card__info--tit").expect("valid video title selector");
+    let cover_selector = Selector::parse("img[src], source[srcset]").expect("valid image selector");
+    let duration_selector = Selector::parse(".bili-video-card__stats__duration").expect("valid duration selector");
+    let stat_selector = Selector::parse(".bili-video-card__stats--item").expect("valid stat selector");
+    let owner_selector = Selector::parse(".bili-video-card__info--owner").expect("valid owner selector");
+    let author_selector = Selector::parse(".bili-video-card__info--author").expect("valid author selector");
+    let mut seen = HashSet::new();
+
+    document
+        .select(&card_selector)
+        .filter_map(|card| {
+            let link = card.select(&link_selector).next()?;
+            let href = link.value().attr("href")?;
+            let bvid = extract_web_identifier(href, r"BV[0-9A-Za-z]{10}")?;
+            if !seen.insert(bvid.clone()) {
+                return None;
+            }
+            let title_element = card.select(&title_selector).next();
+            let title = title_element
+                .and_then(|element| element.value().attr("title"))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .or_else(|| title_element.map(web_element_text))
+                .unwrap_or_default();
+            if title.is_empty() {
+                return None;
+            }
+            let cover = card
+                .select(&cover_selector)
+                .find_map(|element| {
+                    element
+                        .value()
+                        .attr("src")
+                        .or_else(|| element.value().attr("srcset"))
+                        .map(normalize_web_url)
+                })
+                .unwrap_or_default();
+            let duration = card
+                .select(&duration_selector)
+                .next()
+                .map(web_element_text)
+                .unwrap_or_default();
+            let stats = card
+                .select(&stat_selector)
+                .map(web_element_text)
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>();
+            let owner = card.select(&owner_selector).next();
+            let mid = owner
+                .and_then(|element| element.value().attr("href"))
+                .and_then(|href| extract_web_identifier(href, r"space\.bilibili\.com/(\d+)"))
+                .and_then(|value| value.parse::<i64>().ok())
+                .unwrap_or(0);
+            let author = card
+                .select(&author_selector)
+                .next()
+                .map(web_element_text)
+                .unwrap_or_default();
+
+            Some(KeywordVideoResult {
+                aid: 0,
+                bvid,
+                title,
+                pic: cover,
+                duration,
+                mid,
+                author,
+                author_face: String::new(),
+                pubdate: 0,
+                play: stats.first().map(|value| parse_web_count(value)).unwrap_or(0),
+                danmaku: stats.get(1).map(|value| parse_web_count(value)).unwrap_or(0),
+                like: 0,
+                favorite: 0,
+                reply: 0,
+                description: String::new(),
+            })
+        })
+        .collect()
+}
+
+fn parse_web_live_results(document: &Html) -> Vec<KeywordGenericSearchResult> {
+    let card_selector = Selector::parse(".bili-live-card__wrap").expect("valid live card selector");
+    let link_selector = Selector::parse("a[href*='live.bilibili.com/']").expect("valid live link selector");
+    let title_selector = Selector::parse(".bili-live-card__info--tit").expect("valid live title selector");
+    let author_selector = Selector::parse(".bili-live-card__info--uname").expect("valid live author selector");
+    let image_selector = Selector::parse("img[src], source[srcset]").expect("valid image selector");
+    let stat_selector = Selector::parse(".bili-live-card__stats--item").expect("valid live stat selector");
+    let mut seen = HashSet::new();
+
+    document
+        .select(&card_selector)
+        .filter_map(|card| {
+            let link = card.select(&link_selector).next()?;
+            let url = normalize_web_url(link.value().attr("href")?);
+            let id = extract_web_identifier(&url, r"live\.bilibili\.com/(\d+)")?;
+            if !seen.insert(id.clone()) {
+                return None;
+            }
+            let title = card
+                .select(&title_selector)
+                .next()
+                .map(web_element_text)
+                .unwrap_or_default();
+            let author = card
+                .select(&author_selector)
+                .next()
+                .map(web_element_text)
+                .unwrap_or_default();
+            let cover = card
+                .select(&image_selector)
+                .find_map(|element| {
+                    element
+                        .value()
+                        .attr("src")
+                        .or_else(|| element.value().attr("srcset"))
+                        .map(normalize_web_url)
+                })
+                .unwrap_or_default();
+            let stats = card
+                .select(&stat_selector)
+                .map(web_element_text)
+                .filter(|text| !text.is_empty())
+                .take(3)
+                .collect();
+            Some(KeywordGenericSearchResult {
+                id,
+                title,
+                cover,
+                description: String::new(),
+                url,
+                author,
+                author_face: String::new(),
+                mid: 0,
+                badge: "直播间".to_string(),
+                stats,
+            })
+        })
+        .collect()
+}
+
+fn parse_web_user_results(document: &Html) -> Vec<KeywordGenericSearchResult> {
+    let card_selector = Selector::parse(".b-user-info-card").expect("valid user card selector");
+    let link_selector = Selector::parse("a[href*='space.bilibili.com/']").expect("valid user link selector");
+    let title_selector = Selector::parse(".i_card_title, [class*='user-name'], [class*='user-title']")
+        .expect("valid user title selector");
+    let image_selector = Selector::parse("img[src], source[srcset]").expect("valid image selector");
+    let mut seen = HashSet::new();
+
+    document
+        .select(&card_selector)
+        .filter_map(|card| {
+            let link = card.select(&link_selector).next()?;
+            let url = normalize_web_url(link.value().attr("href")?);
+            let id = extract_web_identifier(&url, r"space\.bilibili\.com/(\d+)")?;
+            if !seen.insert(id.clone()) {
+                return None;
+            }
+            let title = card
+                .select(&title_selector)
+                .next()
+                .map(web_element_text)
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| web_element_text(link));
+            let face = card
+                .select(&image_selector)
+                .find_map(|element| {
+                    element
+                        .value()
+                        .attr("src")
+                        .or_else(|| element.value().attr("srcset"))
+                        .map(normalize_web_url)
+                })
+                .unwrap_or_default();
+            let mid = id.parse::<i64>().unwrap_or(0);
+            Some(KeywordGenericSearchResult {
+                id,
+                title: title.clone(),
+                cover: face.clone(),
+                description: String::new(),
+                url,
+                author: title,
+                author_face: face,
+                mid,
+                badge: "用户".to_string(),
+                stats: Vec::new(),
+            })
+        })
+        .collect()
+}
+
+fn parse_web_bangumi_results(document: &Html) -> Vec<KeywordBangumiResult> {
+    let link_selector = Selector::parse("a[href*='/bangumi/play/ss']").expect("valid bangumi selector");
+    let image_selector = Selector::parse("img[src], source[srcset]").expect("valid image selector");
+    let mut seen = HashSet::new();
+    document
+        .select(&link_selector)
+        .filter_map(|link| {
+            let url = normalize_web_url(link.value().attr("href")?);
+            let id = extract_web_identifier(&url, r"/ss(\d+)")?;
+            if !seen.insert(id.clone()) {
+                return None;
+            }
+            let root = web_result_root(link);
+            let title = link
+                .value()
+                .attr("title")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .unwrap_or_else(|| web_element_text(link));
+            let cover = root
+                .select(&image_selector)
+                .find_map(|element| {
+                    element
+                        .value()
+                        .attr("src")
+                        .or_else(|| element.value().attr("srcset"))
+                        .map(normalize_web_url)
+                })
+                .unwrap_or_default();
+            Some(KeywordBangumiResult {
+                season_id: id.parse::<i64>().ok()?,
+                title,
+                cover,
+                index_show: String::new(),
+                description: String::new(),
+                goto_url: url,
+            })
+        })
+        .collect()
+}
+
+#[derive(Clone, Copy)]
+enum WebGenericKind {
+    Film,
+    Article,
+}
+
+fn parse_web_generic_results(document: &Html, kind: WebGenericKind) -> Vec<KeywordGenericSearchResult> {
+    let (selector_text, id_pattern, badge) = match kind {
+        WebGenericKind::Film => ("a[href*='/bangumi/play/ss']", r"/ss(\d+)", "影视"),
+        WebGenericKind::Article => ("a[href*='/read/cv'], a[href*='/opus/']", r"(?:cv|opus/)(\d+)", "专栏"),
+    };
+    let link_selector = Selector::parse(selector_text).expect("valid generic link selector");
+    let image_selector = Selector::parse("img[src], source[srcset]").expect("valid image selector");
+    let mut seen = HashSet::new();
+    document
+        .select(&link_selector)
+        .filter_map(|link| {
+            let url = normalize_web_url(link.value().attr("href")?);
+            let id = extract_web_identifier(&url, id_pattern)?;
+            if !seen.insert(id.clone()) {
+                return None;
+            }
+            let root = web_result_root(link);
+            let title = link
+                .value()
+                .attr("title")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .unwrap_or_else(|| web_element_text(link));
+            if title.is_empty() {
+                return None;
+            }
+            let cover = root
+                .select(&image_selector)
+                .find_map(|element| {
+                    element
+                        .value()
+                        .attr("src")
+                        .or_else(|| element.value().attr("srcset"))
+                        .map(normalize_web_url)
+                })
+                .unwrap_or_default();
+            Some(KeywordGenericSearchResult {
+                id,
+                title,
+                cover,
+                description: String::new(),
+                url,
+                author: String::new(),
+                author_face: String::new(),
+                mid: 0,
+                badge: badge.to_string(),
+                stats: Vec::new(),
+            })
+        })
+        .collect()
+}
+
+fn web_result_root<'a>(element: ElementRef<'a>) -> ElementRef<'a> {
+    element
+        .ancestors()
+        .filter_map(ElementRef::wrap)
+        .find(|ancestor| {
+            ancestor.value().attr("class").is_some_and(|classes| {
+                classes.contains("card") || classes.contains("item") || classes.contains("result")
+            })
+        })
+        .unwrap_or(element)
+}
+
+fn web_element_text(element: ElementRef<'_>) -> String {
+    element
+        .text()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn normalize_web_url(value: &str) -> String {
+    let value = value.split_whitespace().next().unwrap_or(value).trim();
+    if value.starts_with("//") {
+        format!("https:{value}")
+    } else if value.starts_with('/') {
+        format!("https://www.bilibili.com{value}")
+    } else {
+        value.to_string()
+    }
+}
+
+fn extract_web_identifier(value: &str, pattern: &str) -> Option<String> {
+    let regex = regex::Regex::new(pattern).ok()?;
+    let captures = regex.captures(value)?;
+    captures
+        .get(1)
+        .or_else(|| captures.get(0))
+        .map(|capture| capture.as_str().to_string())
+}
+
+fn parse_web_count(value: &str) -> i64 {
+    let value = value.trim().replace(',', "");
+    let (number, multiplier) = if let Some(number) = value.strip_suffix('万') {
+        (number, 10_000.0)
+    } else if let Some(number) = value.strip_suffix('亿') {
+        (number, 100_000_000.0)
+    } else {
+        (value.as_str(), 1.0)
+    };
+    number
+        .parse::<f64>()
+        .map(|number| (number * multiplier).round() as i64)
+        .unwrap_or(0)
+}
+
+fn parse_web_page_info(
+    document: &Html,
+    available_count: i64,
+    requested_page: i64,
+    requested_page_size: i64,
+) -> SearchPageInfo {
+    let selector = Selector::parse(
+        ".vui_pagenation--btn, .vui_pagenation--active, [class*='pagination'] button, [class*='pagination'] a",
+    )
+    .expect("valid pagination selector");
+    let page = requested_page.max(1);
+    let page_size = requested_page_size.max(1);
+    let explicit_page_count = document
+        .select(&selector)
+        .filter_map(|element| web_element_text(element).parse::<i64>().ok())
+        .max()
+        .unwrap_or(0);
+    let inferred_has_more = available_count >= page_size;
+    let page_count = explicit_page_count.max(if inferred_has_more { page + 1 } else { page });
+    let has_more = page < page_count;
+    let total = if explicit_page_count > 0 {
+        explicit_page_count.saturating_mul(page_size)
+    } else {
+        (page - 1)
+            .saturating_mul(page_size)
+            .saturating_add(available_count.min(page_size))
+            .saturating_add(i64::from(has_more))
+    };
+    SearchPageInfo {
+        page,
+        page_size,
+        total,
+        page_count: page_count.max(1),
+        has_more,
+    }
+}
+
 fn parse_search_page_info(
     data: &Value,
     requested_page: i64,
@@ -3147,6 +3711,96 @@ fn parse_bool_like(value: &Value) -> bool {
                 .map(|text| matches!(text.trim(), "1" | "true" | "True"))
         })
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod web_search_tests {
+    use super::*;
+
+    #[test]
+    fn parses_server_rendered_video_card() {
+        let html = r#"
+            <div class="bili-video-card__wrap">
+              <a href="//www.bilibili.com/video/BV1BqNu6qEAu/">
+                <picture><img src="//i0.hdslb.com/test.jpg" /></picture>
+                <span class="bili-video-card__stats--item">6.2万</span>
+                <span class="bili-video-card__stats--item">18</span>
+                <span class="bili-video-card__stats__duration">03:01</span>
+              </a>
+              <h3 class="bili-video-card__info--tit" title="测试视频">测试视频</h3>
+              <a class="bili-video-card__info--owner" href="//space.bilibili.com/1741551557">
+                <span class="bili-video-card__info--author">测试作者</span>
+              </a>
+            </div>
+        "#;
+
+        let result = parse_web_search_html(html, "测试", "all", 1, 6).unwrap();
+        assert_eq!(result.videos.len(), 1);
+        let video = &result.videos[0];
+        assert_eq!(video.bvid, "BV1BqNu6qEAu");
+        assert_eq!(video.title, "测试视频");
+        assert_eq!(video.author, "测试作者");
+        assert_eq!(video.mid, 1_741_551_557);
+        assert_eq!(video.play, 62_000);
+        assert_eq!(video.danmaku, 18);
+        assert_eq!(video.duration, "03:01");
+        assert_eq!(video.pic, "https://i0.hdslb.com/test.jpg");
+    }
+
+    #[test]
+    fn parses_server_rendered_live_card() {
+        let html = r#"
+            <div class="bili-live-card__wrap">
+              <a class="bili-live-card__image--link" href="//live.bilibili.com/12345">
+                <img src="//i0.hdslb.com/live.jpg" />
+              </a>
+              <h3 class="bili-live-card__info--tit">测试直播间</h3>
+              <span class="bili-live-card__info--uname">测试主播</span>
+              <span class="bili-live-card__stats--item">在线 1.2万</span>
+            </div>
+        "#;
+
+        let result = parse_web_search_html(html, "测试", "live", 1, 6).unwrap();
+        assert_eq!(result.lives.len(), 1);
+        let live = &result.lives[0];
+        assert_eq!(live.id, "12345");
+        assert_eq!(live.title, "测试直播间");
+        assert_eq!(live.author, "测试主播");
+        assert_eq!(live.badge, "直播间");
+        assert_eq!(live.url, "https://live.bilibili.com/12345");
+    }
+
+    #[test]
+    fn parses_server_rendered_user_card() {
+        let html = r#"
+            <div class="b-user-info-card">
+              <a href="//space.bilibili.com/98765"><img src="//i0.hdslb.com/avatar.jpg" /></a>
+              <a class="i_card_title" href="//space.bilibili.com/98765">测试用户</a>
+            </div>
+        "#;
+
+        let result = parse_web_search_html(html, "测试", "bili_user", 1, 6).unwrap();
+        assert_eq!(result.users.len(), 1);
+        let user = &result.users[0];
+        assert_eq!(user.id, "98765");
+        assert_eq!(user.mid, 98_765);
+        assert_eq!(user.title, "测试用户");
+        assert_eq!(user.author_face, "https://i0.hdslb.com/avatar.jpg");
+        assert_eq!(user.badge, "用户");
+    }
+
+    #[test]
+    fn rejects_unparseable_non_empty_page() {
+        let error = parse_web_search_html(
+            "<html><body><div>安全验证</div></body></html>",
+            "测试",
+            "all",
+            1,
+            6,
+        )
+        .unwrap_err();
+        assert!(error.contains("没有返回可解析"));
+    }
 }
 
 pub(crate) fn extract_cookie_value(cookie: &str, name: &str) -> Option<String> {

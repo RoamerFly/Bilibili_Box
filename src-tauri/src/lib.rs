@@ -146,6 +146,7 @@ pub fn run() {
             commands::window_start_dragging,
             commands::browser_login,
             commands::search_video,
+            commands::search_video_web,
             commands::verify_search_wind_control,
             commands::get_normal_info,
             commands::get_live_play_info,

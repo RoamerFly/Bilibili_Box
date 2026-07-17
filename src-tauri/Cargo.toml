@@ -50,6 +50,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # 正则表达式
 regex = "1"
+scraper = "0.23"
 
 # 错误处理
 anyhow = "1"

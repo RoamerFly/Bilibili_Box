@@ -68,6 +68,20 @@ const durationOptions: Array<{ value: SearchDuration; label: string }> = [
 
 type SearchResultType = "all" | "video" | "bangumi" | "film" | "live" | "article" | "user";
 type SearchCategoryType = Exclude<SearchResultType, "all">;
+type SearchBackend = "api" | "web";
+type RunSearchOptions = {
+  mode?: "replace" | "append" | "merge";
+  targetPage?: number;
+  targetType?: SearchCategoryType;
+  pageCount?: number;
+  searchType?: string;
+  backend?: SearchBackend;
+};
+type WebSearchOffer = {
+  rawInput: string;
+  filters: SearchFilters;
+  options: RunSearchOptions;
+};
 const SEARCH_PREFETCH_PAGES = 2;
 const SEARCH_STATE_CACHE_KEY = "search:last-state:v1";
 const DEFAULT_CATEGORY_PAGES: Record<SearchCategoryType, number> = {
@@ -80,23 +94,53 @@ const DEFAULT_CATEGORY_PAGES: Record<SearchCategoryType, number> = {
 };
 const authorFaceCache = new Map<number, string>();
 const authorFaceRequests = new Map<number, Promise<string>>();
+let authorFaceRequestQueue: Promise<void> = Promise.resolve();
 
-function resolveAuthorFace(mid: number): Promise<string> {
+function isPlaceholderAuthorFace(face: string): boolean {
+  const normalized = face.trim().toLowerCase();
+  return !normalized
+    || normalized.includes("/noface")
+    || normalized.includes("no-face")
+    || normalized.includes("default_avatar")
+    || normalized.includes("default-avatar")
+    || normalized.includes("default_face")
+    || normalized.includes("default-face");
+}
+
+function resolveAuthorFace(mid: number, forceRefresh = false): Promise<string> {
   if (mid <= 0) return Promise.resolve("");
   const cached = authorFaceCache.get(mid);
-  if (cached !== undefined) return Promise.resolve(cached);
+  if (!forceRefresh && cached) return Promise.resolve(cached);
   const pending = authorFaceRequests.get(mid);
   if (pending) return pending;
 
-  const request = loadCachedPageData(`search-author-face:v1:${mid}`, async () => {
-    const profile = await invoke<{ face?: string }>("get_up_profile", { mid });
-    return profile.face?.trim() || "";
-  })
+  const request = (async () => {
+    const cacheKey = `search-author-face:v2:${mid}`;
+    if (!forceRefresh) {
+      const persisted = await readCachedPageData<string>(cacheKey);
+      if (persisted && !isPlaceholderAuthorFace(persisted)) return persisted.trim();
+    }
+
+    // UP 资料接口对瞬时并发较敏感。搜索结果会同时渲染很多头像，串行补查可避免
+    // 一次性触发大量 card 请求后全部失败，再逐张显示默认头像。
+    const queuedRequest = authorFaceRequestQueue.then(async () => {
+      const profile = await invoke<{ face?: string }>("get_up_profile", { mid });
+      const face = profile.face?.trim() || "";
+      if (isPlaceholderAuthorFace(face)) return "";
+      await saveCachedPageData(cacheKey, face);
+      return face;
+    });
+    authorFaceRequestQueue = queuedRequest.then(() => undefined, () => undefined);
+    return queuedRequest;
+  })()
     .catch(() => "")
     .then((face) => {
-      authorFaceCache.set(mid, face);
-      authorFaceRequests.delete(mid);
+      // 失败或空头像不能进入内存/持久缓存，否则网络恢复后搜索页也永远不会重试。
+      if (face) authorFaceCache.set(mid, face);
       return face;
+    })
+    .finally(() => {
+      authorFaceRequests.delete(mid);
     });
   authorFaceRequests.set(mid, request);
   return request;
@@ -128,6 +172,16 @@ const SEARCH_TYPE_TO_TAB: Record<string, SearchResultType> = {
   article: "article",
   bili_user: "user",
 };
+
+function buildBilibiliWebSearchUrl(input: string, searchType?: string): string {
+  const route = searchType === "media_bangumi" ? "bangumi"
+    : searchType === "media_ft" ? "pgc"
+    : searchType === "live" ? "live"
+    : searchType === "article" ? "article"
+    : searchType === "bili_user" ? "upuser"
+    : "all";
+  return `https://search.bilibili.com/${route}?keyword=${encodeURIComponent(input.trim())}`;
+}
 
 const searchScopeOptions: Array<{ value: string; label: string }> = [
   { value: "all", label: "综合" },
@@ -191,6 +245,7 @@ export function SearchView() {
   const searchRequestIdRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [webSearchOffer, setWebSearchOffer] = useState<WebSearchOffer | null>(null);
   const [isFocused, setIsFocused] = useState(false);
 
   useEffect(() => {
@@ -262,6 +317,7 @@ export function SearchView() {
   const cardLayout = useCardLayout("search", viewMode);
   const {
     input: searchInput,
+    searchBackend = "api",
     filters: currentFilters,
     activeResultType = "all",
     activeLiveType = "room",
@@ -288,7 +344,7 @@ export function SearchView() {
   const runSearch = useCallback(async (
     rawInput: string,
     filters: SearchFilters,
-    options: { mode?: "replace" | "append" | "merge"; targetPage?: number; targetType?: SearchCategoryType; pageCount?: number; searchType?: string } = {}
+    options: RunSearchOptions = {}
   ) => {
     const input = rawInput.trim();
     if (!input) {
@@ -297,7 +353,8 @@ export function SearchView() {
     }
 
     const mode = options.mode ?? "replace";
-    const pageCount = options.pageCount ?? SEARCH_PREFETCH_PAGES;
+    const backend = options.backend ?? "api";
+    const pageCount = options.pageCount ?? (backend === "web" ? 1 : SEARCH_PREFETCH_PAGES);
     const searchType = options.searchType;
     const currentSearchState = useAppStore.getState().searchPageState;
     const currentAggregate: AggregateSearchResult | null = currentSearchState.result?.type === "Aggregate"
@@ -326,6 +383,7 @@ export function SearchView() {
     searchRequestIdRef.current = requestId;
     setLoading(true);
     setError("");
+    if (backend === "api") setWebSearchOffer(null);
     try {
       let mergedAggregate = (mode === "append" || mode === "merge") ? currentAggregate : null;
       let directResult: SearchResponse | null = null;
@@ -335,7 +393,8 @@ export function SearchView() {
       for (let offset = 0; offset < pageCount; offset += 1) {
         const page = startPage + offset;
         const cacheKey = [
-          "search-response:v2",
+          "search-response:v3",
+          backend,
           input,
           filters.order,
           filters.pubtime,
@@ -346,7 +405,7 @@ export function SearchView() {
         ].join(":");
         const data = await loadCachedPageData(
           cacheKey,
-          () => invoke<SearchResponse>("search_video", {
+          () => invoke<SearchResponse>(backend === "web" ? "search_video_web" : "search_video", {
             input,
             order: filters.order,
             pubtime: filters.pubtime,
@@ -371,7 +430,9 @@ export function SearchView() {
 
       if (requestId !== searchRequestIdRef.current) return;
       if (directResult) {
+        setWebSearchOffer(null);
         setSearchPageState({
+          searchBackend: backend,
           filters,
           result: directResult,
           currentPage: 1,
@@ -385,6 +446,7 @@ export function SearchView() {
       }
 
       if (mergedAggregate) {
+        setWebSearchOffer(null);
         // 追踪已加载的搜索类型
         const newLoadedTypes: SearchResultType[] = mode === "merge" && searchType
           ? Array.from(new Set([...(currentSearchState.loadedTypes ?? []), SEARCH_TYPE_TO_TAB[searchType] ?? "video"]))
@@ -417,6 +479,7 @@ export function SearchView() {
             ?? (mode === "append" ? nextCategoryPages[options.targetType] : 1);
         }
         setSearchPageState({
+          searchBackend: backend,
           filters,
           result: { type: "Aggregate", ...mergedAggregate },
           currentPage: options.targetPage ?? (mode === "append" ? currentSearchState.currentPage : 1),
@@ -433,14 +496,19 @@ export function SearchView() {
       if (requestId !== searchRequestIdRef.current) return;
       const errStr = String(err);
       
-      if (errStr.includes("WIND_CONTROL_REQUIRED:")) {
-        setError("搜索请求被 B 站暂时拦截。已保留现有搜索结果，请稍后手动重试；重新登录通常不能直接解除 412 风控。");
+      if (backend === "api" && errStr.includes("WIND_CONTROL_REQUIRED:")) {
+        setWebSearchOffer({ rawInput, filters, options: { ...options, backend: "web", pageCount: 1 } });
+        setError("API 搜索请求被 B 站暂时拦截。已保留现有结果，你可以稍后重试 API，或主动使用网页搜索兜底。");
+        return;
+      }
+      if (backend === "web" && errStr.includes("WEB_SEARCH_BLOCKED:")) {
+        setError("B 站网页搜索也被暂时拦截，已保留现有结果，请等待一段时间后再试。");
         return;
       } else {
         setError(errStr);
       }
 
-      if (mode === "replace") {
+      if (mode === "replace" && backend === "api") {
         setSearchPageState({ result: null, loadedPages: 0, hasMore: false, loadedTypes: [] });
       }
     } finally {
@@ -458,7 +526,7 @@ export function SearchView() {
       if (rawInput.trim()) {
         saveHistory(rawInput);
       }
-      await runSearch(rawInput, currentFilters, { mode: "replace", searchType });
+      await runSearch(rawInput, currentFilters, { mode: "replace", searchType, backend: "api" });
     },
     [currentFilters, runSearch, searchInput, searchScope, saveHistory]
   );
@@ -469,10 +537,10 @@ export function SearchView() {
 
       if (result?.type === "Aggregate" && lastAggregateInput) {
         const searchType = searchScope === "all" ? "all" : (TAB_TO_SEARCH_TYPE[searchScope] ?? "video");
-        void runSearch(lastAggregateInput, nextFilters, { mode: "replace", searchType });
+        void runSearch(lastAggregateInput, nextFilters, { mode: "replace", searchType, backend: searchBackend });
       }
     },
-    [lastAggregateInput, result?.type, runSearch, searchScope, setSearchPageState]
+    [lastAggregateInput, result?.type, runSearch, searchBackend, searchScope, setSearchPageState]
   );
 
   const handlePageChange = useCallback(
@@ -494,9 +562,15 @@ export function SearchView() {
       if (!lastAggregateInput) return;
       // 搜索全部时按当前激活 tab 的类型加载更多；单类型搜索时用该类型
       const searchType = TAB_TO_SEARCH_TYPE[type] ?? "video";
-      void runSearch(lastAggregateInput, currentFilters, { mode: "append", targetPage, targetType: type, searchType });
+      void runSearch(lastAggregateInput, currentFilters, {
+        mode: "append",
+        targetPage,
+        targetType: type,
+        searchType,
+        backend: searchBackend,
+      });
     },
-    [currentFilters, lastAggregateInput, runSearch]
+    [currentFilters, lastAggregateInput, runSearch, searchBackend]
   );
 
   const handleTabClick = useCallback(
@@ -1057,6 +1131,26 @@ export function SearchView() {
           }}
         />
 
+        {searchBackend === "web" && result ? (
+          <span
+            title="当前结果来自 B 站公开搜索网页的服务端 HTML"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              height: "30px",
+              padding: "0 10px",
+              borderRadius: "999px",
+              backgroundColor: "var(--color-primary-light)",
+              color: "var(--color-primary)",
+              fontSize: "11.5px",
+              fontWeight: 800,
+              whiteSpace: "nowrap",
+            }}
+          >
+            网页搜索结果
+          </span>
+        ) : null}
+
         <motion.button
           onClick={() => void handleSearch()}
           disabled={loading || !searchInput.trim()}
@@ -1311,9 +1405,62 @@ export function SearchView() {
               backgroundColor: "var(--color-error-bg)",
               color: "var(--color-error-text)",
               fontSize: "13.5px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+              flexWrap: "wrap",
             }}
           >
-            {error}
+            <span>{error}</span>
+            {webSearchOffer ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => void runSearch(
+                    webSearchOffer.rawInput,
+                    webSearchOffer.filters,
+                    webSearchOffer.options
+                  )}
+                  style={{
+                    height: "32px",
+                    padding: "0 12px",
+                    borderRadius: "9px",
+                    border: "1px solid color-mix(in srgb, var(--color-primary) 38%, var(--color-border))",
+                    backgroundColor: "var(--color-primary)",
+                    color: "#fff",
+                    fontSize: "12.5px",
+                    fontWeight: 700,
+                    cursor: loading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  使用网页搜索
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void openExternalUrl(
+                    buildBilibiliWebSearchUrl(
+                      webSearchOffer.rawInput,
+                      webSearchOffer.options.searchType
+                    )
+                  )}
+                  style={{
+                    height: "32px",
+                    padding: "0 12px",
+                    borderRadius: "9px",
+                    border: "1px solid var(--color-border)",
+                    backgroundColor: "var(--color-bg-secondary)",
+                    color: "var(--color-text-secondary)",
+                    fontSize: "12.5px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  在浏览器打开
+                </button>
+              </div>
+            ) : null}
           </motion.div>
         ) : null}
       </AnimatePresence>
@@ -1505,7 +1652,7 @@ function NormalVideoResult({
           </h3>
 
           <div style={{ display: "flex", alignItems: "center", gap: "9px", marginBottom: "12px" }}>
-            <AvatarImage src={video.owner.face} alt={video.owner.name} size={30} onClick={() => onOpenAuthor({ mid: video.owner.mid, name: video.owner.name, face: video.owner.face })} />
+            <AvatarImage src={video.owner.face} alt={video.owner.name} size={30} mid={video.owner.mid} onClick={() => onOpenAuthor({ mid: video.owner.mid, name: video.owner.name, face: video.owner.face })} />
             <span style={{ fontSize: "13.5px", color: "var(--color-text-secondary)", fontWeight: 500 }}>{video.owner.name}</span>
             <span style={{ fontSize: "12.5px", color: "var(--color-text-muted)" }}>发布于 {formatDateTime(video.pubdate)}</span>
           </div>
@@ -2114,11 +2261,11 @@ function AggregateBangumiCard({
 }
 
 function AvatarImage({ src, alt, size, mid = 0, onClick }: { src: string; alt: string; size: number; mid?: number; onClick?: () => void }) {
-  const [resolvedSrc, setResolvedSrc] = useState(src);
+  const [resolvedSrc, setResolvedSrc] = useState(() => isPlaceholderAuthorFace(src) ? "" : src);
 
   useEffect(() => {
     let cancelled = false;
-    if (src) {
+    if (!isPlaceholderAuthorFace(src)) {
       setResolvedSrc(src);
       return;
     }
@@ -2185,8 +2332,13 @@ function AvatarImage({ src, alt, size, mid = 0, onClick }: { src: string; alt: s
         alt={alt}
         loading="lazy"
         referrerPolicy="no-referrer"
-        onError={(event) => {
-          event.currentTarget.style.display = "none";
+        onError={() => {
+          const failedSrc = resolvedSrc;
+          setResolvedSrc("");
+          if (mid <= 0) return;
+          void resolveAuthorFace(mid, true).then((face) => {
+            if (face && face !== failedSrc) setResolvedSrc(face);
+          });
         }}
         style={{ width: "100%", height: "100%", objectFit: "cover", position: "relative" }}
       />

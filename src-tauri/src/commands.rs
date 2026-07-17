@@ -1607,6 +1607,33 @@ pub async fn search_video(
         .await
 }
 
+/// 用户主动选择的网页搜索兜底，不会由 API 搜索自动触发。
+#[tauri::command]
+pub async fn search_video_web(
+    bili_client: State<'_, Arc<BiliClient>>,
+    input: String,
+    order: Option<String>,
+    pubtime: Option<String>,
+    duration: Option<String>,
+    page: Option<i64>,
+    page_size: Option<i64>,
+    search_type: Option<String>,
+) -> Result<SearchResult, String> {
+    bili_client
+        .search_video_from_web(
+            &input,
+            SearchVideoOptions {
+                order,
+                pubtime,
+                duration,
+                page,
+                page_size,
+                search_type,
+            },
+        )
+        .await
+}
+
 /// 获取普通视频信息
 #[tauri::command]
 pub async fn get_normal_info(
