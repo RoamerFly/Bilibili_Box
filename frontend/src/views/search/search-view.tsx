@@ -2279,7 +2279,10 @@ function AvatarImage({ src, alt, size, mid = 0, onClick }: { src: string; alt: s
     };
   }, [mid, src]);
 
-  const normalizedSrc = formatBiliImageUrl(resolvedSrc, `@${size * 3}w_${size * 3}h_1c.webp`);
+  // 卡片缩放后 size 可能是 21.12 之类的小数，而 B 站图片 CDN 的宽高参数只接受整数。
+  // 小数规格会返回 400，随后 img 的错误回退就会让所有卡片看起来都是同一个默认头像。
+  const cdnImageSize = Math.max(1, Math.round(size * 3));
+  const normalizedSrc = formatBiliImageUrl(resolvedSrc, `@${cdnImageSize}w_${cdnImageSize}h_1c.webp`);
   const baseStyle = {
     width: size,
     height: size,
