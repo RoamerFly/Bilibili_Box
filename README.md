@@ -80,6 +80,8 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 
 ![Home Preview](./docs/screenshots/home.png)
 
+![Home_an Preview](./docs/screenshots/home_an.png)
+
 ### 搜索内容
 
 ![Search Preview](./docs/screenshots/search.png)
