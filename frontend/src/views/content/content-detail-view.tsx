@@ -62,6 +62,8 @@ interface ArticleCollectionItem {
   author_name: string;
 }
 
+const ARTICLE_COMMENT_TYPE = 12;
+
 export function ContentDetailView() {
   const content = useAppStore((s) => s.contentDetailState);
   const contentDetailStackLength = useAppStore((s) => s.contentDetailStack.length);
@@ -179,6 +181,10 @@ export function ContentDetailView() {
   } : content.author;
   const displayCover = content.kind === "articleList" ? collectionInfo?.cover || content.cover : articleInfo?.banner_url || content.cover;
   const browserUrl = content.url || buildContentBrowserUrl(content.kind, content);
+  const commentOid = content.commentOid
+    || (content.kind === "article" ? articleInfo?.id || content.articleId : undefined);
+  const commentType = content.commentType
+    || (content.kind === "article" && commentOid ? ARTICLE_COMMENT_TYPE : undefined);
   const images = (() => {
     if (content.kind === "live" || content.kind === "articleList") return [];
     const items: ArticleImageInfo[] = [];
@@ -445,11 +451,11 @@ export function ContentDetailView() {
           )
         ) : null}
       </motion.article>
-      {showComments && content.commentOid && content.commentType ? (
+      {showComments && commentOid && commentType ? (
         <CommentsSection
-          oid={content.commentOid}
-          typeId={content.commentType}
-          refreshKey={`${content.id}:${articleInfo?.id || ""}:${collectionInfo?.id || ""}`}
+          oid={commentOid}
+          typeId={commentType}
+          refreshKey={`${content.id}:${commentOid}:${commentType}`}
         />
       ) : null}
       {previewImage ? (

@@ -18,6 +18,7 @@ pub struct BangumiInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BangumiEpisode {
     pub ep_id: i64,
+    pub aid: i64,
     pub bvid: String,
     pub cid: i64,
     pub title: String,
@@ -145,6 +146,7 @@ impl super::BiliClient {
                                 .get("ep_id")
                                 .and_then(|v| v.as_i64())
                                 .or_else(|| ep.get("id").and_then(|v| v.as_i64()))?,
+                            aid: ep.get("aid").and_then(|v| v.as_i64()).unwrap_or(0),
                             bvid: ep
                                 .get("bvid")
                                 .and_then(|v| v.as_str())

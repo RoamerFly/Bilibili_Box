@@ -136,6 +136,7 @@ export interface BangumiInfo {
   evaluate: string;
   episodes: Array<{
     ep_id: number;
+    aid: number;
     bvid: string;
     cid: number;
     title: string;

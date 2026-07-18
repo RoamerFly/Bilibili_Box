@@ -37,6 +37,7 @@ import coin33Img from "@/assets/33-coin-ani.png";
 interface EpisodeOption {
   label: string;
   title: string;
+  aid?: number;
   bvid: string;
   cid: number;
   epId?: number;
@@ -245,6 +246,7 @@ export function PlayerView() {
     const nextEpisodes = info.episodes.map((episode, index) => ({
       label: `EP${index + 1}`,
       title: episode.long_title || episode.title,
+      aid: episode.aid,
       bvid: episode.bvid,
       cid: episode.cid,
       epId: episode.ep_id,
@@ -381,8 +383,8 @@ export function PlayerView() {
 
   const currentEpisodeTitle = selectedEpisode?.title || playerState?.title || currentTitle;
   const cover = bangumiInfo?.cover || videoInfo?.pic || playerState?.cover || "";
-  const commentOid = videoInfo?.aid ?? null;
-  const commentType = videoInfo ? 1 : null;
+  const commentOid = videoInfo?.aid || selectedEpisode?.aid || null;
+  const commentType = commentOid ? 1 : null;
   const browserUrl = useMemo(() => {
     if (!playerState) return "";
     if (playerState.kind === "bangumi") {
