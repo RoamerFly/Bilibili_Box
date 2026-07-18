@@ -1166,7 +1166,16 @@ export function PlayerView() {
                 </button>
               ) : null}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "420px", overflowY: "auto" }}>
+            <div
+              style={{
+                display: "grid",
+                gridAutoRows: "max-content",
+                alignContent: "start",
+                gap: "8px",
+                maxHeight: "420px",
+                overflowY: "auto",
+              }}
+            >
               {episodes.map((episode) => {
                 const active = selectedEpisode?.cid === episode.cid;
                 const episodeKey = `${episode.bvid}-${episode.cid}`;
@@ -1179,6 +1188,7 @@ export function PlayerView() {
                       alignItems: "center",
                       justifyContent: "space-between",
                       gap: "10px",
+                      minHeight: "58px",
                       borderRadius: "10px",
                       border: active ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
                       backgroundColor: active ? "var(--color-primary-light)" : "var(--color-bg-secondary)",
@@ -1191,7 +1201,11 @@ export function PlayerView() {
                       style={{
                         minWidth: 0,
                         flex: 1,
-                        padding: "10px 0 10px 12px",
+                        alignSelf: "stretch",
+                        display: "grid",
+                        alignContent: "center",
+                        gap: "3px",
+                        padding: "8px 0 8px 12px",
                         border: 0,
                         color: "inherit",
                         background: "transparent",
@@ -1199,15 +1213,18 @@ export function PlayerView() {
                         textAlign: "left",
                       }}
                     >
-                      <div style={{ fontSize: "13.5px", fontWeight: 700, color: "var(--color-text)" }}>{episode.label}</div>
+                      <div style={{ fontSize: "13.5px", lineHeight: 1.2, fontWeight: 700, color: "var(--color-text)" }}>{episode.label}</div>
                       <div
                         style={{
                           fontSize: "12.5px",
+                          lineHeight: 1.25,
                           color: "var(--color-text-muted)",
-                          marginTop: "2px",
+                          display: "-webkit-box",
+                          WebkitBoxOrient: "vertical",
+                          WebkitLineClamp: 2,
                           overflow: "hidden",
                           textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
+                          whiteSpace: "normal",
                         }}
                       >
                         {episode.title}
