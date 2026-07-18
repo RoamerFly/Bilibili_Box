@@ -3,7 +3,7 @@ name = "bilibili-box"
 version = "1.0.6"
 description = "BiliBox - Bilibili 媒体工作站"
 authors = ["BiliBox"]
-license = "MIT"
+license-file = "../LICENSE"
 edition = "2021"
 rust-version = "1.77.2"
 

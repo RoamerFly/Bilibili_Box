@@ -20,12 +20,13 @@
   </p>
 
   <p>
-    <img alt="Rust" src="https://img.shields.io/badge/Rust-1.77%2B-f46623?style=for-the-badge&logo=rust&logoColor=white" />
-    <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.x-24c8db?style=for-the-badge&logo=tauri&logoColor=white" />
-    <img alt="React" src="https://img.shields.io/badge/React-19-61dafb?style=for-the-badge&logo=react&logoColor=20232a" />
-    <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.x-3178c6?style=for-the-badge&logo=typescript&logoColor=white" />
-    <img alt="Downloads" src="https://img.shields.io/github/downloads/RoamerFly/Bilibili_Box/total?style=for-the-badge&logo=github&color=34d399" />
-    <img alt="License" src="https://img.shields.io/badge/License-MIT-7c3aed?style=for-the-badge" />
+    <a href="https://github.com/RoamerFly/Bilibili_Box/releases/latest"><img src="https://img.shields.io/github/v/release/RoamerFly/Bilibili_Box?style=flat-square" alt="Release" /></a>
+    <a href="https://github.com/RoamerFly/Bilibili_Box/releases"><img src="https://img.shields.io/github/downloads/RoamerFly/Bilibili_Box/total?style=flat-square" alt="Downloads" /></a>
+    <a href="https://github.com/RoamerFly/Bilibili_Box/stargazers"><img src="https://img.shields.io/github/stars/RoamerFly/Bilibili_Box?style=flat-square" alt="Stars" /></a>
+    <img src="https://img.shields.io/badge/Source-Source%20Available-2ea44f?style=flat-square" alt="Source Available" />
+    <img src="https://img.shields.io/badge/Frontend-React%20%7C%20Vite%20%7C%20TypeScript-3178c6?style=flat-square" alt="Frontend" />
+    <img src="https://img.shields.io/badge/Backend-Rust%20%7C%20Tauri-f46623?style=flat-square" alt="Backend" />
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-Non--Commercial-red?style=flat-square" alt="Non-Commercial License" /></a>
   </p>
 </div>
 
@@ -248,4 +249,6 @@ bilibili-box/
 
 ## License
 
-[MIT](./LICENSE)
+[BiliBox Non-Commercial License](./LICENSE)
+
+本项目仅允许个人、教育、研究及其他非商业用途。商业使用、付费服务或商业再分发须事先获得版权所有者的书面许可。
