@@ -54,6 +54,7 @@ impl super::BiliClient {
                 ("oid", oid),
                 ("pn", pn.to_string()),
                 ("ps", ps.to_string()),
+                ("sort", "2".to_string()),
             ],
             pn,
             ps,

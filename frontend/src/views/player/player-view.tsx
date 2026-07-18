@@ -1029,7 +1029,7 @@ export function PlayerView() {
                       <SelectTrigger style={playerSelectStyle} className="min-w-[80px] border-white/30 bg-black/40 text-white h-[30px] rounded-[7px]">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent className="z-[1050]">
+                      <SelectContent side="top" className="z-[1050] max-h-[320px] overflow-y-auto">
                         {availableQualities.length ? availableQualities.map((quality) => (
                           <SelectItem key={quality} value={String(quality)}>
                             {PLAYBACK_QUALITY_LABELS[quality] || `${quality}P`}
@@ -1044,7 +1044,7 @@ export function PlayerView() {
                       <SelectTrigger style={playerSelectStyle} className="min-w-[65px] border-white/30 bg-black/40 text-white h-[30px] rounded-[7px]">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent className="z-[1050]">
+                      <SelectContent side="top" className="z-[1050] max-h-[320px] overflow-y-auto">
                         {PLAYBACK_SPEEDS.map((rate) => (
                           <SelectItem key={rate} value={String(rate)}>
                             {rate}x

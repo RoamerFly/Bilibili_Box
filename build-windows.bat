@@ -23,6 +23,7 @@ set "OUTPUT_DIR=dist_windows"
 set "TAURI_RELEASE_DIR=src-tauri\target\release"
 set "ICON_SOURCE=icon.png"
 set "REFRESH_ICONS=0"
+set "BILIBOX_FRONTEND_ROOT=%PROJECT_ROOT%frontend"
 
 if /I "%~1"=="--refresh-icons" (
     set "REFRESH_ICONS=1"
@@ -40,12 +41,12 @@ echo.
 
 echo [1/5] Installing locked dependencies...
 where npm >nul 2>nul
-if errorlevel 1 (
+if not "!ERRORLEVEL!"=="0" (
     echo ERROR: npm was not found. Install Node.js or add npm to PATH.
     exit /b 1
 )
 where cargo >nul 2>nul
-if errorlevel 1 (
+if not "!ERRORLEVEL!"=="0" (
     echo ERROR: cargo was not found. Install Rust or add %%USERPROFILE%%\.cargo\bin to PATH.
     exit /b 1
 )
@@ -61,16 +62,12 @@ if not exist "src-tauri\Cargo.lock" (
     echo ERROR: src-tauri\Cargo.lock was not found.
     exit /b 1
 )
-call npm ci --no-audit --no-fund
-if errorlevel 1 (
-    echo ERROR: Root dependency installation failed.
-    exit /b 1
-)
-call npm --prefix frontend ci --no-audit --no-fund
-if errorlevel 1 (
-    echo ERROR: Frontend dependency installation failed.
-    exit /b 1
-)
+call :stop_project_vite
+if not "!ERRORLEVEL!"=="0" exit /b 1
+call :npm_ci_with_retry "." "Root"
+if not "!ERRORLEVEL!"=="0" exit /b 1
+call :npm_ci_with_retry "frontend" "Frontend"
+if not "!ERRORLEVEL!"=="0" exit /b 1
 
 echo.
 if "%REFRESH_ICONS%"=="1" (
@@ -80,7 +77,7 @@ if "%REFRESH_ICONS%"=="1" (
         exit /b 1
     )
     call npm run tauri -- icon "%ICON_SOURCE%"
-    if errorlevel 1 (
+    if not "!ERRORLEVEL!"=="0" (
         echo ERROR: Icon generation failed.
         exit /b 1
     )
@@ -97,7 +94,7 @@ if "%REFRESH_ICONS%"=="1" (
 echo.
 echo [3/5] Building frontend...
 call npm run build
-if errorlevel 1 (
+if not "!ERRORLEVEL!"=="0" (
     echo ERROR: Frontend build failed.
     exit /b 1
 )
@@ -105,7 +102,7 @@ if errorlevel 1 (
 echo.
 echo [4/5] Building Tauri application...
 call npm run tauri -- build -- --locked
-if errorlevel 1 (
+if not "!ERRORLEVEL!"=="0" (
     echo ERROR: Tauri build failed.
     exit /b 1
 )
@@ -133,7 +130,7 @@ if exist "%TAURI_RELEASE_DIR%\bilibili-box.exe" (
     echo ERROR: Tauri executable not found in %TAURI_RELEASE_DIR%.
     exit /b 1
 )
-if errorlevel 1 (
+if not "!ERRORLEVEL!"=="0" (
     echo ERROR: Failed to copy the application executable.
     exit /b 1
 )
@@ -148,9 +145,9 @@ if exist "%PROJECT_ENV%\" (
 )
 
 call :copy_runtime_tool ffmpeg.exe
-if errorlevel 1 exit /b 1
+if not "!ERRORLEVEL!"=="0" exit /b 1
 call :copy_runtime_tool ffprobe.exe
-if errorlevel 1 exit /b 1
+if not "!ERRORLEVEL!"=="0" exit /b 1
 
 echo.
 echo ============================================
@@ -161,6 +158,37 @@ echo.
 echo Generated files:
 dir /b "%OUTPUT_DIR%"
 exit /b 0
+
+:stop_project_vite
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$frontend = [IO.Path]::GetFullPath($env:BILIBOX_FRONTEND_ROOT).TrimEnd('\'); $targets = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -and $_.CommandLine.Contains($frontend + '\node_modules\') -and $_.CommandLine -match '[\\/]vite[\\/]bin[\\/]vite\.js' }); foreach ($target in $targets) { Write-Host ('  - Stopping project Vite process PID ' + $target.ProcessId + ' before locked dependency installation.'); Stop-Process -Id $target.ProcessId -Force -ErrorAction Stop; Wait-Process -Id $target.ProcessId -Timeout 5 -ErrorAction SilentlyContinue }"
+if not "!ERRORLEVEL!"=="0" (
+    echo ERROR: Failed to stop the project Vite development process.
+    echo Close the running development server and try again.
+    exit /b 1
+)
+exit /b 0
+
+:npm_ci_with_retry
+setlocal EnableDelayedExpansion
+set "DEPENDENCY_DIR=%~1"
+set "DEPENDENCY_LABEL=%~2"
+set "INSTALL_ATTEMPT=1"
+:npm_ci_retry
+call npm --prefix "!DEPENDENCY_DIR!" ci --no-audit --no-fund
+set "INSTALL_EXIT_CODE=!ERRORLEVEL!"
+if "!INSTALL_EXIT_CODE!"=="0" (
+    endlocal & exit /b 0
+)
+if !INSTALL_ATTEMPT! GEQ 3 (
+    echo ERROR: !DEPENDENCY_LABEL! dependency installation failed with exit code !INSTALL_EXIT_CODE!.
+    echo Close applications or antivirus scans using node_modules, then run the build again.
+    endlocal & exit /b 1
+)
+echo WARNING: !DEPENDENCY_LABEL! dependency installation failed with exit code !INSTALL_EXIT_CODE!.
+echo Retrying in 2 seconds ^(!INSTALL_ATTEMPT!/3^)...
+timeout /t 2 /nobreak >nul
+set /a INSTALL_ATTEMPT+=1
+goto npm_ci_retry
 
 :copy_runtime_tool
 set "TOOL_NAME=%~1"
@@ -179,7 +207,7 @@ if not defined TOOL_SOURCE (
 )
 echo   - Copying %TOOL_NAME% from !TOOL_SOURCE!
 copy "!TOOL_SOURCE!" "%OUTPUT_DIR%\env\%TOOL_NAME%" /y >nul
-if errorlevel 1 (
+if not "!ERRORLEVEL!"=="0" (
     echo ERROR: Failed to copy %TOOL_NAME%.
     exit /b 1
 )

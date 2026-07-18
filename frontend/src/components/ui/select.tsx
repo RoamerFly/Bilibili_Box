@@ -112,20 +112,30 @@ const SelectTrigger = React.forwardRef<
 });
 SelectTrigger.displayName = "SelectTrigger";
 
-const SelectContent = ({ className, children }: { className?: string; children?: React.ReactNode }) => {
+const SelectContent = ({
+  className,
+  children,
+  side = "bottom",
+}: {
+  className?: string;
+  children?: React.ReactNode;
+  side?: "top" | "bottom";
+}) => {
   const context = React.useContext(SelectContext);
   if (!context) return null;
+  const motionOffset = side === "top" ? -4 : 4;
 
   return (
     <AnimatePresence>
       {context.open && (
         <motion.div
-          initial={{ opacity: 0, y: 4, scale: 0.97 }}
+          initial={{ opacity: 0, y: motionOffset, scale: 0.97 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 4, scale: 0.97 }}
+          exit={{ opacity: 0, y: motionOffset, scale: 0.97 }}
           transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
           className={cn(
             "absolute top-[calc(100%+6px)] left-0 z-[2000] min-w-[8rem] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/95 backdrop-blur-xl p-1.5 shadow-[0_12px_42px_rgba(0,0,0,0.16)]",
+            side === "top" && "top-auto bottom-[calc(100%+6px)] origin-bottom",
             className
           )}
         >

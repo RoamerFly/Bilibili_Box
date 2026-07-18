@@ -188,6 +188,7 @@ pub struct ArticleDetailInfo {
     pub summary: String,
     pub content_text: String,
     pub images: Vec<ArticleImageInfo>,
+    pub content_blocks: Vec<ArticleContentBlock>,
     #[serde(default)]
     pub collection: Option<ArticleCollectionSummary>,
     pub banner_url: String,
@@ -199,6 +200,17 @@ pub struct ArticleDetailInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArticleImageInfo {
     pub url: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleContentBlock {
+    pub kind: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
     pub title: String,
 }
 
@@ -424,11 +436,14 @@ impl super::BiliClient {
 
         let mut content_text = String::new();
         let mut images = Vec::new();
+        let mut content_blocks = Vec::new();
         if let Some(content) = data.get("content").and_then(Value::as_str) {
             if let Ok(content_json) = serde_json::from_str::<Value>(content) {
                 extract_article_content(&content_json, &mut content_text, &mut images);
+                extract_article_json_blocks(&content_json, &mut content_blocks);
             } else {
                 extract_article_html_content(content, &mut content_text, &mut images);
+                extract_article_html_blocks(content, &mut content_blocks);
             }
         }
         if images.is_empty() {
@@ -438,13 +453,26 @@ impl super::BiliClient {
             extract_article_content_image_list(data.get("origin_image_urls"), &mut images);
             extract_article_content_image_list(data.get("image_urls"), &mut images);
         }
-        let banner_url = data
-            .get("banner_url")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
+        let banner_url = extract_article_banner_url(&data);
         images.retain(|image| image.url != banner_url);
         images = dedupe_article_images(images);
+        content_blocks = normalize_article_content_blocks(content_blocks, &banner_url);
+        if content_blocks.is_empty() && !content_text.trim().is_empty() {
+            content_blocks.push(ArticleContentBlock {
+                kind: "text".to_string(),
+                text: content_text.trim().to_string(),
+                url: String::new(),
+                title: String::new(),
+            });
+        }
+        if !content_blocks.iter().any(|block| block.kind == "image") {
+            content_blocks.extend(images.iter().map(|image| ArticleContentBlock {
+                kind: "image".to_string(),
+                text: String::new(),
+                url: image.url.clone(),
+                title: image.title.clone(),
+            }));
+        }
 
         let author = data.get("author").unwrap_or(&Value::Null);
         Ok(ArticleDetailInfo {
@@ -461,6 +489,7 @@ impl super::BiliClient {
                 .to_string(),
             content_text: content_text.trim().to_string(),
             images,
+            content_blocks,
             collection: extract_article_collection_summary(&data),
             banner_url,
             author_mid: author
@@ -3205,6 +3234,59 @@ fn extract_article_content(value: &Value, text: &mut String, images: &mut Vec<Ar
     }
 }
 
+fn extract_article_json_blocks(value: &Value, blocks: &mut Vec<ArticleContentBlock>) {
+    match value {
+        Value::Object(map) => {
+            if let Some(insert) = map.get("insert") {
+                extract_article_json_insert_block(insert, blocks);
+                return;
+            }
+            for child in map.values() {
+                extract_article_json_blocks(child, blocks);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                extract_article_json_blocks(item, blocks);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_article_json_insert_block(value: &Value, blocks: &mut Vec<ArticleContentBlock>) {
+    match value {
+        Value::String(raw) => {
+            let text = raw.trim();
+            if !text.is_empty() {
+                blocks.push(ArticleContentBlock {
+                    kind: "text".to_string(),
+                    text: text.to_string(),
+                    url: String::new(),
+                    title: String::new(),
+                });
+            }
+        }
+        Value::Object(map) => {
+            let mut images = Vec::new();
+            for key in ["native-image", "nativeImage", "image", "image-upload", "imageUpload", "image_upload"] {
+                if let Some(node) = map.get(key) {
+                    extract_article_images(node, &mut images);
+                }
+            }
+            for image in dedupe_article_images(images) {
+                blocks.push(ArticleContentBlock {
+                    kind: "image".to_string(),
+                    text: String::new(),
+                    url: image.url,
+                    title: image.title,
+                });
+            }
+        }
+        _ => {}
+    }
+}
+
 fn extract_article_insert(value: &Value, text: &mut String, images: &mut Vec<ArticleImageInfo>) {
     match value {
         Value::String(raw) => {
@@ -3303,6 +3385,52 @@ fn extract_article_html_content(html: &str, text: &mut String, images: &mut Vec<
     }
 }
 
+fn extract_article_html_blocks(html: &str, blocks: &mut Vec<ArticleContentBlock>) {
+    let Ok(block_re) = regex::Regex::new(
+        r#"(?is)<figure\b[^>]*>.*?</figure\s*>|<p\b[^>]*>.*?</p\s*>|<h[1-6]\b[^>]*>.*?</h[1-6]\s*>|<blockquote\b[^>]*>.*?</blockquote\s*>|<li\b[^>]*>.*?</li\s*>"#,
+    ) else {
+        return;
+    };
+
+    for matched in block_re.find_iter(html) {
+        let block = matched.as_str();
+        if block.trim_start().to_ascii_lowercase().starts_with("<figure") {
+            let mut images = Vec::new();
+            extract_article_html_images(block, &extract_html_figcaption(block), &mut images);
+            for image in dedupe_article_images(images) {
+                blocks.push(ArticleContentBlock {
+                    kind: "image".to_string(),
+                    text: String::new(),
+                    url: image.url,
+                    title: image.title,
+                });
+            }
+            continue;
+        }
+
+        let text = extract_article_html_text_block(block);
+        if !text.is_empty() {
+            blocks.push(ArticleContentBlock {
+                kind: "text".to_string(),
+                text,
+                url: String::new(),
+                title: String::new(),
+            });
+        }
+    }
+}
+
+fn extract_article_html_text_block(html: &str) -> String {
+    let mut plain = html.to_string();
+    if let Ok(re) = regex::Regex::new(r"(?i)<br\s*/?>") {
+        plain = re.replace_all(&plain, "\n").to_string();
+    }
+    if let Ok(re) = regex::Regex::new(r"(?is)<[^>]+>") {
+        plain = re.replace_all(&plain, "").to_string();
+    }
+    clean_html_text(&plain)
+}
+
 fn extract_article_html_images(html: &str, title: &str, images: &mut Vec<ArticleImageInfo>) {
     let Ok(img_re) = regex::Regex::new(r#"(?is)<img\b[^>]*>"#) else {
         return;
@@ -3392,6 +3520,26 @@ fn dedupe_article_images(images: Vec<ArticleImageInfo>) -> Vec<ArticleImageInfo>
     images
         .into_iter()
         .filter(|image| !image.url.trim().is_empty() && seen.insert(image.url.clone()))
+        .collect()
+}
+
+fn normalize_article_content_blocks(
+    blocks: Vec<ArticleContentBlock>,
+    banner_url: &str,
+) -> Vec<ArticleContentBlock> {
+    blocks
+        .into_iter()
+        .filter_map(|mut block| match block.kind.as_str() {
+            "text" => {
+                block.text = block.text.trim().to_string();
+                (!block.text.is_empty()).then_some(block)
+            }
+            "image" => {
+                let keep = !block.url.trim().is_empty() && block.url != banner_url;
+                keep.then_some(block)
+            }
+            _ => None,
+        })
         .collect()
 }
 
@@ -3584,6 +3732,21 @@ fn first_image_url_in_value(value: &Value) -> Option<String> {
     }
 }
 
+fn extract_article_banner_url(value: &Value) -> String {
+    value
+        .get("banner_url")
+        .and_then(Value::as_str)
+        .filter(|url| !url.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            value
+                .pointer("/opus/article")
+                .and_then(|article| first_image_field(article, &["cover"]))
+        })
+        .or_else(|| first_image_field(value, &["image_urls", "origin_image_urls"]))
+        .unwrap_or_default()
+}
+
 fn first_image_field(value: &Value, names: &[&str]) -> Option<String> {
     for name in names {
         let Some(node) = value.get(*name) else {
@@ -3716,6 +3879,46 @@ fn parse_bool_like(value: &Value) -> bool {
 #[cfg(test)]
 mod web_search_tests {
     use super::*;
+
+    #[test]
+    fn falls_back_to_opus_article_cover_for_legacy_article_banner() {
+        let data = serde_json::json!({
+            "banner_url": "",
+            "image_urls": ["https://i0.hdslb.com/bfs/article/fallback.png"],
+            "opus": {
+                "article": {
+                    "cover": [{ "url": "https://i0.hdslb.com/bfs/article/opus-cover.png" }]
+                }
+            }
+        });
+
+        assert_eq!(
+            extract_article_banner_url(&data),
+            "https://i0.hdslb.com/bfs/article/opus-cover.png"
+        );
+    }
+
+    #[test]
+    fn preserves_article_html_text_and_image_order() {
+        let html = r#"
+            <figure><img src="//i0.hdslb.com/bfs/article/first.png" /><figcaption>第一张图</figcaption></figure>
+            <p>第一段文字</p>
+            <figure><img src="//i0.hdslb.com/bfs/article/second.png" /><figcaption>第二张图</figcaption></figure>
+            <p>第二段文字</p>
+        "#;
+        let mut blocks = Vec::new();
+        extract_article_html_blocks(html, &mut blocks);
+
+        assert_eq!(blocks.len(), 4);
+        assert_eq!(blocks[0].kind, "image");
+        assert_eq!(blocks[0].title, "第一张图");
+        assert_eq!(blocks[1].kind, "text");
+        assert_eq!(blocks[1].text, "第一段文字");
+        assert_eq!(blocks[2].kind, "image");
+        assert_eq!(blocks[2].title, "第二张图");
+        assert_eq!(blocks[3].kind, "text");
+        assert_eq!(blocks[3].text, "第二段文字");
+    }
 
     #[test]
     fn parses_server_rendered_video_card() {

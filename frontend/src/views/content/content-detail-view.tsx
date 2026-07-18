@@ -25,6 +25,7 @@ interface ArticleDetailInfo {
   summary: string;
   content_text: string;
   images: ArticleImageInfo[];
+  content_blocks: ArticleContentBlock[];
   collection?: ArticleCollectionSummary | null;
   banner_url: string;
   author_mid: number;
@@ -33,6 +34,13 @@ interface ArticleDetailInfo {
 }
 
 interface ArticleImageInfo {
+  url: string;
+  title: string;
+}
+
+interface ArticleContentBlock {
+  kind: "text" | "image";
+  text: string;
   url: string;
   title: string;
 }
@@ -179,20 +187,27 @@ export function ContentDetailView() {
     name: articleInfo.author_name || content.author?.name || "专栏作者",
     face: articleInfo.author_face || content.author?.face || "",
   } : content.author;
-  const displayCover = content.kind === "articleList" ? collectionInfo?.cover || content.cover : articleInfo?.banner_url || content.cover;
+  const articleBannerUrl = content.kind === "article"
+    ? articleInfo?.banner_url || content.cover || content.images[0] || ""
+    : "";
+  const displayCover = content.kind === "articleList" ? collectionInfo?.cover || content.cover : articleBannerUrl || content.cover;
   const browserUrl = content.url || buildContentBrowserUrl(content.kind, content);
   const commentOid = content.commentOid
     || (content.kind === "article" ? articleInfo?.id || content.articleId : undefined);
   const commentType = content.commentType
     || (content.kind === "article" && commentOid ? ARTICLE_COMMENT_TYPE : undefined);
+  const articleContentBlocks = articleInfo?.content_blocks || [];
+  const hasOrderedArticleContent = content.kind === "article" && articleContentBlocks.length > 0;
   const images = (() => {
     if (content.kind === "live" || content.kind === "articleList") return [];
     const items: ArticleImageInfo[] = [];
     for (const image of articleInfo?.images || []) {
       if (image.url) items.push(image);
     }
-    for (const url of content.images || []) {
-      if (url) items.push({ url, title: "" });
+    if (content.kind !== "article") {
+      for (const url of content.images || []) {
+        if (url) items.push({ url, title: "" });
+      }
     }
     if (displayCover && content.kind !== "article") {
       items.push({ url: displayCover, title: "" });
@@ -226,7 +241,21 @@ export function ContentDetailView() {
           padding: "24px",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: "16px", alignItems: "flex-start", flexWrap: "wrap" }}>
+        {content.kind === "article" && articleBannerUrl ? (
+          <img
+            src={formatBiliImageUrl(articleBannerUrl, "@1400w_420h_1c.webp")}
+            alt={`${displayTitle} 顶部横幅`}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            style={{ width: "100%", maxHeight: "320px", objectFit: "cover", borderRadius: "14px", marginBottom: "22px", backgroundColor: "var(--color-bg-subtle)" }}
+          />
+        ) : null}
+        {content.kind === "article" ? (
+          <h1 style={{ margin: 0, color: "var(--color-text)", fontSize: "24px", lineHeight: 1.35, fontWeight: 850 }}>
+            {displayTitle}
+          </h1>
+        ) : null}
+        <div style={{ marginTop: content.kind === "article" ? "14px" : 0, display: "flex", justifyContent: "space-between", gap: "16px", alignItems: "flex-start", flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
             {displayAuthor ? (
               <ClickableAvatar
@@ -283,9 +312,11 @@ export function ContentDetailView() {
           </div>
         </div>
 
-        <h1 style={{ marginTop: "22px", color: "var(--color-text)", fontSize: "24px", lineHeight: 1.35, fontWeight: 850 }}>
-          {displayTitle}
-        </h1>
+        {content.kind !== "article" ? (
+          <h1 style={{ marginTop: "22px", color: "var(--color-text)", fontSize: "24px", lineHeight: 1.35, fontWeight: 850 }}>
+            {displayTitle}
+          </h1>
+        ) : null}
 
         {articleLoading ? (
           <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "8px", color: "var(--color-primary)", fontSize: "14px", fontWeight: 800 }}>
@@ -316,12 +347,12 @@ export function ContentDetailView() {
           />
         ) : null}
 
-        {displayText || displayContentText ? (
+        {!hasOrderedArticleContent && (displayText || displayContentText) ? (
           <div style={{ marginTop: "14px", display: "grid", gap: "8px", color: "var(--color-text-secondary)", fontSize: "15px", lineHeight: 1.75 }}>
             {displayText ? <p style={{ whiteSpace: "pre-wrap" }}>动态简介: {displayText}</p> : null}
             {displayContentText ? <p style={{ whiteSpace: "pre-wrap" }}>{displayContentText}</p> : null}
           </div>
-        ) : content.kind !== "articleList" ? (
+        ) : !hasOrderedArticleContent && content.kind !== "articleList" ? (
           <div style={{ marginTop: "16px", color: "var(--color-text-muted)", fontSize: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
             {content.kind === "image" ? <ImageIcon style={{ width: 17, height: 17 }} /> : <Link2 style={{ width: 17, height: 17 }} />}
             这条内容没有文字说明
@@ -369,6 +400,14 @@ export function ContentDetailView() {
           </button>
         ) : null}
 
+        {hasOrderedArticleContent ? (
+          <ArticleContentBody
+            blocks={articleContentBlocks}
+            articleTitle={displayTitle}
+            onPreview={setPreviewImage}
+          />
+        ) : null}
+
         {content.kind === "articleList" ? (
           <ArticleCollectionBlock
             info={collectionInfo}
@@ -394,7 +433,7 @@ export function ContentDetailView() {
           />
         ) : null}
 
-        {images.length ? (
+        {images.length && !hasOrderedArticleContent ? (
           content.kind === "article" ? (
             <div style={{ marginTop: "26px", display: "grid", gap: "28px" }}>
               {images.map((image, index) => (
@@ -476,6 +515,58 @@ export function ContentDetailView() {
           </figure>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ArticleContentBody({
+  blocks,
+  articleTitle,
+  onPreview,
+}: {
+  blocks: ArticleContentBlock[];
+  articleTitle: string;
+  onPreview: (image: ArticleImageInfo) => void;
+}) {
+  return (
+    <div style={{ marginTop: "26px", display: "grid", gap: "22px" }}>
+      {blocks.map((block, index) => {
+        if (block.kind === "text") {
+          return (
+            <p
+              key={`text-${index}`}
+              style={{ margin: 0, whiteSpace: "pre-wrap", color: "var(--color-text-secondary)", fontSize: "15px", lineHeight: 1.85 }}
+            >
+              {block.text}
+            </p>
+          );
+        }
+
+        const image = { url: block.url, title: block.title };
+        return (
+          <figure key={`${block.url}-${index}`} style={{ margin: 0, display: "grid", gap: "10px", justifyItems: "center" }}>
+            <button
+              type="button"
+              onClick={() => onPreview(image)}
+              style={{ width: "100%", display: "grid", placeItems: "center", border: "none", padding: 0, background: "var(--color-bg-subtle)", cursor: "zoom-in", borderRadius: "12px", overflow: "hidden" }}
+              title="点击查看大图"
+            >
+              <img
+                src={formatBiliImageUrl(block.url, "@1200w.webp")}
+                alt={block.title || `${articleTitle} 图片 ${index + 1}`}
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                style={{ display: "block", width: "auto", maxWidth: "100%", maxHeight: "760px", objectFit: "contain" }}
+              />
+            </button>
+            {block.title ? (
+              <figcaption style={{ color: "var(--color-text-muted)", fontSize: "13px", lineHeight: 1.6, textAlign: "center" }}>
+                {block.title}
+              </figcaption>
+            ) : null}
+          </figure>
+        );
+      })}
     </div>
   );
 }
