@@ -175,6 +175,15 @@ export function UpProfileView() {
     }
   }, [mid]);
 
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([
+      fetchProfile(),
+      activeTab === "videos"
+        ? fetchVideos(1, "replace")
+        : fetchDynamics("", "replace"),
+    ]);
+  }, [activeTab, fetchDynamics, fetchProfile, fetchVideos]);
+
   useEffect(() => {
     if (!mid) return;
     setProfile(upProfileState ? {
@@ -517,7 +526,7 @@ export function UpProfileView() {
             <p style={{ flex: "1 1 280px", color: "var(--color-text-muted)", fontSize: "13.5px", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
               {displayProfile.sign || "这个 UP 主暂时没有填写简介"}
             </p>
-            <PurpleRefreshButton loading={loading} onClick={() => activeTab === "videos" ? fetchVideos(1, "replace") : fetchDynamics("", "replace")} />
+            <PurpleRefreshButton loading={loading} onClick={handleRefresh} />
           </div>
           <div style={{ marginTop: "12px", display: "flex", gap: "16px", color: "var(--color-text-secondary)", fontSize: "13px", flexWrap: "wrap" }}>
             {headerStats.map(([label, value]) => (

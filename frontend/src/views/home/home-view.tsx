@@ -151,7 +151,10 @@ export function HomeView() {
             history: historyValue,
           };
         },
-        forceRefresh
+        {
+          forceRefresh,
+          maxAgeMs: 60 * 1000,
+        }
       );
 
       setStats({

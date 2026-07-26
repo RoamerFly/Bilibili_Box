@@ -196,7 +196,9 @@ export function RecommendView() {
     const requestId = ++requestIdRef.current;
     const append = mode === "append";
     const currentBatch = batchIndexesRef.current[category.label] ?? 1;
-    const batch = append ? currentBatch + 1 : 1;
+    const batch = append || (forceRefresh && category.rid === null)
+      ? currentBatch + 1
+      : 1;
     const requestPageSize = Math.min(category.rid === null ? 30 : 60, Math.max(12, pageSize * 3));
 
     if (append) {
@@ -259,7 +261,10 @@ export function RecommendView() {
       const response = await loadCachedPageData(
         cacheKey,
         () => invoke<FollowingDynamicPage>("get_following_dynamics", { offset: append ? dynamicOffset : null }),
-        forceRefresh
+        {
+          forceRefresh,
+          maxAgeMs: append ? 5 * 60 * 1000 : 60 * 1000,
+        }
       );
       const merged = append ? [...useAppStore.getState().recommendPageState.dynamicItems, ...response.list] : response.list;
       setRecommendPageState({

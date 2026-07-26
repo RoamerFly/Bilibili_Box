@@ -356,6 +356,10 @@ impl super::BiliClient {
             ("type".to_string(), "all".to_string()),
             ("platform".to_string(), "web".to_string()),
             (
+                "_".to_string(),
+                chrono::Utc::now().timestamp_millis().to_string(),
+            ),
+            (
                 "features".to_string(),
                 "itemOpusStyle,listOnlyfans,opusBigCover,onlyfansVote,decorationCard,onlyfansAssetsV2,forwardListHidden,ugcDelete".to_string(),
             ),

@@ -478,10 +478,10 @@ jobs:
               printf '%s\n' '- 发布说明改为更适合应用内展示的中文分段结构。'
             } > "$notes_file"
           fi
-          {
-            cat "$notes_file"
-            printf '\n%s\n' "$DOWNLOAD_GUIDE"
-          } > "$body_file"
+          cat "$notes_file" > "$body_file"
+          if ! grep -q '^## 下载建议[[:space:]]*$' "$notes_file"; then
+            printf '\n%s\n' "$DOWNLOAD_GUIDE" >> "$body_file"
+          fi
           echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
           echo "body_file=$body_file" >> "$GITHUB_OUTPUT"
 

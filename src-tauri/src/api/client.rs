@@ -418,6 +418,8 @@ impl BiliClient {
             "accept",
             HeaderValue::from_static("application/json, text/plain, */*"),
         );
+        headers.insert("cache-control", HeaderValue::from_static("no-cache"));
+        headers.insert("pragma", HeaderValue::from_static("no-cache"));
 
         let mut builder = reqwest::ClientBuilder::new()
             .timeout(Duration::from_secs(10))
@@ -448,6 +450,8 @@ impl BiliClient {
             "accept",
             HeaderValue::from_static("application/json, text/plain, */*"),
         );
+        headers.insert("cache-control", HeaderValue::from_static("no-cache"));
+        headers.insert("pragma", HeaderValue::from_static("no-cache"));
 
         let mut builder = reqwest::ClientBuilder::new()
             .timeout(Duration::from_secs(10))

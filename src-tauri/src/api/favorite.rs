@@ -1,3 +1,4 @@
+use futures_util::stream::{self, StreamExt};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -263,6 +264,25 @@ impl super::BiliClient {
         self.get_liked_videos_from_web(mid, page, ps).await
     }
 
+    async fn enrich_liked_video_items(
+        &self,
+        items: Vec<LikedVideoItem>,
+    ) -> Vec<LikedVideoItem> {
+        stream::iter(items.into_iter().map(|item| async move {
+            if !liked_video_needs_detail(&item) || item.bvid.trim().is_empty() {
+                return item;
+            }
+
+            match self.get_normal_info(&item.bvid).await {
+                Ok(detail) => merge_liked_video_detail(item, detail),
+                Err(_) => item,
+            }
+        }))
+        .buffered(4)
+        .collect()
+        .await
+    }
+
     async fn get_liked_videos_from_web(
         &self,
         mid: i64,
@@ -318,6 +338,7 @@ impl super::BiliClient {
         } else {
             Vec::new()
         };
+        let list = self.enrich_liked_video_items(list).await;
 
         Ok(LikedVideoPage {
             has_more: end < all_items.len(),
@@ -376,6 +397,7 @@ impl super::BiliClient {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        let list = self.enrich_liked_video_items(list).await;
         let total = data
             .get("count")
             .or_else(|| data.get("total"))
@@ -422,7 +444,10 @@ impl super::BiliClient {
 fn parse_liked_video_item(item: &Value) -> Option<LikedVideoItem> {
     let owner = item
         .get("owner")
-        .or_else(|| item.get("author"))
+        .or_else(|| item.get("upper"))
+        .or_else(|| item.get("upper_info"))
+        .or_else(|| item.get("up_info"))
+        .or_else(|| item.get("author").filter(|author| author.is_object()))
         .unwrap_or(&Value::Null);
     Some(LikedVideoItem {
         aid: item
@@ -431,6 +456,7 @@ fn parse_liked_video_item(item: &Value) -> Option<LikedVideoItem> {
             .and_then(parse_i64_value)?,
         bvid: item
             .get("bvid")
+            .or_else(|| item.get("bv_id"))
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
@@ -476,23 +502,84 @@ fn parse_liked_video_item(item: &Value) -> Option<LikedVideoItem> {
             mid: owner
                 .get("mid")
                 .or_else(|| item.get("mid"))
+                .or_else(|| item.get("upper_mid"))
+                .or_else(|| item.get("author_mid"))
                 .and_then(parse_i64_value)
                 .unwrap_or(0),
             name: owner
                 .get("name")
                 .or_else(|| owner.get("uname"))
-                .or_else(|| item.get("author"))
+                .or_else(|| item.get("author").filter(|author| author.is_string()))
+                .or_else(|| item.get("author_name"))
+                .or_else(|| item.get("up_name"))
+                .or_else(|| item.get("uname"))
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string(),
             face: owner
                 .get("face")
                 .or_else(|| owner.get("avatar"))
+                .or_else(|| owner.get("upic"))
+                .or_else(|| item.get("author_face"))
+                .or_else(|| item.get("up_face"))
+                .or_else(|| item.get("face"))
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string(),
         },
     })
+}
+
+fn liked_video_needs_detail(item: &LikedVideoItem) -> bool {
+    item.cid <= 0
+        || item.title.trim().is_empty()
+        || item.cover.trim().is_empty()
+        || item.upper.mid <= 0
+        || item.upper.name.trim().is_empty()
+        || item.upper.face.trim().is_empty()
+}
+
+fn merge_liked_video_detail(
+    mut item: LikedVideoItem,
+    detail: super::video::VideoInfo,
+) -> LikedVideoItem {
+    if item.aid <= 0 {
+        item.aid = detail.aid;
+    }
+    if item.bvid.trim().is_empty() {
+        item.bvid = detail.bvid;
+    }
+    if item.cid <= 0 {
+        item.cid = detail.cid;
+    }
+    if item.title.trim().is_empty() {
+        item.title = detail.title;
+    }
+    if item.cover.trim().is_empty() {
+        item.cover = detail.pic;
+    }
+    if item.duration == 0 {
+        item.duration = detail.duration;
+    }
+    if item.pubdate <= 0 {
+        item.pubdate = detail.pubdate.unwrap_or(0);
+    }
+    if item.play <= 0 {
+        item.play = detail.stat.view;
+    }
+    if item.like <= 0 {
+        item.like = detail.stat.like;
+    }
+    if item.upper.mid <= 0 {
+        item.upper.mid = detail.owner.mid;
+    }
+    if item.upper.name.trim().is_empty() {
+        item.upper.name = detail.owner.name;
+    }
+    if item.upper.face.trim().is_empty() {
+        item.upper.face = detail.owner.face;
+    }
+    item
 }
 
 fn parse_i64_value(value: &Value) -> Option<i64> {
@@ -504,4 +591,79 @@ fn parse_i64_value(value: &Value) -> Option<i64> {
                 .as_str()
                 .and_then(|text| text.trim().parse::<i64>().ok())
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::video::{OwnerInfo, VideoStat};
+
+    #[test]
+    fn parses_alternate_liked_video_owner_fields() {
+        let item = json!({
+            "aid": 123,
+            "bvid": "BV1owner",
+            "cid": 456,
+            "title": "测试视频",
+            "pic": "https://i0.hdslb.com/cover.jpg",
+            "upper": {
+                "mid": 789,
+                "uname": "真实 UP",
+                "upic": "https://i0.hdslb.com/face.jpg"
+            }
+        });
+
+        let parsed = parse_liked_video_item(&item).expect("liked video should parse");
+        assert_eq!(parsed.upper.mid, 789);
+        assert_eq!(parsed.upper.name, "真实 UP");
+        assert_eq!(parsed.upper.face, "https://i0.hdslb.com/face.jpg");
+    }
+
+    #[test]
+    fn fills_missing_liked_video_owner_from_video_detail() {
+        let item = LikedVideoItem {
+            aid: 123,
+            bvid: "BV1detail".to_string(),
+            cid: 456,
+            title: "已有标题".to_string(),
+            cover: "https://i0.hdslb.com/cover.jpg".to_string(),
+            duration: 10,
+            pubdate: 0,
+            play: 0,
+            like: 0,
+            upper: FavUpper {
+                mid: 0,
+                name: String::new(),
+                face: String::new(),
+            },
+        };
+        let detail = super::super::video::VideoInfo {
+            aid: 123,
+            bvid: "BV1detail".to_string(),
+            cid: 456,
+            title: "详情标题".to_string(),
+            duration: 10,
+            pubdate: Some(1_700_000_000),
+            description: String::new(),
+            pic: "https://i0.hdslb.com/detail-cover.jpg".to_string(),
+            owner: OwnerInfo {
+                mid: 789,
+                name: "详情 UP".to_string(),
+                face: "https://i0.hdslb.com/detail-face.jpg".to_string(),
+            },
+            stat: VideoStat {
+                view: 100,
+                like: 20,
+                ..VideoStat::default()
+            },
+            pages: Vec::new(),
+            ugc_season: None,
+        };
+
+        let merged = merge_liked_video_detail(item, detail);
+        assert_eq!(merged.upper.mid, 789);
+        assert_eq!(merged.upper.name, "详情 UP");
+        assert_eq!(merged.upper.face, "https://i0.hdslb.com/detail-face.jpg");
+        assert_eq!(merged.pubdate, 1_700_000_000);
+    }
 }
