@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build output
+dist/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+.codex-tmp/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
