@@ -148,7 +148,7 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 
 ## 下载发行版
 
-前往 [Releases](https://github.com/RoamerFly/Bilibili_Box/releases/latest) 页面下载对应平台的安装包或便携版；国内也可参考 [GitCode 镜像](https://gitcode.com/roverfly/Bilibili_box)。
+前往 [Releases](https://github.com/RoamerFly/Bilibili_Box/releases/latest) 页面下载对应平台的安装包或便携版。
 
 | 平台 | 版本 |
 | --- | --- |
