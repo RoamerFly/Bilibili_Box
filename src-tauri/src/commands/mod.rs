@@ -1,14 +1,16 @@
+// Tauri IPC command modules.
+pub mod download;
+pub mod update;
+pub mod window;
+
 use md5::{Digest, Md5};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
 use crate::api::auth::{BrowserLoginResult, QrcodeData, QrcodeStatus, UserInfo};
@@ -27,9 +29,7 @@ use crate::api::video::{
 use crate::api::watchlater::WatchLaterInfo;
 use crate::api::BiliClient;
 use crate::config::Config;
-use crate::download::{
-    CreateArticleDownloadTaskParams, CreateDownloadTaskParams, DownloadManager, DownloadProgress,
-};
+use crate::download::DownloadManager;
 use crate::media_proxy::{MediaProxyServer, RegisteredPlayable};
 
 const GITHUB_API_LATEST_RELEASE_URL: &str =
@@ -49,6 +49,8 @@ pub struct UpdateAsset {
     pub name: String,
     pub url: String,
     pub size: u64,
+    #[serde(skip_serializing)]
+    signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -783,18 +785,6 @@ pub fn delete_saved_account_data(
 }
 
 #[tauri::command]
-pub fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
-    let parsed = Url::parse(url.trim()).map_err(|e| format!("无效的 URL: {e}"))?;
-    match parsed.scheme() {
-        "http" | "https" => app
-            .opener()
-            .open_url(parsed.as_str(), None::<&str>)
-            .map_err(|e| format!("打开浏览器失败: {e}")),
-        _ => Err("只允许打开 http/https 链接".to_string()),
-    }
-}
-
-#[tauri::command]
 pub async fn check_update(app: AppHandle) -> Result<UpdateCheckResult, String> {
     let current_version = app.package_info().version.to_string();
     let client = update_http_client()?;
@@ -811,47 +801,6 @@ pub async fn check_update(app: AppHandle) -> Result<UpdateCheckResult, String> {
         body: release.body,
         asset: release.asset,
     })
-}
-
-#[tauri::command]
-pub async fn download_and_install_update(
-    app: AppHandle,
-    asset_url: String,
-    asset_name: String,
-) -> Result<(), String> {
-    let parsed = Url::parse(asset_url.trim()).map_err(|e| format!("无效的更新地址: {e}"))?;
-    if parsed.scheme() != "https" {
-        return Err("更新包必须来自 HTTPS 地址".to_string());
-    }
-
-    let file_name = sanitize_update_file_name(&asset_name);
-    let update_dir = app
-        .path()
-        .temp_dir()
-        .map_err(|e| format!("获取临时目录失败: {e}"))?
-        .join("BiliBoxUpdate");
-    tokio::fs::create_dir_all(&update_dir)
-        .await
-        .map_err(|e| format!("创建更新缓存目录失败: {e}"))?;
-    let update_path = update_dir.join(file_name);
-
-    let bytes = reqwest::Client::new()
-        .get(parsed.as_str())
-        .header("User-Agent", "BiliBox")
-        .send()
-        .await
-        .map_err(|e| format!("下载更新失败: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("下载更新失败: {e}"))?
-        .bytes()
-        .await
-        .map_err(|e| format!("读取更新包失败: {e}"))?;
-    tokio::fs::write(&update_path, bytes)
-        .await
-        .map_err(|e| format!("保存更新包失败: {e}"))?;
-
-    launch_update_file(&app, &update_path)?;
-    Ok(())
 }
 
 fn update_http_client() -> Result<reqwest::Client, String> {
@@ -914,6 +863,7 @@ async fn fetch_github_updater_metadata(client: &reqwest::Client) -> Result<Updat
         name: update_asset_name_from_url(&item.url),
         url: item.url.clone(),
         size: 0,
+        signature: Some(item.signature.clone()),
     });
 
     Ok(UpdateRelease {
@@ -946,6 +896,7 @@ async fn fetch_github_api_release(client: &reqwest::Client) -> Result<UpdateRele
             name: asset.name.clone(),
             url: asset.browser_download_url.clone(),
             size: asset.size,
+            signature: None,
         })
         .or_else(|| {
             platform_update_assets(&release.tag_name, ReleaseHost::Github)
@@ -1077,6 +1028,7 @@ fn platform_update_assets(tag_name: &str, host: ReleaseHost) -> Vec<UpdateAsset>
             url: format!("{base_url}/{tag_name}/{name}"),
             name,
             size: 0,
+            signature: None,
         })
         .collect()
 }
@@ -1253,109 +1205,6 @@ fn update_asset_score(name: &str) -> i32 {
     }
 
     score
-}
-
-fn sanitize_update_file_name(name: &str) -> String {
-    let sanitized = name
-        .chars()
-        .map(|ch| match ch {
-            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
-            ch if ch.is_control() => '_',
-            ch => ch,
-        })
-        .collect::<String>();
-    let sanitized = sanitized.trim().trim_matches('.');
-    if sanitized.is_empty() {
-        "BiliBoxUpdate".to_string()
-    } else {
-        sanitized.to_string()
-    }
-}
-
-fn launch_update_file(app: &AppHandle, update_path: &PathBuf) -> Result<(), String> {
-    let extension = update_path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .unwrap_or_default();
-
-    let is_installer = matches!(
-        extension.as_str(),
-        "exe" | "msi" | "dmg" | "pkg" | "appimage" | "deb" | "rpm"
-    );
-
-    if is_installer {
-        #[cfg(target_os = "windows")]
-        Command::new(update_path)
-            .spawn()
-            .map_err(|e| format!("启动安装程序失败: {e}"))?;
-
-        #[cfg(target_os = "macos")]
-        Command::new("open")
-            .arg(update_path)
-            .spawn()
-            .map_err(|e| format!("启动安装程序失败: {e}"))?;
-
-        #[cfg(target_os = "linux")]
-        Command::new(update_path)
-            .spawn()
-            .map_err(|e| format!("启动安装程序失败: {e}"))?;
-
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(800)).await;
-            app.exit(0);
-        });
-        return Ok(());
-    }
-
-    app.opener()
-        .open_path(update_path.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|e| format!("打开更新包失败: {e}"))
-}
-
-#[tauri::command]
-pub fn window_minimize(app: AppHandle) -> Result<(), String> {
-    app.get_webview_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?
-        .minimize()
-        .map_err(|e| format!("最小化窗口失败: {e}"))
-}
-
-#[tauri::command]
-pub fn window_toggle_maximize(app: AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?;
-
-    if window
-        .is_maximized()
-        .map_err(|e| format!("读取窗口最大化状态失败: {e}"))?
-    {
-        window
-            .unmaximize()
-            .map_err(|e| format!("还原窗口失败: {e}"))
-    } else {
-        window
-            .maximize()
-            .map_err(|e| format!("最大化窗口失败: {e}"))
-    }
-}
-
-#[tauri::command]
-pub fn window_close(app: AppHandle) -> Result<(), String> {
-    app.get_webview_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?
-        .close()
-        .map_err(|e| format!("关闭窗口失败: {e}"))
-}
-
-#[tauri::command]
-pub fn window_start_dragging(app: AppHandle) -> Result<(), String> {
-    app.get_webview_window("main")
-        .ok_or_else(|| "主窗口不存在".to_string())?
-        .start_dragging()
-        .map_err(|e| format!("拖动窗口失败: {e}"))
 }
 
 /// 浏览器登录：打开内置 WebView 登录窗口，登录成功后自动提取 SESSDATA
@@ -2021,84 +1870,6 @@ where
     }
 }
 
-// ========== 下载相关命令 ==========
-
-/// 创建下载任务
-#[tauri::command]
-pub async fn create_download_task(
-    download_manager: State<'_, Arc<DownloadManager>>,
-    params: CreateDownloadTaskParams,
-) -> Result<Vec<String>, String> {
-    download_manager.create_download_tasks(params).await
-}
-
-#[tauri::command]
-pub async fn create_article_download_task(
-    download_manager: State<'_, Arc<DownloadManager>>,
-    params: CreateArticleDownloadTaskParams,
-) -> Result<Vec<String>, String> {
-    download_manager.create_article_download_task(params).await
-}
-
-/// 获取所有下载任务
-#[tauri::command]
-pub fn get_download_tasks(
-    download_manager: State<'_, Arc<DownloadManager>>,
-) -> Vec<DownloadProgress> {
-    download_manager.get_all_tasks()
-}
-
-/// 暂停下载任务
-#[tauri::command]
-pub async fn pause_download_tasks(
-    download_manager: State<'_, Arc<DownloadManager>>,
-    task_ids: Vec<String>,
-) -> Result<(), String> {
-    download_manager.pause_download_tasks(task_ids).await
-}
-
-/// 恢复下载任务
-#[tauri::command]
-pub async fn resume_download_tasks(
-    download_manager: State<'_, Arc<DownloadManager>>,
-    task_ids: Vec<String>,
-) -> Result<(), String> {
-    download_manager.resume_download_tasks(task_ids).await
-}
-
-/// 删除下载任务
-#[tauri::command]
-pub async fn delete_download_tasks(
-    download_manager: State<'_, Arc<DownloadManager>>,
-    task_ids: Vec<String>,
-    delete_files: Option<bool>,
-) -> Result<(), String> {
-    download_manager
-        .delete_download_tasks(task_ids, delete_files.unwrap_or(false))
-        .await
-}
-
-/// 重启下载任务
-#[tauri::command]
-pub async fn restart_download_tasks(
-    download_manager: State<'_, Arc<DownloadManager>>,
-    task_ids: Vec<String>,
-) -> Result<(), String> {
-    download_manager.restart_download_tasks(task_ids).await
-}
-
-/// 获取下载任务数量
-#[tauri::command]
-pub fn get_download_task_count(download_manager: State<'_, Arc<DownloadManager>>) -> usize {
-    download_manager.task_count()
-}
-
-/// 获取活跃下载任务数量
-#[tauri::command]
-pub fn get_active_download_count(download_manager: State<'_, Arc<DownloadManager>>) -> usize {
-    download_manager.active_task_count()
-}
-
 // ========== 用户内容相关命令 ==========
 
 /// 获取收藏夹列表
@@ -2237,78 +2008,4 @@ pub async fn get_all_subtitles_srt(
     cid: i64,
 ) -> Result<Vec<(String, String)>, String> {
     bili_client.get_all_subtitles_srt(aid, cid).await
-}
-
-/// 打开下载目录
-#[tauri::command]
-pub fn open_download_folder(
-    app: AppHandle,
-    config: State<'_, Arc<RwLock<Config>>>,
-) -> Result<(), String> {
-    let configured_path = config.read().download_dir.clone();
-    let path = Config::resolve_download_dir(&app, &configured_path)?;
-    std::fs::create_dir_all(&path).map_err(|e| format!("创建下载目录失败: {}", e))?;
-
-    #[cfg(target_os = "windows")]
-    std::process::Command::new("explorer")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| format!("打开目录失败: {}", e))?;
-
-    #[cfg(target_os = "macos")]
-    std::process::Command::new("open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| format!("打开目录失败: {}", e))?;
-
-    #[cfg(target_os = "linux")]
-    std::process::Command::new("xdg-open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| format!("打开目录失败: {}", e))?;
-
-    Ok(())
-}
-
-/// 打开单个下载任务所在目录
-#[tauri::command]
-pub fn open_download_task_folder(
-    download_manager: State<'_, Arc<DownloadManager>>,
-    task_id: String,
-) -> Result<(), String> {
-    let path = download_manager.get_task_folder(&task_id)?;
-    if !path.exists() {
-        return Err("任务所在目录不存在".to_string());
-    }
-
-    #[cfg(target_os = "windows")]
-    std::process::Command::new("explorer")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| format!("打开目录失败: {}", e))?;
-
-    #[cfg(target_os = "macos")]
-    std::process::Command::new("open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| format!("打开目录失败: {}", e))?;
-
-    #[cfg(target_os = "linux")]
-    std::process::Command::new("xdg-open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| format!("打开目录失败: {}", e))?;
-
-    Ok(())
-}
-
-/// 将下载完成的本地视频注册到内部媒体协议。
-#[tauri::command]
-pub fn get_downloaded_play_url(
-    download_manager: State<'_, Arc<DownloadManager>>,
-    media_proxy: State<'_, Arc<MediaProxyServer>>,
-    task_id: String,
-) -> Result<String, String> {
-    let file_path = download_manager.get_downloaded_file(&task_id)?;
-    media_proxy.register_local_file(file_path)
 }

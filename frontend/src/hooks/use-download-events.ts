@@ -1,11 +1,14 @@
 import { useEffect, useRef } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@/lib/api";
+import {
+  mapDownloadStatus,
+  type BackendTaskState,
+  type TaskState,
+} from "@/lib/download-status";
 import { formatSpeed } from "@/lib/utils";
 import type { DownloadStage } from "@/lib/types";
-import { useDownloadStore, useLogStore, type DownloadStatus, type DownloadTask } from "@/stores/app-store";
-
-type BackendTaskState = "Pending" | "Downloading" | "Merging" | "Paused" | "Completed" | "Failed";
+import { useDownloadStore, useLogStore, type DownloadTask } from "@/stores/app-store";
 
 interface BackendDownloadProgress {
   task_id: string;
@@ -45,47 +48,6 @@ interface DownloadProgress {
   speed: string;
 }
 
-type TaskState = "pending" | "downloading" | "merging" | "completed" | "failed" | "paused";
-
-// 映射后端状态到前端状态
-function mapTaskState(state: TaskState): DownloadStatus {
-  switch (state) {
-    case "pending":
-      return "pending";
-    case "downloading":
-      return "downloading";
-    case "merging":
-      return "merging";
-    case "completed":
-      return "completed";
-    case "failed":
-      return "error";
-    case "paused":
-      return "paused";
-    default:
-      return "pending";
-  }
-}
-
-function mapBackendTaskState(state: BackendTaskState): DownloadStatus {
-  switch (state) {
-    case "Pending":
-      return "pending";
-    case "Downloading":
-      return "downloading";
-    case "Merging":
-      return "merging";
-    case "Paused":
-      return "paused";
-    case "Completed":
-      return "completed";
-    case "Failed":
-      return "error";
-    default:
-      return "pending";
-  }
-}
-
 function mapBackendTask(task: BackendDownloadProgress): DownloadTask {
   return {
     id: task.task_id,
@@ -93,7 +55,7 @@ function mapBackendTask(task: BackendDownloadProgress): DownloadTask {
     cover: task.cover || "",
     progress: Math.max(0, Math.min(100, task.progress || 0)),
     speed: task.speed || 0,
-    status: mapBackendTaskState(task.state),
+    status: mapDownloadStatus(task.state),
     stage: task.stage,
     bvid: task.bvid || undefined,
     cid: task.cid,
@@ -226,7 +188,7 @@ export function useDownloadEvents() {
               filename: progress.episode_title,
               bvid: progress.bvid || undefined,
               cid: progress.cid,
-              status: mapTaskState(progress.state),
+              status: mapDownloadStatus(progress.state),
               stage: progress.stage,
               progress: percent,
               downloadedBytes: progress.downloaded_count,
@@ -265,7 +227,7 @@ export function useDownloadEvents() {
           }
           updateTask({
             id: payload.data.task_id,
-            status: mapTaskState(payload.data.state),
+            status: mapDownloadStatus(payload.data.state),
             ...(payload.data.state === "merging" ? { stage: "merging" as DownloadStage } : {}),
             ...(payload.data.state === "paused" ? { stage: "paused" as DownloadStage, speed: 0 } : {}),
           });

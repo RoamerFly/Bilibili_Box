@@ -10,7 +10,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Semaphore;
 
+use super::naming::sanitize_path_component;
 use super::ffmpeg::FfmpegExecutor;
+use super::persistence::{deserialize_progress, serialize_progress};
+use super::speed::format_speed;
 use crate::config::{AudioQuality, CodecType, Config, FileExistAction, VideoQuality};
 use crate::danmaku::{convert_to_ass, AssConfig};
 use crate::events::{DownloadEvent, DownloadStage, TaskState};
@@ -148,23 +151,10 @@ impl DownloadManager {
             interval.tick().await;
             let speed = byte_per_sec.swap(0, Ordering::Relaxed);
 
-            // 发送速度事件到前端
-            if speed > 0 {
-                let speed_str = Self::format_speed(speed);
-                let event = DownloadEvent::Speed { speed: speed_str };
-                let _ = app.emit("download://speed", event);
-            }
-        }
-    }
-
-    /// 格式化速度
-    fn format_speed(bytes_per_sec: u64) -> String {
-        if bytes_per_sec < 1024 {
-            format!("{} B/s", bytes_per_sec)
-        } else if bytes_per_sec < 1024 * 1024 {
-            format!("{:.2} KB/s", bytes_per_sec as f64 / 1024.0)
-        } else {
-            format!("{:.2} MB/s", bytes_per_sec as f64 / (1024.0 * 1024.0))
+            // 始终发送速度事件，确保暂停、等待或网络停滞时前端及时归零。
+            let speed_str = format_speed(speed);
+            let event = DownloadEvent::Speed { speed: speed_str };
+            let _ = app.emit("download://speed", event);
         }
     }
 
@@ -961,7 +951,7 @@ impl DownloadManager {
             let extension = Self::url_extension(&normalized_url).unwrap_or("jpg");
             let title = Self::trimmed_string(Some(&image.title))
                 .unwrap_or_else(|| format!("图片{:02}", index + 1));
-            let safe_title = Self::sanitize_path_component(&title);
+            let safe_title = sanitize_path_component(&title);
             let expected =
                 output_dir.join(format!("{:02}-{}.{}", index + 1, safe_title, extension));
             let Some(path) = Self::resolve_existing_file(expected.clone(), &file_exist_action)?
@@ -1218,7 +1208,7 @@ impl DownloadManager {
         let expected_extension = if progress.audio_only { "mp3" } else { "mp4" };
         let expected_stem = Self::output_stem(progress);
         let mut candidate_dirs = vec![Self::output_dir_from_root(&root, progress)];
-        let legacy_dir = root.join(Self::sanitize_path_component(&progress.title));
+        let legacy_dir = root.join(sanitize_path_component(&progress.title));
         if !candidate_dirs.iter().any(|dir| dir == &legacy_dir) {
             candidate_dirs.push(legacy_dir);
         }
@@ -1344,7 +1334,7 @@ impl DownloadManager {
 
     fn output_dir_from_root(root: &Path, progress: &DownloadProgress) -> PathBuf {
         if let Some(collection_title) = Self::trimmed_string(progress.collection_title.as_deref()) {
-            root.join(Self::sanitize_path_component(&collection_title))
+            root.join(sanitize_path_component(&collection_title))
         } else {
             root.to_path_buf()
         }
@@ -1357,7 +1347,7 @@ impl DownloadManager {
         } else {
             progress.title.clone()
         };
-        Self::sanitize_path_component(&name)
+        sanitize_path_component(&name)
     }
 
     fn task_temp_dir(app: &AppHandle, progress: &DownloadProgress) -> Result<PathBuf, String> {
@@ -1368,7 +1358,7 @@ impl DownloadManager {
         };
         Ok(Config::user_cache_dir(app)?
             .join("download")
-            .join(Self::sanitize_path_component(&temp_name)))
+            .join(sanitize_path_component(&temp_name)))
     }
 
     fn trimmed_string(value: Option<&str>) -> Option<String> {
@@ -1443,7 +1433,7 @@ impl DownloadManager {
         std::fs::create_dir_all(&task_dir).map_err(|e| format!("创建任务目录失败: {}", e))?;
 
         let task_file = task_dir.join(format!("{}.json", progress.task_id));
-        let json = serde_json::to_string(progress).map_err(|e| format!("序列化进度失败: {}", e))?;
+        let json = serialize_progress(progress)?;
         std::fs::write(task_file, json).map_err(|e| format!("写入进度文件失败: {}", e))?;
 
         Ok(())
@@ -1482,7 +1472,7 @@ impl DownloadManager {
             let Ok(content) = std::fs::read_to_string(entry.path()) else {
                 continue;
             };
-            let Ok(mut progress) = serde_json::from_str::<DownloadProgress>(&content) else {
+            let Ok(mut progress) = deserialize_progress(&content) else {
                 continue;
             };
             if let Some(output_path) = self.find_existing_output_file(&progress) {
@@ -1551,7 +1541,7 @@ impl DownloadManager {
         }
         let config = self.app.state::<Arc<RwLock<Config>>>();
         let root = Config::resolve_download_dir(&self.app, &config.read().download_dir)?;
-        let legacy_dir = root.join(Self::sanitize_path_component(&progress.title));
+        let legacy_dir = root.join(sanitize_path_component(&progress.title));
         if legacy_dir.is_dir() {
             return Ok(legacy_dir);
         }
@@ -1595,7 +1585,7 @@ impl DownloadManager {
             let _ = tokio::fs::remove_dir_all(temp_dir).await;
         }
 
-        let legacy_dir = root.join(Self::sanitize_path_component(&progress.title));
+        let legacy_dir = root.join(sanitize_path_component(&progress.title));
         if folder == legacy_dir
             && folder != root
             && Self::trimmed_string(progress.collection_title.as_deref()).is_none()
@@ -1615,25 +1605,6 @@ impl DownloadManager {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis() as i64)
             .unwrap_or_default()
-    }
-
-    fn sanitize_path_component(input: &str) -> String {
-        let sanitized: String = input
-            .chars()
-            .map(|ch| match ch {
-                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
-                ch if ch.is_control() => '_',
-                ch => ch,
-            })
-            .collect();
-
-        let sanitized = sanitized.trim().trim_matches('.').to_string();
-        let sanitized: String = sanitized.chars().take(120).collect();
-        if sanitized.is_empty() {
-            "untitled".to_string()
-        } else {
-            sanitized
-        }
     }
 
     fn resolve_existing_file(
@@ -1770,7 +1741,7 @@ impl DownloadManager {
             {
                 Ok(subtitles) => {
                     for (language, srt) in subtitles {
-                        let language = Self::sanitize_path_component(&language);
+                        let language = sanitize_path_component(&language);
                         let file_name = if language.is_empty() {
                             format!("{safe_title}.srt")
                         } else {

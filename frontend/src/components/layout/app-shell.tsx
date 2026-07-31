@@ -21,6 +21,7 @@ import { easeConfig } from "@/lib/utils";
 import { Minus, Square, X } from "lucide-react";
 import { invoke } from "@/lib/api";
 import { COMING_SOON_EVENT } from "@/lib/coming-soon";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 interface Config {
   sessdata: string;
@@ -42,6 +43,7 @@ const CACHEABLE_VIEWS: ViewType[] = [
 
 export function AppShell() {
   const currentView = useAppStore((s) => s.currentView);
+  const setView = useAppStore((s) => s.setView);
   const setConfig = useAppStore((s) => s.setConfig);
   const setUserInfo = useAppStore((s) => s.setUserInfo);
   const setRecommendPageState = useAppStore((s) => s.setRecommendPageState);
@@ -191,12 +193,26 @@ export function AppShell() {
                 className={view === currentView ? "bb-view-layer active" : "bb-view-layer"}
                 aria-hidden={view !== currentView}
               >
-                {renderView(view, accountViewVersion)}
+                <ErrorBoundary
+                  title="页面加载失败"
+                  resetKey={`${view}:${accountViewVersion}:${view === currentView ? "active" : "cached"}`}
+                  onBackHome={() => setView("home")}
+                >
+                  {renderView(view, accountViewVersion)}
+                </ErrorBoundary>
               </div>
             ))}
             {!CACHEABLE_VIEWS.includes(currentView) ? (
               <AnimatePresence initial={false} mode="sync">
-                <div className="bb-view-layer active">{renderView(currentView, accountViewVersion)}</div>
+                <div className="bb-view-layer active">
+                  <ErrorBoundary
+                    title="页面加载失败"
+                    resetKey={`${currentView}:${accountViewVersion}`}
+                    onBackHome={() => setView("home")}
+                  >
+                    {renderView(currentView, accountViewVersion)}
+                  </ErrorBoundary>
+                </div>
               </AnimatePresence>
             ) : null}
           </div>

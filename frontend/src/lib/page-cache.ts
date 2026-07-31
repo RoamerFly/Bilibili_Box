@@ -20,6 +20,17 @@ export interface PageCacheLoadOptions {
   allowStaleOnError?: boolean;
 }
 
+export function isPageCacheFresh(
+  savedAt: number | null | undefined,
+  maxAgeMs: number,
+  now = Date.now()
+): boolean {
+  return savedAt != null
+    && maxAgeMs >= 0
+    && now >= savedAt
+    && now - savedAt <= maxAgeMs;
+}
+
 function isPageCacheEnvelope<T>(value: unknown): value is PageCacheEnvelope<T> {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<PageCacheEnvelope<T>>;
@@ -76,8 +87,7 @@ export async function loadCachedPageData<T>(
 
   if (!forceRefresh) {
     cached = await readCachedPageEntry<T>(key);
-    const isFresh = cached?.savedAt != null
-      && Date.now() - cached.savedAt <= maxAgeMs;
+    const isFresh = isPageCacheFresh(cached?.savedAt, maxAgeMs);
     if (cached && isFresh) {
       return cached.data;
     }

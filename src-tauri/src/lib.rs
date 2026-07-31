@@ -82,8 +82,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(move |app| {
-            let mut config_val = Config::load(app.handle())?;
-            config_val.start_maximized = false; // Force non-fullscreen startup
+            let config_val = Config::load(app.handle())?;
             let config = Arc::new(RwLock::new(config_val.clone()));
             app.manage(config.clone());
 
@@ -137,13 +136,13 @@ pub fn run() {
             commands::list_saved_accounts,
             commands::switch_account_profile,
             commands::delete_saved_account_data,
-            commands::open_external_url,
+            commands::window::open_external_url,
             commands::check_update,
-            commands::download_and_install_update,
-            commands::window_minimize,
-            commands::window_toggle_maximize,
-            commands::window_close,
-            commands::window_start_dragging,
+            commands::update::download_and_install_update,
+            commands::window::window_minimize,
+            commands::window::window_toggle_maximize,
+            commands::window::window_close,
+            commands::window::window_start_dragging,
             commands::browser_login,
             commands::search_video,
             commands::search_video_web,
@@ -175,16 +174,16 @@ pub fn run() {
             commands::block_user,
             commands::unblock_user,
             commands::check_api_health,
-            commands::create_download_task,
-            commands::create_article_download_task,
-            commands::get_download_tasks,
-            commands::pause_download_tasks,
-            commands::resume_download_tasks,
-            commands::delete_download_tasks,
-            commands::restart_download_tasks,
-            commands::get_download_task_count,
-            commands::get_active_download_count,
-            commands::get_downloaded_play_url,
+            commands::download::create_download_task,
+            commands::download::create_article_download_task,
+            commands::download::get_download_tasks,
+            commands::download::pause_download_tasks,
+            commands::download::resume_download_tasks,
+            commands::download::delete_download_tasks,
+            commands::download::restart_download_tasks,
+            commands::download::get_download_task_count,
+            commands::download::get_active_download_count,
+            commands::download::get_downloaded_play_url,
             commands::get_fav_folders,
             commands::get_fav_info,
             commands::get_liked_videos,
@@ -197,8 +196,8 @@ pub fn run() {
             commands::get_subtitle_info,
             commands::get_subtitle,
             commands::get_all_subtitles_srt,
-            commands::open_download_folder,
-            commands::open_download_task_folder,
+            commands::download::open_download_folder,
+            commands::download::open_download_task_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

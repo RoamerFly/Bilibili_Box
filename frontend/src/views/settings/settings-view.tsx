@@ -306,10 +306,7 @@ export function SettingsView() {
         return;
       }
       setFeedback(`发现新版本 ${result.latest_version}，正在下载 ${result.asset.name}`);
-      await invoke("download_and_install_update", {
-        assetUrl: result.asset.url,
-        assetName: result.asset.name,
-      });
+      await invoke("download_and_install_update");
       setFeedback("安装程序已启动，应用即将退出");
     } catch (err) {
       setFeedback(`检查更新失败：${String(err)}`);

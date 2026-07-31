@@ -19,7 +19,9 @@
 
 - `PUBLIC_RELEASE_TOKEN`：GitHub fine-grained personal access token，仅授权 `RoamerFly/Bilibili_Box`，Repository permissions 中 `Contents` 设为 `Read and write`。
 - `TAURI_UPDATER_PRIVATE_KEY` 或 `TAURI_SIGNING_PRIVATE_KEY`：Tauri 更新签名私钥。
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：签名私钥密码；没有密码时可为空。
+- `TAURI_UPDATER_PRIVATE_KEY_PASSWORD`：新更新私钥的密码；没有密码时不需要创建。仅在回退使用旧 `TAURI_SIGNING_PRIVATE_KEY` 时读取 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
+
+与私钥配对的 Minisign 公钥不属于机密，保存在 Release 工作流的 `BILIBOX_UPDATER_PUBLIC_KEY` 中；构建时会嵌入应用，用于安装更新前验证签名。
 
 不要把这些值写入文件、提交记录、构建日志或公开仓库。
 

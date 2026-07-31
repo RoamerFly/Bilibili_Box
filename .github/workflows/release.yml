@@ -37,6 +37,7 @@ env:
   APP_NAME: Bilibili_Box
   NODE_VERSION: "22"
   PUBLIC_RELEASE_REPOSITORY: RoamerFly/Bilibili_Box
+  BILIBOX_UPDATER_PUBLIC_KEY: dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFDQkM3QzkyRTVGQzJGRTUKUldUbEwvemxrbnk4SE5sM2JzZHA1d2F1dDhQUlV1NEI5azBSanhPL2VaUC95eHN3WVJPT1EwVGYK
   DOWNLOAD_GUIDE: |
     ## 下载建议
 
@@ -51,8 +52,21 @@ env:
     `.sig` 和 `latest.json` 主要用于自动更新与签名校验，普通安装通常不需要手动下载。
 
 jobs:
+  validate:
+    name: Validate release configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate updater configuration
+        shell: bash
+        run: |
+          if [ -z "$BILIBOX_UPDATER_PUBLIC_KEY" ]; then
+            echo "::error::Missing embedded updater public key."
+            exit 1
+          fi
+
   linux:
     name: Build Linux x64
+    needs: validate
     runs-on: ubuntu-22.04
     env:
       TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
@@ -199,6 +213,7 @@ jobs:
 
   windows:
     name: Build Windows x64
+    needs: validate
     runs-on: windows-latest
     env:
       TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
@@ -293,6 +308,7 @@ jobs:
 
   macos:
     name: Build macOS ${{ matrix.arch }}
+    needs: validate
     runs-on: ${{ matrix.runner }}
     env:
       TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
@@ -490,11 +506,18 @@ jobs:
         shell: bash
         env:
           TAURI_UPDATER_PRIVATE_KEY_VALUE: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+          TAURI_UPDATER_PRIVATE_KEY_PASSWORD_VALUE: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
           TAURI_SIGNING_PRIVATE_KEY_VALUE: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD_VALUE: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          key="${TAURI_UPDATER_PRIVATE_KEY_VALUE:-$TAURI_SIGNING_PRIVATE_KEY_VALUE}"
+          if [ -n "$TAURI_UPDATER_PRIVATE_KEY_VALUE" ]; then
+            key="$TAURI_UPDATER_PRIVATE_KEY_VALUE"
+            password="$TAURI_UPDATER_PRIVATE_KEY_PASSWORD_VALUE"
+          else
+            key="$TAURI_SIGNING_PRIVATE_KEY_VALUE"
+            password="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_VALUE"
+          fi
           if [ -z "$key" ]; then
             echo "::error::Missing TAURI_UPDATER_PRIVATE_KEY or TAURI_SIGNING_PRIVATE_KEY repository secret."
             exit 1
@@ -503,7 +526,7 @@ jobs:
           printf '%s' "$key" > "$key_path"
           chmod 600 "$key_path"
           echo "TAURI_SIGNING_PRIVATE_KEY_PATH=$key_path" >> "$GITHUB_ENV"
-          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_VALUE" >> "$GITHUB_ENV"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$password" >> "$GITHUB_ENV"
 
       - name: Sign updater assets
         shell: bash

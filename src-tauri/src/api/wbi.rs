@@ -28,7 +28,7 @@ pub fn get_mixin_key(img_key: &str, sub_key: &str) -> String {
     let bytes = raw.as_bytes();
     let mut mixin_key = String::with_capacity(32);
 
-    for &i in MIXIN_KEY_ENC_TAB.iter() {
+    for &i in MIXIN_KEY_ENC_TAB.iter().take(32) {
         if i < bytes.len() {
             mixin_key.push(bytes[i] as char);
         }
@@ -215,5 +215,34 @@ impl super::BiliClient {
         let mixin_key = self.get_cached_mixin_key().await?;
         sign_params(params, &mixin_key);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mixin_key_matches_known_reference() {
+        let img_key = "7cd084941338484aae1ad9425b84077c";
+        let sub_key = "4932caff0ff746eab6f01bf08b70ac45";
+        assert_eq!(
+            get_mixin_key(img_key, sub_key),
+            "ea1db124af3c7062474693fa704f4ff8"
+        );
+    }
+
+    #[test]
+    fn wbi_values_remove_disallowed_characters() {
+        assert_eq!(sanitize_wbi_value("a!b'c(d)e*f"), "abcdef");
+    }
+
+    #[test]
+    fn key_is_extracted_from_image_url() {
+        assert_eq!(
+            extract_key_from_url("https://i0.hdslb.com/bfs/wbi/example-key.png").unwrap(),
+            "example-key"
+        );
+        assert!(extract_key_from_url("https://i0.hdslb.com/bfs/wbi/").is_err());
     }
 }
