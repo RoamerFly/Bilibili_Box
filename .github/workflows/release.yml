@@ -36,6 +36,7 @@ permissions:
 env:
   APP_NAME: Bilibili_Box
   NODE_VERSION: "22"
+  PUBLIC_RELEASE_REPOSITORY: RoamerFly/Bilibili_Box
   DOWNLOAD_GUIDE: |
     ## 下载建议
 
@@ -523,6 +524,7 @@ jobs:
       - name: Generate updater metadata
         shell: bash
         env:
+          GITHUB_REPOSITORY: ${{ env.PUBLIC_RELEASE_REPOSITORY }}
           RELEASE_ASSET_DIR: release-assets
           RELEASE_TAG_NAME: ${{ steps.meta.outputs.tag_name }}
           RELEASE_NOTES_FILE: ${{ steps.meta.outputs.notes_file }}
@@ -531,9 +533,11 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          repository: ${{ env.PUBLIC_RELEASE_REPOSITORY }}
+          token: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
           tag_name: ${{ steps.meta.outputs.tag_name }}
           name: ${{ steps.meta.outputs.release_name }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: main
           body_path: ${{ steps.meta.outputs.body_file }}
           draft: ${{ steps.meta.outputs.draft == 'true' }}
           prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
