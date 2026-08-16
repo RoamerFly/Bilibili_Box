@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine};
 use futures_util::StreamExt;
 use minisign_verify::{PublicKey, Signature};
 use serde::{Deserialize, Serialize};
@@ -848,13 +849,31 @@ fn verify_update_signature(bytes: &[u8], signature: &str) -> Result<(), String> 
         return Err("当前构建未配置更新验签公钥，已拒绝安装".to_string());
     }
 
-    let public_key = PublicKey::decode(public_key_text)
-        .or_else(|_| PublicKey::from_base64(public_key_text))
+    let public_key = parse_update_public_key(public_key_text)
         .map_err(|e| format!("更新验签公钥无效: {e}"))?;
     let signature = Signature::decode(signature).map_err(|e| format!("更新包签名格式无效: {e}"))?;
     public_key
         .verify(bytes, &signature, false)
         .map_err(|e| format!("更新包签名验证失败，已拒绝安装: {e}"))
+}
+
+/// 解析构建时注入的 Minisign 更新验签公钥。
+///
+/// 工作流通过 `BILIBOX_UPDATER_PUBLIC_KEY` 注入公钥，为避免注释行与密钥行之间的
+/// 换行在环境变量中被吞掉，将其整体做了 base64 编码。这里依次尝试：
+/// 标准多行文本 → base64 编码的多行文本 → 纯 base64 密钥（无注释行）。
+fn parse_update_public_key(raw: &str) -> Result<PublicKey, minisign_verify::Error> {
+    if let Ok(key) = PublicKey::decode(raw) {
+        return Ok(key);
+    }
+    if let Ok(decoded) = STANDARD.decode(raw) {
+        if let Ok(text) = std::str::from_utf8(&decoded) {
+            if let Ok(key) = PublicKey::decode(text.trim()) {
+                return Ok(key);
+            }
+        }
+    }
+    PublicKey::from_base64(raw)
 }
 
 fn sanitize_update_file_name(name: &str) -> String {
@@ -1043,5 +1062,20 @@ mod tests {
         let intel = platform_asset_names("macos", "x86_64", "v1.2.3").unwrap();
         assert!(arm.iter().all(|name| name.contains("macos-arm64")));
         assert!(intel.iter().all(|name| name.contains("macos-x64")));
+    }
+
+    #[test]
+    fn parses_base64_encoded_update_public_key() {
+        // 工作流把 minisign 公钥整体 base64 编码后注入（为保留注释行与密钥行之间的
+        // 换行）。此前 decode/from_base64 直接拿编码串解析而失败，导致应用内检查更新
+        // 报「更新验签公钥无效」。回归验证三种形态（base64 编码文本 / 标准多行文本 /
+        // 纯 base64 密钥）都能被正确解析。
+        let encoded = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFDQkM3QzkyRTVGQzJGRTUKUldUbEwvemxrbnk4SE5sM2JzZHA1d2F1dDhQUlV1NEI5azBSanhPL2VaUC95eHN3WVJPT1EwVGYK";
+        let text = "untrusted comment: minisign public key: 1CBC7C92E5FC2FE5\nRWTlL/zlkny8HNl3bsdp5waut8PRUu4B9k0RjxO/eZP/yxswYROOQ0Tf";
+        let key_line = "RWTlL/zlkny8HNl3bsdp5waut8PRUu4B9k0RjxO/eZP/yxswYROOQ0Tf";
+
+        assert!(parse_update_public_key(encoded).is_ok());
+        assert!(parse_update_public_key(text).is_ok());
+        assert!(parse_update_public_key(key_line).is_ok());
     }
 }
