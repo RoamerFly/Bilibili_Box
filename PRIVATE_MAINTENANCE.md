@@ -20,6 +20,10 @@
 - `PUBLIC_RELEASE_TOKEN`：GitHub fine-grained personal access token，仅授权 `RoamerFly/Bilibili_Box`，Repository permissions 中 `Contents` 设为 `Read and write`。
 - `TAURI_UPDATER_PRIVATE_KEY` 或 `TAURI_SIGNING_PRIVATE_KEY`：Tauri 更新签名私钥。
 - `TAURI_UPDATER_PRIVATE_KEY_PASSWORD`：新更新私钥的密码；没有密码时不需要创建。仅在回退使用旧 `TAURI_SIGNING_PRIVATE_KEY` 时读取 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
+- 可选 macOS Developer ID 签名：`APPLE_CERTIFICATE_BASE64`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`。
+- 可选 macOS 公证：`APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_PASSWORD`（需同时配置上面的 Developer ID 证书）。
+
+没有 Apple secrets 时，工作流只做 ad-hoc 签名，并明确标记产物未公证、不可视为 Gatekeeper 发布就绪；只有配置完整的 Developer ID 与公证凭据时才会 notarize/staple DMG。
 
 与私钥配对的 Minisign 公钥不属于机密，保存在 Release 工作流的 `BILIBOX_UPDATER_PUBLIC_KEY` 中；构建时会嵌入应用，用于安装更新前验证签名。
 

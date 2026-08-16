@@ -294,10 +294,9 @@ impl BiliClient {
         for cookie in cookies_str.split(';') {
             let cookie = cookie.trim();
             if !cookie.is_empty() {
-                self.shared_cookie_jar.read().add_cookie_str(
-                    &format!("{cookie}; Domain=.bilibili.com; Path=/"),
-                    url,
-                );
+                self.shared_cookie_jar
+                    .read()
+                    .add_cookie_str(&format!("{cookie}; Domain=.bilibili.com; Path=/"), url);
             }
         }
         if let Err(err) = self.persist_runtime_cookies() {

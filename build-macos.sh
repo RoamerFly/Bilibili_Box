@@ -100,20 +100,26 @@ echo
 echo "[5/5] Preparing portable package in $OUTPUT_DIR..."
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR/env" "$OUTPUT_DIR/data/guest/cache" "$OUTPUT_DIR/data/guest/download"
-if [[ -f "THIRD_PARTY_NOTICES.md" ]]; then
-    install -m 644 "THIRD_PARTY_NOTICES.md" "$OUTPUT_DIR/THIRD_PARTY_NOTICES.md"
-fi
+[[ -f "THIRD_PARTY_NOTICES.md" ]] || fail "THIRD_PARTY_NOTICES.md was not found."
+install -m 644 "THIRD_PARTY_NOTICES.md" "$OUTPUT_DIR/THIRD_PARTY_NOTICES.md"
 
 [[ -f "$TAURI_RELEASE_DIR/bilibili-box" ]] ||
     fail "Tauri executable not found in $TAURI_RELEASE_DIR."
 install -m 755 "$TAURI_RELEASE_DIR/bilibili-box" "$OUTPUT_DIR/bilibili-box"
 
-shopt -s nullglob
-tauri_libraries=("$TAURI_RELEASE_DIR"/*.dylib)
-shopt -u nullglob
-if ((${#tauri_libraries[@]})); then
-    cp -p "${tauri_libraries[@]}" "$OUTPUT_DIR/env/"
-fi
+# Copy only the official sherpa-onnx shared runtime allowlist. The Cargo
+# cdylib (bilibili_box_lib.dylib) must not enter the portable package.
+sherpa_libraries=(
+    "libonnxruntime.1.27.0.dylib"
+    "libonnxruntime.dylib"
+    "libsherpa-onnx-c-api.dylib"
+    "libsherpa-onnx-cxx-api.dylib"
+)
+for library in "${sherpa_libraries[@]}"; do
+    source_path="$TAURI_RELEASE_DIR/$library"
+    [[ -f "$source_path" ]] || fail "Required sherpa-onnx runtime $library was not produced."
+    install -m 755 "$source_path" "$OUTPUT_DIR/$library"
+done
 
 if [[ -d "$PROJECT_ROOT/env" ]]; then
     cp -R "$PROJECT_ROOT/env/." "$OUTPUT_DIR/env/"

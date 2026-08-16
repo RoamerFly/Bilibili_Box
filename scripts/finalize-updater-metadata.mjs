@@ -4,7 +4,10 @@ import path from "node:path";
 
 const assetDir = process.env.RELEASE_ASSET_DIR || "release-assets";
 const tagName = process.env.RELEASE_TAG_NAME || process.env.GITHUB_REF_NAME || "v0.0.0";
-const repo = process.env.GITHUB_REPOSITORY || "RoamerFly/Bilibili_Box";
+// GITHUB_REPOSITORY is a GitHub Actions reserved variable and always points at
+// the workflow's source repository. Releases are intentionally published to a
+// separate public repository, so use a dedicated variable for download URLs.
+const repo = process.env.RELEASE_REPOSITORY || "RoamerFly/Bilibili_Box";
 const notes = process.env.RELEASE_NOTES_FILE
   ? (await readFile(process.env.RELEASE_NOTES_FILE, "utf8")).trim()
   : (process.env.RELEASE_NOTES || "").trim();
@@ -19,9 +22,10 @@ const platformPatterns = [
   { key: "darwin-aarch64", pattern: /macos-arm64-portable\.zip$/i, priority: 20 },
   { key: "darwin-x86_64", pattern: /macos-x64-installer\.dmg$/i, priority: 10 },
   { key: "darwin-x86_64", pattern: /macos-x64-portable\.zip$/i, priority: 20 },
-  { key: "linux-x86_64", pattern: /linux-x64-installer\.deb$/i, priority: 10 },
-  { key: "linux-x86_64", pattern: /linux-x64-portable\.tar\.gz$/i, priority: 20 },
-  { key: "linux-x86_64", pattern: /linux-x64-installer\.rpm$/i, priority: 30 },
+  // Linux application updates are only safe through AppImage.  Debian/RPM
+  // assets remain published artifacts for package managers, but must never be
+  // selected as an in-app executable update.
+  { key: "linux-x86_64", pattern: /linux-x64-appimage\.AppImage$/i, priority: 10 },
 ];
 
 function resolvePlatform(fileName) {

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Bot,
   Cookie,
   Database,
   Eye,
@@ -12,6 +13,7 @@ import {
   Palette,
   RefreshCw,
   RotateCcw,
+  Settings2,
   Sun,
   Trash2,
   Users,
@@ -23,6 +25,7 @@ import { invoke } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { showComingSoon } from "@/lib/coming-soon";
 import { CARD_LAYOUT_KEYS, DEFAULT_CARD_LAYOUT, DEFAULT_CARD_SCALE, useAppStore, type CardLayoutKey } from "@/stores/app-store";
+import { AiSettingsPanel, withAiSettings, type AiSettings } from "./ai-settings-panel";
 
 type ThemeMode = "light" | "dark" | "system";
 
@@ -40,6 +43,7 @@ interface BackendConfig {
   prompt_download_quality: boolean;
   show_comments: boolean;
   task_concurrency: number;
+  ai?: AiSettings;
   [key: string]: unknown;
 }
 
@@ -145,22 +149,29 @@ export function SettingsView() {
   const [accountSwitching, setAccountSwitching] = useState("");
   const [accountDeleting, setAccountDeleting] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [activeSettingsTab, setActiveSettingsTab] = useState<"general" | "ai">("general");
   const [backendConfig, setBackendConfig] = useState<BackendConfig | null>(null);
+  const backendConfigRef = useRef<BackendConfig | null>(null);
   const [unifiedCardLayoutDraft, setUnifiedCardLayoutDraft] = useState<{ rows: number; columns: number }>({
     rows: DEFAULT_CARD_LAYOUT.rows,
     columns: DEFAULT_CARD_LAYOUT.columns,
   });
 
+  const syncBackendConfig = useCallback((nextConfig: BackendConfig) => {
+    backendConfigRef.current = nextConfig;
+    setBackendConfig(nextConfig);
+    setConfig(nextConfig);
+  }, [setConfig]);
+
   const loadConfig = useCallback(async () => {
     setLoading(true);
     try {
       const nextConfig = await invoke<BackendConfig>("get_config");
-      setBackendConfig(nextConfig);
-      setConfig(nextConfig);
+      syncBackendConfig(nextConfig);
     } finally {
       setLoading(false);
     }
-  }, [setConfig]);
+  }, [syncBackendConfig]);
 
   useEffect(() => {
     void loadConfig();
@@ -168,13 +179,12 @@ export function SettingsView() {
 
   const saveConfig = useCallback(
     async (updates: Partial<BackendConfig>) => {
-      const currentConfig = backendConfig ?? (await invoke<BackendConfig>("get_config"));
+      const currentConfig = backendConfigRef.current ?? backendConfig ?? (await invoke<BackendConfig>("get_config"));
       const nextConfig = { ...currentConfig, ...updates };
       await invoke("save_config", { newConfig: nextConfig });
-      setBackendConfig(nextConfig);
-      setConfig(nextConfig);
+      syncBackendConfig(nextConfig);
     },
-    [backendConfig, setConfig]
+    [backendConfig, syncBackendConfig]
   );
 
   const isLoggedIn = useMemo(() => userInfo !== null, [userInfo]);
@@ -231,8 +241,7 @@ export function SettingsView() {
   }, []);
 
   const applyAccountResult = useCallback((result: AccountSwitchResult) => {
-    setBackendConfig(result.config);
-    setConfig(result.config);
+    syncBackendConfig(result.config);
     setUserInfo(result.user_info ? {
       username: result.user_info.uname,
       avatar: result.user_info.face || "",
@@ -241,15 +250,14 @@ export function SettingsView() {
     } : null);
     resetAccountScopedState();
     notifyAccountChanged();
-  }, [notifyAccountChanged, resetAccountScopedState, setConfig, setUserInfo]);
+  }, [notifyAccountChanged, resetAccountScopedState, setUserInfo, syncBackendConfig]);
 
   const handleLogout = async () => {
     setFeedback("");
     try {
       await invoke("clear_user_info");
       const guestConfig = await invoke<BackendConfig>("get_config");
-      setBackendConfig(guestConfig);
-      setConfig(guestConfig);
+      syncBackendConfig(guestConfig);
       setUserInfo(null);
       resetAccountScopedState();
       notifyAccountChanged();
@@ -282,9 +290,8 @@ export function SettingsView() {
     setFeedback("");
     try {
       const restored = await invoke<BackendConfig>("reset_config");
-      setBackendConfig(restored);
-      setConfig(restored);
-      setFeedback("已恢复默认设置");
+      syncBackendConfig(restored);
+      setFeedback("已恢复默认设置；AI 供应商配置与 API Key 未修改，请在 AI 设置中管理供应商");
     } catch (err) {
       setFeedback(`恢复默认设置失败：${String(err)}`);
     } finally {
@@ -435,6 +442,12 @@ export function SettingsView() {
     }
   };
 
+  const handleAiSettingsSaved = useCallback((settings: AiSettings) => {
+    const currentConfig = backendConfigRef.current;
+    if (!currentConfig) return;
+    syncBackendConfig(withAiSettings(currentConfig, settings));
+  }, [syncBackendConfig]);
+
   if (loading || !backendConfig) {
     return (
       <div
@@ -501,6 +514,7 @@ export function SettingsView() {
               type="button"
               disabled={resetting || checkingUpdate || clearingCache}
               onClick={() => void handleResetConfig()}
+              title="通用恢复默认不会修改 AI 供应商配置或 API Key；供应商需在 AI 设置中管理"
               style={{ ...secondaryButtonStyle, opacity: resetting || checkingUpdate || clearingCache ? 0.65 : 1 }}
             >
               <RotateCcw style={{ width: 15, height: 15, marginRight: "6px" }} />
@@ -510,8 +524,46 @@ export function SettingsView() {
         </div>
       </motion.div>
 
+      <div
+        role="tablist"
+        aria-label="设置分类"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "4px",
+          width: "fit-content",
+          maxWidth: "100%",
+          marginBottom: "16px",
+          padding: "4px",
+          borderRadius: "11px",
+          backgroundColor: "var(--color-bg-tertiary)",
+          overflowX: "auto",
+        }}
+      >
+        <SettingsTab
+          id="settings-general-tab"
+          controls="settings-general-panel"
+          active={activeSettingsTab === "general"}
+          icon={<Settings2 style={{ width: 16, height: 16 }} />}
+          onClick={() => setActiveSettingsTab("general")}
+        >
+          通用设置
+        </SettingsTab>
+        <SettingsTab
+          id="settings-ai-tab"
+          controls="settings-ai-panel"
+          active={activeSettingsTab === "ai"}
+          icon={<Bot style={{ width: 16, height: 16 }} />}
+          onClick={() => setActiveSettingsTab("ai")}
+        >
+          AI 设置
+        </SettingsTab>
+      </div>
+
       {feedback ? (
         <div
+          role={feedbackIsError ? "alert" : "status"}
+          aria-live={feedbackIsError ? "assertive" : "polite"}
           style={{
             marginBottom: "16px",
             padding: "11px 16px",
@@ -525,6 +577,12 @@ export function SettingsView() {
         </div>
       ) : null}
 
+      {activeSettingsTab === "ai" ? (
+        <div id="settings-ai-panel" role="tabpanel" aria-labelledby="settings-ai-tab" tabIndex={0}>
+          <AiSettingsPanel onSettingsSaved={handleAiSettingsSaved} />
+        </div>
+      ) : (
+      <div id="settings-general-panel" role="tabpanel" aria-labelledby="settings-general-tab" tabIndex={0}>
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
@@ -734,6 +792,8 @@ export function SettingsView() {
           isLast
         />
       </motion.div>
+      </div>
+      )}
       {cacheDialogOpen ? (
         <CacheDialog
           overview={cacheOverview}
@@ -842,6 +902,53 @@ function SettingRow({
 
       <div style={{ flexShrink: 0 }}>{control}</div>
     </div>
+  );
+}
+
+function SettingsTab({
+  id,
+  controls,
+  active,
+  icon,
+  onClick,
+  children,
+}: {
+  id: string;
+  controls: string;
+  active: boolean;
+  icon: React.ReactNode;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      id={id}
+      role="tab"
+      aria-selected={active}
+      aria-controls={controls}
+      onClick={onClick}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "7px",
+        minHeight: "36px",
+        padding: "0 14px",
+        border: active ? "1px solid var(--color-border)" : "1px solid transparent",
+        borderRadius: "8px",
+        backgroundColor: active ? "var(--color-bg-secondary)" : "transparent",
+        color: active ? "var(--color-primary)" : "var(--color-text-secondary)",
+        boxShadow: active ? "0 1px 3px rgba(15,23,42,0.08)" : "none",
+        fontSize: "13.5px",
+        fontWeight: active ? 650 : 500,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {icon}
+      {children}
+    </button>
   );
 }
 

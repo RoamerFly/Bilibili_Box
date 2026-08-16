@@ -11,9 +11,7 @@ pub(super) fn deserialize_progress(content: &str) -> Result<DownloadProgress, St
 #[cfg(test)]
 mod tests {
     use super::{deserialize_progress, serialize_progress};
-    use crate::download::manager::{
-        ArticleDownloadImage, DownloadProgress, DownloadTaskState,
-    };
+    use crate::download::manager::{ArticleDownloadImage, DownloadProgress, DownloadTaskState};
     use crate::events::DownloadStage;
 
     #[test]

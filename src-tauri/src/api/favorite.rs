@@ -264,10 +264,7 @@ impl super::BiliClient {
         self.get_liked_videos_from_web(mid, page, ps).await
     }
 
-    async fn enrich_liked_video_items(
-        &self,
-        items: Vec<LikedVideoItem>,
-    ) -> Vec<LikedVideoItem> {
+    async fn enrich_liked_video_items(&self, items: Vec<LikedVideoItem>) -> Vec<LikedVideoItem> {
         stream::iter(items.into_iter().map(|item| async move {
             if !liked_video_needs_detail(&item) || item.bvid.trim().is_empty() {
                 return item;
