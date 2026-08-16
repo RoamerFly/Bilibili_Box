@@ -1,13 +1,13 @@
 <div align="center">
   <img src="./frontend/src/assets/app-icon.png" width="136" height="136" alt="BiliBox Logo" />
   <h1>BiliBox</h1>
-
   <p>
     一个高颜值、桌面级、开箱即用的 Bilibili 媒体工作台。
   </p>
   <p>
-    <strong>搜索、收藏、稍后再看、观看历史、追番追剧、在线播放与后台下载，一站完成。</strong>
+    <strong>搜索、收藏、稍后再看、观看历史、追番追剧、在线播放、AI总结与后台下载，一站完成。</strong>
   </p>
+
 
   <p>
     <a href="#功能亮点">功能亮点</a>
@@ -78,6 +78,13 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 - 亮色、暗色与跟随系统主题
 - 支持一键恢复默认设置，并保留当前账号登录状态
 
+### AI总结
+
+- 一键生成视频内容总结，输出核心观点与按时间戳划分的章节
+- 优先使用官方字幕，无字幕时自动切换本地语音识别兜底
+- 支持自定义提示词模板与多语言输出，结果自动缓存
+- 支持配置多个 AI 供应商与模型
+
 ## 界面预览
 
 ### 首页
@@ -110,6 +117,10 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 
 ![Player Preview](./docs/screenshots/player.png)
 
+### AI总结页面
+
+![Player Preview](./docs/screenshots/AI_sum.png)
+
 ### 下载队列
 
 ![Downloads Preview](./docs/screenshots/downloads.png)
@@ -126,7 +137,9 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 
 ### 设置
 
-![Settings Preview](./docs/screenshots/settings.png)
+![Settings Preview](./docs/screenshots/settings1.png)
+
+![Settings Preview](./docs/screenshots/settings2.png)
 
 ### 专栏
 
