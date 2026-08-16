@@ -1210,6 +1210,37 @@ export function PlayerView() {
                     <PlayerIconButton title="下载音频为 MP3" onClick={() => void handleAudioDownload()}>
                       <Music2 size={18} />
                     </PlayerIconButton>
+                    <Select
+                      value={String(playbackQuality)}
+                      onValueChange={(val) => void handlePlaybackQualityChange(Number(val))}
+                      disabled={!availableQualities.length}
+                    >
+                      <SelectTrigger style={playerSelectStyle} className="min-w-[80px] border-white/30 bg-black/40 text-white h-[30px] rounded-[7px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent side="top" className="z-[1050] max-h-[320px] overflow-y-auto">
+                        {availableQualities.length ? availableQualities.map((quality) => (
+                          <SelectItem key={quality} value={String(quality)}>
+                            {PLAYBACK_QUALITY_LABELS[quality] || `${quality}P`}
+                          </SelectItem>
+                        )) : <SelectItem value={String(playbackQuality)}>本地</SelectItem>}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={String(playbackRate)}
+                      onValueChange={(val) => handlePlaybackRateChange(Number(val))}
+                    >
+                      <SelectTrigger style={playerSelectStyle} className="min-w-[65px] border-white/30 bg-black/40 text-white h-[30px] rounded-[7px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent side="top" className="z-[1050] max-h-[320px] overflow-y-auto">
+                        {PLAYBACK_SPEEDS.map((rate) => (
+                          <SelectItem key={rate} value={String(rate)}>
+                            {rate}x
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <PlayerIconButton
                       title={isPictureInPicture ? "退出画中画" : "画中画"}
                       disabled={!canPictureInPicture}
@@ -1222,41 +1253,6 @@ export function PlayerView() {
                     </PlayerIconButton>
                   </div>
                 </div>
-              </div>
-            ) : null}
-            {hasPlayableSource ? (
-              <div style={playerTopControlsStyle}>
-                <Select
-                  value={String(playbackQuality)}
-                  onValueChange={(val) => void handlePlaybackQualityChange(Number(val))}
-                  disabled={!availableQualities.length}
-                >
-                  <SelectTrigger style={playerSelectStyle} className="min-w-[80px] border-white/30 bg-black/40 text-white h-[30px] rounded-[7px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent side="bottom" className="z-[1050] max-h-[320px] overflow-y-auto">
-                    {availableQualities.length ? availableQualities.map((quality) => (
-                      <SelectItem key={quality} value={String(quality)}>
-                        {PLAYBACK_QUALITY_LABELS[quality] || `${quality}P`}
-                      </SelectItem>
-                    )) : <SelectItem value={String(playbackQuality)}>本地</SelectItem>}
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={String(playbackRate)}
-                  onValueChange={(val) => handlePlaybackRateChange(Number(val))}
-                >
-                  <SelectTrigger style={playerSelectStyle} className="min-w-[65px] border-white/30 bg-black/40 text-white h-[30px] rounded-[7px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent side="bottom" className="z-[1050] max-h-[320px] overflow-y-auto">
-                    {PLAYBACK_SPEEDS.map((rate) => (
-                      <SelectItem key={rate} value={String(rate)}>
-                        {rate}x
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
             ) : null}
           </div>
@@ -2286,17 +2282,6 @@ const playerControlsStyle: React.CSSProperties = {
   padding: "32px 14px 12px",
   background: "linear-gradient(transparent, rgba(0, 0, 0, 0.82))",
   transition: "opacity 0.18s ease",
-};
-
-// 清晰度 / 倍速始终可见，不随底部控制条一起自动隐藏。
-const playerTopControlsStyle: React.CSSProperties = {
-  position: "absolute",
-  top: "10px",
-  right: "10px",
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  zIndex: 6,
 };
 
 const playerToolbarStyle: React.CSSProperties = {

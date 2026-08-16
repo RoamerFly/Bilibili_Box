@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Check, ChevronDown } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 const SelectContext = React.createContext<{
@@ -126,23 +126,24 @@ const SelectContent = ({
   const motionOffset = side === "top" ? -4 : 4;
 
   return (
-    <AnimatePresence>
-      {context.open && (
-        <motion.div
-          initial={{ opacity: 0, y: motionOffset, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: motionOffset, scale: 0.97 }}
-          transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-          className={cn(
-            "absolute top-[calc(100%+6px)] left-0 z-[2000] min-w-[8rem] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/95 backdrop-blur-xl p-1.5 shadow-[0_12px_42px_rgba(0,0,0,0.16)]",
-            side === "top" && "top-auto bottom-[calc(100%+6px)] origin-bottom",
-            className
-          )}
-        >
-          <div className="flex flex-col gap-0.5">{children}</div>
-        </motion.div>
+    <motion.div
+      initial={false}
+      animate={{
+        opacity: context.open ? 1 : 0,
+        y: context.open ? 0 : motionOffset,
+        scale: context.open ? 1 : 0.97,
+        visibility: context.open ? "visible" : "hidden",
+      }}
+      transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+      style={{ pointerEvents: context.open ? "auto" : "none" }}
+      className={cn(
+        "absolute top-[calc(100%+6px)] left-0 z-[2000] min-w-[8rem] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/95 backdrop-blur-xl p-1.5 shadow-[0_12px_42px_rgba(0,0,0,0.16)]",
+        side === "top" && "top-auto bottom-[calc(100%+6px)] origin-bottom",
+        className
       )}
-    </AnimatePresence>
+    >
+      <div className="flex flex-col gap-0.5">{children}</div>
+    </motion.div>
   );
 };
 
