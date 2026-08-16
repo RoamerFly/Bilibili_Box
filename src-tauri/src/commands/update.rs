@@ -44,6 +44,9 @@ pub struct UpdateCheckResult {
     pub release_url: String,
     pub body: String,
     pub asset: Option<UpdateAsset>,
+    /// 是否可安全地执行应用内下载安装：仅当存在安装包且带有非空数字签名时为 true。
+    /// 前端据此决定是否提供「下载更新」按钮，避免下载后因验签失败而更新失败。
+    pub installable: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,6 +94,10 @@ pub async fn check_update(app: AppHandle) -> Result<UpdateCheckResult, String> {
     let release = fetch_update_release(&client).await?;
     let latest_version = normalize_version(&release.tag_name);
     let update_available = is_version_newer(&latest_version, &current_version);
+    let installable = release
+        .asset
+        .as_ref()
+        .is_some_and(|asset| asset.signature.as_deref().is_some_and(|value| !value.trim().is_empty()));
 
     Ok(UpdateCheckResult {
         current_version,
@@ -100,6 +107,7 @@ pub async fn check_update(app: AppHandle) -> Result<UpdateCheckResult, String> {
         release_url: release.release_url,
         body: release.body,
         asset: release.asset,
+        installable,
     })
 }
 
@@ -580,7 +588,7 @@ pub async fn download_and_install_update(app: AppHandle) -> Result<(), String> {
         return Err(LINUX_UNSUPPORTED_UPDATE_MESSAGE.to_string());
     }
     let client = update_http_client()?;
-    let release = fetch_github_updater_metadata(&client).await?;
+    let release = fetch_update_release(&client).await?;
     let latest_version = normalize_version(&release.tag_name);
     if !is_version_newer(&latest_version, &current_version) {
         return Err("当前已是最新版，无需安装更新".to_string());

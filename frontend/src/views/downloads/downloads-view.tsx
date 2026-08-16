@@ -12,7 +12,7 @@ import { motion } from "framer-motion";
 import { cn, formatBiliImageUrl } from "@/lib/utils";
 import { invoke } from "@/lib/api";
 import { DownloadProgress, DownloadStage } from "@/lib/types";
-import { useAppStore } from "@/stores/app-store";
+import { useAppStore, type DownloadPlaylistItem } from "@/stores/app-store";
 import { DownloadDeleteDialog } from "@/components/download-delete-dialog";
 import { useCardLayout } from "@/hooks/use-card-layout";
 
@@ -133,6 +133,28 @@ function aggregateTaskState(tasks: DownloadTask[]): TaskState {
   if (tasks.some((task) => task.state === "Failed")) return "Failed";
   if (tasks.some((task) => task.state === "Paused")) return "Paused";
   return "Completed";
+}
+
+function isPlayableVideoTask(task: DownloadTask): boolean {
+  return task.state === "Completed" && task.media_kind !== "article" && task.format !== "MP3";
+}
+
+function toPlaylistItem(task: DownloadTask): DownloadPlaylistItem {
+  return { taskId: task.task_id, title: task.title, cover: task.cover, bvid: task.bvid, cid: task.cid };
+}
+
+/** Ordered download playlist (P1..Pn) of every completed video task, with the
+ *  seed task selected when present. */
+function buildDownloadPlaylist(tasks: DownloadTask[], seedTaskId?: string): { playlist: DownloadPlaylistItem[]; localTaskId?: string } {
+  const seen = new Set<string>();
+  const playlist: DownloadPlaylistItem[] = [];
+  for (const task of [...tasks].sort((left, right) => (left.created_at ?? 0) - (right.created_at ?? 0))) {
+    if (!isPlayableVideoTask(task) || seen.has(task.task_id)) continue;
+    seen.add(task.task_id);
+    playlist.push(toPlaylistItem(task));
+  }
+  const localTaskId = seedTaskId && seen.has(seedTaskId) ? seedTaskId : playlist[0]?.taskId;
+  return { playlist, localTaskId };
 }
 
 // ============================================================
@@ -339,14 +361,34 @@ export function DownloadsView() {
       return;
     }
     if (task.state !== "Completed") return;
+    const { playlist, localTaskId } = buildDownloadPlaylist(tasks, task.task_id);
     openPlayer({
       kind: "video",
       bvid: task.bvid,
       cid: task.cid,
       title: task.title,
       cover: task.cover,
-      localTaskId: task.task_id,
+      localTaskId,
+      playlist,
     });
+  };
+
+  const handlePlayGroup = (group: DownloadTask) => {
+    const children = (group.children ?? [])
+      .filter(isPlayableVideoTask)
+      .sort((left, right) => (left.created_at ?? 0) - (right.created_at ?? 0));
+    if (!children.length) return;
+    const first = children[0];
+    openPlayer({
+      kind: "video",
+      bvid: first.bvid,
+      cid: first.cid,
+      title: group.group_title || group.title,
+      cover: first.cover || group.cover,
+      localTaskId: first.task_id,
+      playlist: children.map(toPlaylistItem),
+    });
+    setDetailTask(null);
   };
 
   return (
@@ -704,6 +746,7 @@ export function DownloadsView() {
           onClose={() => setDetailTask(null)}
           onOpenFolder={handleOpenFolder}
           onDelete={(taskId) => requestDelete([taskId])}
+          onPlayAll={() => handlePlayGroup(detailTask)}
         />
       ) : null}
     </div>
@@ -1109,13 +1152,16 @@ function TaskDetailDialog({
   onClose,
   onOpenFolder,
   onDelete,
+  onPlayAll,
 }: {
   task: DownloadTask;
   onClose: () => void;
   onOpenFolder: (id?: string) => void;
   onDelete: (taskId: string) => void;
+  onPlayAll: () => void;
 }) {
   const children = task.children ?? [];
+  const playableChildren = children.filter(isPlayableVideoTask);
   return (
     <div
       role="dialog"
@@ -1132,7 +1178,13 @@ function TaskDetailDialog({
             <h2 style={{ color: "var(--color-text)", fontSize: "18px", fontWeight: 850, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.title}</h2>
             <p style={{ marginTop: "4px", color: "var(--color-text-muted)", fontSize: "13px" }}>共 {children.length} 个子任务</p>
           </div>
-          <button type="button" onClick={onClose} style={{ ...iconButtonPlainStyle, width: 34, height: 34 }}>×</button>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+            <button type="button" onClick={onPlayAll} disabled={!playableChildren.length} style={{ ...childTaskButtonStyle, width: "auto", padding: "0 12px", gap: 5, opacity: playableChildren.length ? 1 : 0.45 }}>
+              <Play style={{ width: 14, height: 14 }} />
+              播放全部
+            </button>
+            <button type="button" onClick={onClose} style={{ ...iconButtonPlainStyle, width: 34, height: 34 }}>×</button>
+          </div>
         </div>
         <div style={{ padding: "14px 18px", overflowY: "auto", display: "grid", gap: "10px" }}>
           {children.map((child, index) => (

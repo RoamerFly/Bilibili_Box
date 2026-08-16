@@ -3,6 +3,8 @@ import {
   Bot,
   Cookie,
   Database,
+  Download,
+  ExternalLink,
   Eye,
   FolderOpen,
   Loader2,
@@ -22,6 +24,7 @@ import { motion } from "framer-motion";
 import { DOWNLOAD_QUALITY_OPTIONS } from "@/components/download-quality-dialog";
 import { LoginDialog } from "@/components/login-dialog";
 import { invoke } from "@/lib/api";
+import { openExternalUrl } from "@/lib/open-external";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { showComingSoon } from "@/lib/coming-soon";
 import { CARD_LAYOUT_KEYS, DEFAULT_CARD_LAYOUT, DEFAULT_CARD_SCALE, useAppStore, type CardLayoutKey } from "@/stores/app-store";
@@ -59,6 +62,7 @@ interface UpdateCheckResult {
     url: string;
     size: number;
   } | null;
+  installable: boolean;
 }
 
 interface CacheBucketInfo {
@@ -138,6 +142,9 @@ export function SettingsView() {
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
   const [cacheStepIndex, setCacheStepIndex] = useState(-1);
   const [cacheOverview, setCacheOverview] = useState<CacheOverview | null>(null);
@@ -308,18 +315,35 @@ export function SettingsView() {
         setFeedback(`当前已是最新版 ${result.current_version}`);
         return;
       }
-      if (!result.asset) {
-        setFeedback(`发现新版本 ${result.latest_version}，但没有适合当前系统的安装包`);
-        return;
-      }
-      setFeedback(`发现新版本 ${result.latest_version}，正在下载 ${result.asset.name}`);
-      await invoke("download_and_install_update");
-      setFeedback("安装程序已启动，应用即将退出");
+      setUpdateResult(result);
+      setUpdateDialogOpen(true);
     } catch (err) {
       setFeedback(`检查更新失败：${String(err)}`);
     } finally {
       setCheckingUpdate(false);
     }
+  };
+
+  const handleDownloadUpdate = async () => {
+    if (!updateResult) return;
+    setUpdating(true);
+    setFeedback("");
+    try {
+      await invoke("download_and_install_update");
+      setFeedback("安装程序已启动，应用即将退出");
+      setUpdateDialogOpen(false);
+    } catch (err) {
+      setFeedback(`下载更新失败：${String(err)}`);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleOpenRelease = () => {
+    if (!updateResult) return;
+    void openExternalUrl(updateResult.release_url).catch((err) => {
+      setFeedback(`打开发布页失败：${String(err)}`);
+    });
   };
 
   const handleViewCache = async () => {
@@ -841,6 +865,15 @@ export function SettingsView() {
           onClose={() => setAccountDialogOpen(false)}
         />
       ) : null}
+      {updateDialogOpen && updateResult ? (
+        <UpdateDialog
+          result={updateResult}
+          updating={updating}
+          onDownload={() => void handleDownloadUpdate()}
+          onOpenRelease={handleOpenRelease}
+          onClose={() => setUpdateDialogOpen(false)}
+        />
+      ) : null}
       <LoginDialog
         open={addAccountDialogOpen}
         onClose={() => {
@@ -1211,6 +1244,123 @@ function CacheBucketCard({ bucket, actionLabel, onAction }: { bucket: CacheBucke
         <Trash2 style={{ width: 14, height: 14, marginRight: "6px" }} />
         {actionLabel}
       </button>
+    </div>
+  );
+}
+
+function UpdateDialog({
+  result,
+  updating,
+  onDownload,
+  onOpenRelease,
+  onClose,
+}: {
+  result: UpdateCheckResult;
+  updating: boolean;
+  onDownload: () => void;
+  onOpenRelease: () => void;
+  onClose: () => void;
+}) {
+  const canInstall = Boolean(result.asset && result.installable);
+  const downloadLabel =
+    result.asset && result.asset.size > 0 ? `下载更新 (${formatBytes(result.asset.size)})` : "下载更新";
+
+  return (
+    <div style={dialogBackdropStyle} onClick={onClose}>
+      <div style={{ ...dialogPanelStyle, width: "min(640px, 100%)" }} onClick={(event) => event.stopPropagation()}>
+        <div style={dialogHeaderStyle}>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={dialogTitleStyle}>发现新版本 {result.latest_version}</h2>
+            {result.release_name ? (
+              <p style={{ marginTop: "3px", color: "var(--color-text-muted)", fontSize: "12.5px" }}>
+                {result.release_name}
+              </p>
+            ) : null}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+            <button type="button" onClick={onOpenRelease} style={secondaryButtonStyle}>
+              <ExternalLink style={{ width: 15, height: 15, marginRight: "6px" }} />
+              前往发布页
+            </button>
+            <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+              关闭
+            </button>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: "16px" }}>
+          <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--color-text-secondary)", marginBottom: "8px" }}>
+            当前版本 {result.current_version} → {result.latest_version}
+          </div>
+          {result.body ? (
+            <div
+              style={{
+                maxHeight: "320px",
+                overflowY: "auto",
+                padding: "14px 16px",
+                borderRadius: "12px",
+                border: "1px solid var(--color-border)",
+                backgroundColor: "var(--color-bg-subtle)",
+                color: "var(--color-text)",
+                fontSize: "13.5px",
+                lineHeight: 1.7,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {result.body}
+            </div>
+          ) : (
+            <div style={{ color: "var(--color-text-muted)", fontSize: "13.5px", padding: "12px 0" }}>
+              该版本未提供更新说明。
+            </div>
+          )}
+        </div>
+
+        {!canInstall ? (
+          <div
+            style={{
+              marginBottom: "16px",
+              padding: "11px 14px",
+              borderRadius: "10px",
+              backgroundColor: "var(--color-warning-bg)",
+              color: "var(--color-warning-text)",
+              fontSize: "13px",
+              lineHeight: 1.6,
+            }}
+          >
+            {result.asset
+              ? "当前更新包缺少数字签名，暂不支持应用内下载，请前往发布页手动安装。"
+              : "没有适合当前系统的安装包，请前往发布页手动下载。"}
+          </div>
+        ) : null}
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "10px" }}>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+            稍后再说
+          </button>
+          {canInstall ? (
+            <button
+              type="button"
+              disabled={updating}
+              onClick={onDownload}
+              style={{ ...primaryButtonStyle, opacity: updating ? 0.65 : 1 }}
+            >
+              {updating ? (
+                <Loader2 className="animate-spin" style={{ width: 15, height: 15, marginRight: "6px" }} />
+              ) : (
+                <Download style={{ width: 15, height: 15, marginRight: "6px" }} />
+              )}
+              {updating ? "下载中" : downloadLabel}
+            </button>
+          ) : (
+            <button type="button" onClick={onOpenRelease} style={primaryButtonStyle}>
+              <ExternalLink style={{ width: 15, height: 15, marginRight: "6px" }} />
+              前往发布页
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1639,6 +1789,21 @@ const secondaryButtonStyle: React.CSSProperties = {
   color: "var(--color-text-secondary)",
   backgroundColor: "var(--color-bg-secondary)",
   border: "1.5px solid var(--color-border)",
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "9px 16px",
+  borderRadius: "8px",
+  fontSize: "13.5px",
+  fontWeight: 650,
+  color: "#ffffff",
+  backgroundColor: "var(--color-primary)",
+  border: "1.5px solid var(--color-primary)",
   cursor: "pointer",
   whiteSpace: "nowrap",
 };

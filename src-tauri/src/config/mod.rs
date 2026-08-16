@@ -156,6 +156,10 @@ fn default_ai_asr_language() -> String {
     "auto".to_string()
 }
 
+fn default_ai_prompt_template() -> String {
+    "视频标题：{video.title}\n视频简介：{video.description}\n用户补充：{video.note}".to_string()
+}
+
 /// Non-sensitive settings for one AI provider. API keys are stored separately in
 /// the platform keyring under the current profile and this provider's stable id.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -212,6 +216,8 @@ pub struct AiSettings {
     pub asr_model: String,
     #[serde(default = "default_ai_asr_language")]
     pub asr_language: String,
+    #[serde(default = "default_ai_prompt_template")]
+    pub prompt_template: String,
 }
 
 /// Deserialize both the current multi-provider shape and the previous single
@@ -248,6 +254,8 @@ impl<'de> Deserialize<'de> for AiSettings {
             asr_model: String,
             #[serde(default = "default_ai_asr_language")]
             asr_language: String,
+            #[serde(default = "default_ai_prompt_template")]
+            prompt_template: String,
         }
         let wire = Wire::deserialize(deserializer)?;
         let providers = wire.providers.unwrap_or_else(|| {
@@ -276,6 +284,7 @@ impl<'de> Deserialize<'de> for AiSettings {
             asr_engine: wire.asr_engine,
             asr_model: wire.asr_model,
             asr_language: wire.asr_language,
+            prompt_template: wire.prompt_template,
         })
     }
 }
@@ -289,6 +298,7 @@ impl Default for AiSettings {
             asr_engine: default_ai_asr_engine(),
             asr_model: default_ai_asr_model(),
             asr_language: default_ai_asr_language(),
+            prompt_template: default_ai_prompt_template(),
         }
     }
 }
@@ -303,6 +313,7 @@ impl AiSettings {
     const MAX_ASR_ENGINE_CHARS: usize = 64;
     const MAX_ASR_MODEL_CHARS: usize = 256;
     const MAX_ASR_LANGUAGE_CHARS: usize = 32;
+    const MAX_PROMPT_TEMPLATE_CHARS: usize = 4_000;
 
     /// Normalize user-provided values before persisting or using them.
     pub fn normalize(mut self) -> Self {
@@ -385,6 +396,11 @@ impl AiSettings {
             &self.asr_language,
             Self::MAX_ASR_LANGUAGE_CHARS,
             &default_ai_asr_language(),
+        );
+        self.prompt_template = normalize_string(
+            &self.prompt_template,
+            Self::MAX_PROMPT_TEMPLATE_CHARS,
+            &default_ai_prompt_template(),
         );
 
         self

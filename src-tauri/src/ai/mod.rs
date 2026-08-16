@@ -27,7 +27,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State};
 use url::Url;
 
-pub const AI_SUMMARY_PROMPT_VERSION: &str = "subtitle-summary-v2";
+pub const AI_SUMMARY_PROMPT_VERSION: &str = "subtitle-summary-v4";
 const AI_SUMMARY_PROGRESS_EVENT: &str = "ai-analysis-progress";
 const MAX_TRANSCRIPT_SEGMENTS: usize = 20_000;
 const MAX_TRANSCRIPT_CHARS: usize = 1_000_000;
@@ -141,11 +141,32 @@ pub struct AiSummaryRequest {
     #[serde(default)]
     pub title: String,
     #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default)]
+    pub note: String,
+    #[serde(default)]
     pub language: Option<String>,
     #[serde(default)]
     pub force: bool,
     #[serde(default)]
     pub cache_only: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AiSummaryPromptPreviewRequest {
+    #[serde(default)]
+    pub prompt_template: String,
+}
+
+/// 只读预览：生成总结时真正发送给模型的两条消息（系统提示 + 用户消息），
+/// 用示例视频数据渲染，让用户无需具体视频即可核对完整提示词结构。
+#[derive(Debug, Clone, Serialize)]
+pub struct AiSummaryPromptPreview {
+    pub system_prompt: String,
+    pub instruction: String,
+    pub user_prompt: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -295,6 +316,49 @@ pub async fn get_ai_summary(
     }))
 }
 
+/// 返回发送给模型的完整提示词预览：系统提示 + 渲染后的 instruction + 最终用户消息 JSON。
+/// 设置页没有具体视频上下文，因此用示例视频/字幕渲染，便于只读核对变量与结构。
+#[tauri::command]
+pub fn preview_ai_summary_prompt(
+    config: State<'_, Arc<RwLock<Config>>>,
+    request: AiSummaryPromptPreviewRequest,
+) -> Result<AiSummaryPromptPreview, String> {
+    let settings = config.read().ai.clone().normalize();
+    let template = if request.prompt_template.trim().is_empty() {
+        settings.prompt_template.clone()
+    } else {
+        request.prompt_template.trim().to_string()
+    };
+
+    let sample_request = AiSummaryRequest {
+        aid: 0,
+        cid: 0,
+        bvid: "BV1xx411c7mD".to_string(),
+        title: "示例视频标题".to_string(),
+        description: "示例视频简介".to_string(),
+        owner: "示例UP主".to_string(),
+        note: "播放页补充说明示例".to_string(),
+        language: Some("zh-CN".to_string()),
+        force: false,
+        cache_only: false,
+    };
+    let segments = vec![
+        TranscriptSegment { start_ms: 0, end_ms: 3_800, text: "这是第一条已识别的字幕内容。".to_string() },
+        TranscriptSegment { start_ms: 3_800, end_ms: 8_200, text: "这是第二条已识别的字幕内容。".to_string() },
+        TranscriptSegment { start_ms: 8_200, end_ms: 13_400, text: "这是第三条已识别的字幕内容。".to_string() },
+    ];
+    let subtitle_text = transcript_segments_to_text(&segments);
+    let instruction = render_prompt_template(&template, &sample_request, &subtitle_text);
+    let chunk = TranscriptChunk { segments };
+    let user_prompt = map_user_prompt(&sample_request, "zh-CN", &chunk, &instruction);
+
+    Ok(AiSummaryPromptPreview {
+        system_prompt: map_system_prompt(),
+        instruction,
+        user_prompt,
+    })
+}
+
 #[tauri::command]
 pub async fn generate_ai_summary(
     app: AppHandle,
@@ -357,6 +421,8 @@ pub async fn generate_ai_summary(
         }
         Err(error) => return Err(error),
     };
+    let subtitle_text = transcript_segments_to_text(&transcript.selection.segments);
+    let instruction = render_prompt_template(&settings.prompt_template, &request, &subtitle_text);
     let ai_client = build_ai_client(&app, settings, true)?;
     let cache_key = build_cache_key(&request, &transcript, &ai_client);
     if !request.force {
@@ -388,11 +454,22 @@ pub async fn generate_ai_summary(
     let language = transcript.selection.language.clone();
     let min_start_ms = transcript.min_start_ms;
     let max_end_ms = transcript.max_end_ms;
+    // Real subtitle boundaries, sorted ascending and deduped, used to snap the
+    // model's imprecise chapter timestamps onto exact segment starts.
+    let mut segment_starts: Vec<i64> = transcript
+        .selection
+        .segments
+        .iter()
+        .map(|segment| segment.start_ms)
+        .collect();
+    segment_starts.sort_unstable();
+    segment_starts.dedup();
     let completed = Arc::new(AtomicUsize::new(0));
     let mapped = futures_util::stream::iter(chunks.into_iter().enumerate())
         .map(|(index, chunk)| {
             let ai_client = ai_client.clone();
             let request = request.clone();
+            let instruction = instruction.clone();
             let app = app.clone();
             let language = language.clone();
             let completed = completed.clone();
@@ -402,7 +479,7 @@ pub async fn generate_ai_summary(
                 let mapped_payload = call_model_with_cancel(
                     &ai_client,
                     &map_system_prompt(),
-                    &map_user_prompt(&request, &language, &chunk),
+                    &map_user_prompt(&request, &language, &chunk, &instruction),
                     &cancel_token,
                 ).await?;
                 let (summary, key_points, chapters) =
@@ -445,7 +522,15 @@ pub async fn generate_ai_summary(
         emit_progress(&app, &request.bvid, request.cid, "reducing", 85);
         let mut level = mapped;
         while level.len() > AI_SUMMARY_REDUCE_BATCH {
-            level = reduce_level(&ai_client, &request, &transcript, &level, &cancel_token).await?;
+            level = reduce_level(
+                &ai_client,
+                &request,
+                &transcript,
+                &level,
+                &instruction,
+                &cancel_token,
+            )
+            .await?;
         }
         let reduced = call_model_with_cancel(
             &ai_client,
@@ -455,12 +540,14 @@ pub async fn generate_ai_summary(
                 &transcript.selection.language,
                 &transcript.selection.segments,
                 &level,
+                &instruction,
             ),
             &cancel_token,
         )
         .await?;
         normalize_model_payload(reduced, transcript.min_start_ms, transcript.max_end_ms)?
     };
+    let chapters = snap_chapters_to_segments(chapters, &segment_starts);
 
     let result = AiVideoSummary {
         bvid: request.bvid.clone(),
@@ -554,6 +641,12 @@ fn validate_request(request: &AiSummaryRequest) -> Result<(), String> {
     }
     if request.bvid.chars().count() > 128 || request.title.chars().count() > 1_000 {
         return Err("AI_SUMMARY_INVALID_VIDEO: 视频标识或标题过长".to_string());
+    }
+    if request.description.chars().count() > 20_000
+        || request.owner.chars().count() > 200
+        || request.note.chars().count() > 4_000
+    {
+        return Err("AI_SUMMARY_INVALID_VIDEO: 视频描述、UP 主或补充说明过长".to_string());
     }
     Ok(())
 }
@@ -1090,6 +1183,7 @@ async fn reduce_level(
     request: &AiSummaryRequest,
     transcript: &TranscriptContext,
     payloads: &[ModelSummaryPayload],
+    instruction: &str,
     cancel: &CancelToken,
 ) -> Result<Vec<ModelSummaryPayload>, String> {
     let mut reduced = Vec::with_capacity(payloads.len().div_ceil(AI_SUMMARY_REDUCE_BATCH));
@@ -1103,6 +1197,7 @@ async fn reduce_level(
                 &transcript.selection.language,
                 &transcript.selection.segments,
                 group,
+                instruction,
             ),
             cancel,
         )
@@ -1664,6 +1759,56 @@ fn normalize_model_payload(
     Ok((summary, key_points, chapters))
 }
 
+/// Snap chapter start times onto the nearest real subtitle segment boundary.
+/// Models tend to round timestamps to whole seconds or drift slightly from the
+/// exact `[start_ms,end_ms]` values in the transcript. Snapping guarantees every
+/// chapter lands exactly on a subtitle line so seeking is deterministic.
+fn snap_chapters_to_segments(
+    chapters: Vec<AiSummaryChapter>,
+    segment_starts: &[i64],
+) -> Vec<AiSummaryChapter> {
+    if segment_starts.is_empty() {
+        return chapters;
+    }
+    let mut snapped: Vec<AiSummaryChapter> = chapters
+        .into_iter()
+        .map(|chapter| AiSummaryChapter {
+            start_ms: snap_to_nearest_segment_start(chapter.start_ms, segment_starts),
+            ..chapter
+        })
+        .collect();
+    // Two chapters can collapse onto the same boundary after snapping; keep the
+    // first (earliest) occurrence to avoid duplicate timestamps.
+    snapped.sort_by_key(|chapter| chapter.start_ms);
+    snapped.dedup_by_key(|chapter| chapter.start_ms);
+    snapped
+}
+
+/// Return the segment start boundary closest to `start_ms`, assuming
+/// `segment_starts` is sorted ascending. Used only to correct the model's
+/// imprecise timestamps against the real subtitle grid.
+fn snap_to_nearest_segment_start(start_ms: i64, segment_starts: &[i64]) -> i64 {
+    match segment_starts.binary_search(&start_ms) {
+        Ok(_) => start_ms,
+        Err(index) => {
+            let before = index.checked_sub(1).map(|i| segment_starts[i]);
+            let after = segment_starts.get(index).copied();
+            match (before, after) {
+                (Some(previous), Some(next)) => {
+                    if start_ms - previous <= next - start_ms {
+                        previous
+                    } else {
+                        next
+                    }
+                }
+                (Some(previous), None) => previous,
+                (None, Some(next)) => next,
+                (None, None) => start_ms,
+            }
+        }
+    }
+}
+
 fn clean_text(value: &str, max_chars: usize) -> String {
     value
         .split_whitespace()
@@ -1675,12 +1820,12 @@ fn clean_text(value: &str, max_chars: usize) -> String {
 }
 
 fn map_system_prompt() -> String {
-    "你是视频字幕分析器。只输出一个 JSON 对象，不要 Markdown，不要解释。字段必须是 summary（字符串）、key_points（字符串数组）、chapters（对象数组，每项含 start_ms、title、summary）。start_ms 必须使用输入字幕中的毫秒时间。输入字幕每行为 `[start_ms,end_ms] 文本`。".to_string()
+    "你是视频字幕分析器。只输出一个 JSON 对象，不要 Markdown，不要解释。字段必须是 summary（字符串）、key_points（字符串数组）、chapters（对象数组，每项含 start_ms、title、summary）。输入字幕每行为 `[start_ms,end_ms] 文本`。\n\n章节切分规则：每个章节对应一个内容主题，主题切换处就是章节边界。章节的 start_ms 应绑定到该主题的过渡句或真正开始讲解的第一句（例如「接下来讲苹果」这类过渡句可作为章节起点），但不要提前到过渡句之前更早的、与该主题无关的句子。每个章节的 start_ms 必须逐字复制对应字幕行的 start_ms 数值，禁止四舍五入、禁止取整到秒、禁止改写或估算时间。".to_string()
 }
 
-fn transcript_chunk_to_text(chunk: &TranscriptChunk) -> String {
-    let mut lines = Vec::with_capacity(chunk.segments.len());
-    for segment in &chunk.segments {
+fn transcript_segments_to_text(segments: &[TranscriptSegment]) -> String {
+    let mut lines = Vec::with_capacity(segments.len());
+    for segment in segments {
         lines.push(format!(
             "[{},{}] {}",
             segment.start_ms, segment.end_ms, segment.text
@@ -1689,23 +1834,49 @@ fn transcript_chunk_to_text(chunk: &TranscriptChunk) -> String {
     lines.join("\n")
 }
 
-fn map_user_prompt(request: &AiSummaryRequest, language: &str, chunk: &TranscriptChunk) -> String {
+fn transcript_chunk_to_text(chunk: &TranscriptChunk) -> String {
+    transcript_segments_to_text(&chunk.segments)
+}
+
+/// Substitute the `{video.*}` placeholders in the user-editable prompt template
+/// with the resolved video metadata for the current request. Unknown tokens are
+/// left untouched so a template never silently swallows user text.
+fn render_prompt_template(template: &str, request: &AiSummaryRequest, subtitle_text: &str) -> String {
+    template
+        .replace("{video.title}", request.title.trim())
+        .replace("{video.description}", request.description.trim())
+        .replace("{video.owner}", request.owner.trim())
+        .replace("{video.bvid}", request.bvid.trim())
+        .replace("{video.aid}", &request.aid.to_string())
+        .replace("{video.cid}", &request.cid.to_string())
+        .replace("{video.note}", request.note.trim())
+        .replace("{video.subtitle}", subtitle_text)
+}
+
+fn map_user_prompt(
+    request: &AiSummaryRequest,
+    language: &str,
+    chunk: &TranscriptChunk,
+    instruction: &str,
+) -> String {
     json!({
         "task": "summarize_transcript_chunk",
         "title": request.title,
         "language": language,
+        "instruction": instruction,
         "segments_text": transcript_chunk_to_text(chunk),
         "output_constraints": {
             "summary_max_chars": MAX_SUMMARY_CHARS,
             "key_points_max": MAX_KEY_POINTS,
-            "chapters_max": MAX_CHAPTERS
+            "chapters_max": MAX_CHAPTERS,
+            "chapter_anchor_rule": "每个章节的 start_ms 绑定到该主题的过渡句或开始讲解的第一句（如「接下来讲苹果」可作起点），不要提前到过渡句之前更早的、与主题无关的句子"
         }
     })
     .to_string()
 }
 
 fn reduce_system_prompt() -> String {
-    "你是视频内容总结编辑。根据多个字幕分块分析结果，合并重复内容并输出一个 JSON 对象，不要 Markdown，不要解释。字段必须是 summary（完整简洁摘要）、key_points（核心观点字符串数组）、chapters（按时间排序的对象数组，每项含 start_ms、title、summary）。只能使用输入中的时间范围。".to_string()
+    "你是视频内容总结编辑。根据多个字幕分块分析结果，合并重复内容并输出一个 JSON 对象，不要 Markdown，不要解释。字段必须是 summary（完整简洁摘要）、key_points（核心观点字符串数组）、chapters（按时间排序的对象数组，每项含 start_ms、title、summary）。只能使用输入中的时间范围。每个章节的 start_ms 必须直接复用 chunk_results 中已有的 start_ms 数值，禁止重新估算、取整或改写。".to_string()
 }
 
 fn reduce_user_prompt(
@@ -1713,6 +1884,7 @@ fn reduce_user_prompt(
     language: &str,
     transcript: &[TranscriptSegment],
     mapped: &[ModelSummaryPayload],
+    instruction: &str,
 ) -> String {
     let bounds = transcript
         .first()
@@ -1723,6 +1895,7 @@ fn reduce_user_prompt(
         "task": "reduce_video_summary",
         "title": request.title,
         "language": language,
+        "instruction": instruction,
         "allowed_time_range": bounds,
         "chunk_results": mapped
     })
@@ -2538,9 +2711,80 @@ Explains why subtitles are preferred before local transcription.
     }
 
     #[test]
+    fn snap_to_nearest_segment_start_rounds_to_real_boundaries() {
+        let starts = vec![0_i64, 1_500, 3_000, 8_000];
+        assert_eq!(snap_to_nearest_segment_start(0, &starts), 0);
+        // 精确命中保持不变
+        assert_eq!(snap_to_nearest_segment_start(3_000, &starts), 3_000);
+        // 更靠近前一个边界
+        assert_eq!(snap_to_nearest_segment_start(1_400, &starts), 1_500);
+        assert_eq!(snap_to_nearest_segment_start(1_600, &starts), 1_500);
+        // 更靠近后一个边界
+        assert_eq!(snap_to_nearest_segment_start(2_500, &starts), 3_000);
+        // 超出范围吸附到最近端点
+        assert_eq!(snap_to_nearest_segment_start(-100, &starts), 0);
+        assert_eq!(snap_to_nearest_segment_start(99_999, &starts), 8_000);
+        // 空网格原样返回
+        assert_eq!(snap_to_nearest_segment_start(123, &[]), 123);
+    }
+
+    #[test]
+    fn snap_chapters_to_segments_dedups_and_resorts() {
+        let starts = vec![0_i64, 1_000, 2_000, 3_000];
+        let chapters = vec![
+            AiSummaryChapter {
+                start_ms: 2_100,
+                title: "b".into(),
+                summary: "b".into(),
+            },
+            AiSummaryChapter {
+                start_ms: 950,
+                title: "a".into(),
+                summary: "a".into(),
+            },
+            AiSummaryChapter {
+                start_ms: 1_050,
+                title: "a2".into(),
+                summary: "a2".into(),
+            },
+        ];
+        let snapped = snap_chapters_to_segments(chapters, &starts);
+        let times: Vec<i64> = snapped.iter().map(|chapter| chapter.start_ms).collect();
+        // 950 → 1000、1050 → 1000（去重保留首个）、2100 → 2000；排序后为 [1000, 2000]
+        assert_eq!(times, vec![1_000, 2_000]);
+        assert_eq!(snapped[0].title, "a");
+        assert_eq!(snapped[1].title, "b");
+    }
+
+    #[test]
     fn base_url_identifier_excludes_credentials_and_query() {
         let url = Url::parse("https://Example.com:443/v1/").unwrap();
         assert_eq!(normalized_base_url_id(&url), "https://example.com/v1");
+    }
+
+    #[test]
+    fn prompt_template_substitutes_video_placeholders() {
+        let request = AiSummaryRequest {
+            aid: 42,
+            cid: 7,
+            bvid: "BV1test".to_string(),
+            title: " 标题 ".to_string(),
+            description: " 简介 ".to_string(),
+            owner: " UP主 ".to_string(),
+            note: " 补充 ".to_string(),
+            language: None,
+            force: false,
+            cache_only: false,
+        };
+        let rendered = render_prompt_template(
+            "标题={video.title} 简介={video.description} UP={video.owner} bvid={video.bvid} aid={video.aid} cid={video.cid} note={video.note} 字幕={video.subtitle}",
+            &request,
+            "[0,1000] 你好",
+        );
+        assert_eq!(
+            rendered,
+            "标题=标题 简介=简介 UP=UP主 bvid=BV1test aid=42 cid=7 note=补充 字幕=[0,1000] 你好"
+        );
     }
 
     #[test]
@@ -2557,6 +2801,9 @@ Explains why subtitles are preferred before local transcription.
             cid: 7,
             bvid: "BV1test".to_string(),
             title: String::new(),
+            description: String::new(),
+            owner: String::new(),
+            note: String::new(),
             language: None,
             force: false,
             cache_only: true,
@@ -2673,6 +2920,9 @@ Explains why subtitles are preferred before local transcription.
             cid: 7,
             bvid: "BV1test".to_string(),
             title: String::new(),
+            description: String::new(),
+            owner: String::new(),
+            note: String::new(),
             language: None,
             force: false,
             cache_only: false,

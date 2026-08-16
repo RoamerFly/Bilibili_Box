@@ -181,6 +181,9 @@ export interface AiSummaryInvokeRequest {
   bvid: string;
   cid: number;
   title?: string;
+  description?: string;
+  owner?: string;
+  note?: string;
   force?: boolean;
   cacheOnly?: boolean;
   language?: string;
@@ -213,6 +216,43 @@ export function readStoredLanguage(): string {
     return normalizeLanguage(window.localStorage.getItem(AI_SUMMARY_LANGUAGE_STORAGE_KEY));
   } catch {
     return "auto";
+  }
+}
+
+export const AI_SUMMARY_JUMP_PLAYBACK_OPTIONS = [
+  { value: "play", label: "直接播放" },
+  { value: "pause", label: "暂停" },
+] as const;
+
+export type AiSummaryJumpPlayback = (typeof AI_SUMMARY_JUMP_PLAYBACK_OPTIONS)[number]["value"];
+
+export const AI_SUMMARY_JUMP_PLAYBACK_STORAGE_KEY = "ai-summary-jump-playback";
+
+export function normalizeJumpPlayback(value: unknown): AiSummaryJumpPlayback {
+  if (typeof value === "string" && AI_SUMMARY_JUMP_PLAYBACK_OPTIONS.some((option) => option.value === value)) {
+    return value as AiSummaryJumpPlayback;
+  }
+  return "play";
+}
+
+export function readStoredJumpPlayback(): AiSummaryJumpPlayback {
+  try {
+    return normalizeJumpPlayback(window.localStorage.getItem(AI_SUMMARY_JUMP_PLAYBACK_STORAGE_KEY));
+  } catch {
+    return "play";
+  }
+}
+
+/** Per-video supplemental note is stored keyed by (bvid, cid) so reopening the dialog restores it. */
+function noteStorageKey(bvid?: string, cid?: number): string {
+  return bvid && cid ? `ai-summary-note:${bvid}:${cid}` : "ai-summary-note:empty";
+}
+
+function readStoredNote(bvid?: string, cid?: number): string {
+  try {
+    return window.localStorage.getItem(noteStorageKey(bvid, cid)) ?? "";
+  } catch {
+    return "";
   }
 }
 
@@ -253,9 +293,11 @@ interface AiSummaryPanelProps {
   bvid?: string;
   cid?: number;
   title?: string;
+  description?: string;
+  owner?: string;
   settings?: AiSummarySettingsLike;
   active?: boolean;
-  onSeek: (seconds: number) => void;
+  onSeek: (seconds: number, shouldPlay: boolean) => void;
   onClose: () => void;
   onOpenSettings: () => void;
   onGeneratingChange?: (generating: boolean) => void;
@@ -466,7 +508,7 @@ export function safeAnalysisError(error: unknown): string {
   return "AI 总结生成失败，请稍后重试。未显示服务端原始响应，以保护隐私和凭据安全。";
 }
 
-export function AiSummaryPanel({ bvid, cid, title, settings, active = false, onSeek, onClose, onOpenSettings, onGeneratingChange }: AiSummaryPanelProps) {
+export function AiSummaryPanel({ bvid, cid, title, description, owner, settings, active = false, onSeek, onClose, onOpenSettings, onGeneratingChange }: AiSummaryPanelProps) {
   const targetKey = summaryCacheKey(bvid, cid);
   const [summary, setSummary] = useState<AiSummaryData | null>(null);
   const [liveSettings, setLiveSettings] = useState<AiSummarySettingsLike | null>(null);
@@ -475,6 +517,8 @@ export function AiSummaryPanel({ bvid, cid, title, settings, active = false, onS
   const [loadingCache, setLoadingCache] = useState(false);
   const [credentialStoreAvailable, setCredentialStoreAvailable] = useState(true);
   const [language, setLanguage] = useState<string>(() => readStoredLanguage());
+  const [jumpPlayback, setJumpPlayback] = useState<AiSummaryJumpPlayback>(() => readStoredJumpPlayback());
+  const [note, setNote] = useState<string>(() => readStoredNote(bvid, cid));
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -538,6 +582,14 @@ export function AiSummaryPanel({ bvid, cid, title, settings, active = false, onS
     }
   }, [language]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(AI_SUMMARY_JUMP_PLAYBACK_STORAGE_KEY, jumpPlayback);
+    } catch {
+      // 忽略存储失败（隐私模式等）。
+    }
+  }, [jumpPlayback]);
+
   const loadCachedSummary = useCallback(async () => {
     if (!bvid || !cid) {
       setSummary(null);
@@ -573,6 +625,7 @@ export function AiSummaryPanel({ bvid, cid, title, settings, active = false, onS
     setProgress(EMPTY_PROGRESS);
     setGenerating(false);
     setCancelling(false);
+    setNote(readStoredNote(bvid, cid));
   }, [targetKey]);
 
   const cancelActiveGeneration = useCallback((showCancellingState: boolean) => {
@@ -633,6 +686,15 @@ export function AiSummaryPanel({ bvid, cid, title, settings, active = false, onS
     };
   }, [active, onClose]);
 
+  const handleNoteChange = (value: string) => {
+    setNote(value);
+    try {
+      window.localStorage.setItem(noteStorageKey(bvid, cid), value);
+    } catch {
+      // 忽略存储失败（隐私模式等）。
+    }
+  };
+
   const handleGenerate = async (force = false) => {
     if (!bvid || !cid || generating) return;
     if (loadingSettings) {
@@ -661,6 +723,9 @@ export function AiSummaryPanel({ bvid, cid, title, settings, active = false, onS
         bvid,
         cid,
         title,
+        description,
+        owner,
+        note: note.trim() ? note.trim() : undefined,
         force,
         language: language === "auto" ? undefined : language,
       }));
@@ -824,7 +889,7 @@ export function AiSummaryPanel({ bvid, cid, title, settings, active = false, onS
       ) : null}
 
       {bvid && cid && summary ? (
-        <SummaryContent summary={summary} onSeek={onSeek} />
+        <SummaryContent summary={summary} onSeek={onSeek} shouldPlay={jumpPlayback === "play"} />
       ) : !loadingCache && !generating && !loadingSettings && !needsConfiguration ? (
         <div style={emptyStateStyle}>
           <FileText style={{ width: 25, height: 25, color: "var(--color-primary)", opacity: 0.82 }} />
@@ -832,8 +897,10 @@ export function AiSummaryPanel({ bvid, cid, title, settings, active = false, onS
           <p style={{ maxWidth: "440px", margin: "5px auto 14px", color: "var(--color-text-muted)", fontSize: "13px", lineHeight: 1.65 }}>
             只读取缓存不会调用模型。点击生成后，将根据当前分 P 的字幕整理摘要、核心观点和章节。
           </p>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <NoteField value={note} onChange={handleNoteChange} />
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "12px", flexWrap: "wrap" }}>
             <LanguageSelector value={language} onChange={setLanguage} />
+            <JumpPlaybackSelector value={jumpPlayback} onChange={setJumpPlayback} />
             <button type="button" onClick={() => void handleGenerate(false)} style={primaryButtonStyle}>
               <Sparkles style={{ width: 15, height: 15 }} />生成总结
             </button>
@@ -851,11 +918,17 @@ export function AiSummaryPanel({ bvid, cid, title, settings, active = false, onS
             </div>
           </div>
         ) : (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginTop: "18px" }}>
-            <LanguageSelector value={language} onChange={setLanguage} />
-            <button type="button" onClick={() => void handleGenerate(true)} style={secondaryButtonStyle}>
-              <RefreshCw style={{ width: 14, height: 14 }} />重新生成
-            </button>
+          <div style={{ display: "grid", gap: "12px", marginTop: "18px" }}>
+            <NoteField value={note} onChange={handleNoteChange} />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                <LanguageSelector value={language} onChange={setLanguage} />
+                <JumpPlaybackSelector value={jumpPlayback} onChange={setJumpPlayback} />
+              </div>
+              <button type="button" onClick={() => void handleGenerate(true)} style={secondaryButtonStyle}>
+                <RefreshCw style={{ width: 14, height: 14 }} />重新生成
+              </button>
+            </div>
           </div>
         )
       ) : null}
@@ -865,7 +938,7 @@ export function AiSummaryPanel({ bvid, cid, title, settings, active = false, onS
   );
 }
 
-function SummaryContent({ summary, onSeek }: { summary: AiSummaryData; onSeek: (seconds: number) => void }) {
+function SummaryContent({ summary, onSeek, shouldPlay }: { summary: AiSummaryData; onSeek: (seconds: number, shouldPlay: boolean) => void; shouldPlay: boolean }) {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -904,12 +977,13 @@ function SummaryContent({ summary, onSeek }: { summary: AiSummaryData; onSeek: (
       {summary.chapters.length ? (
         <section aria-labelledby="ai-summary-chapters" style={contentBlockStyle}>
           <h3 id="ai-summary-chapters" style={sectionTitleStyle}>时间戳章节</h3>
+          <span style={chapterHintStyle}>点击章节可跳转播放</span>
           <div style={{ display: "grid", gap: "8px" }}>
             {summary.chapters.map((chapter, index) => (
               <button
                 type="button"
                 key={`${chapter.start_ms}-${index}-${chapter.title}`}
-                onClick={() => onSeek(Math.max(0, chapter.start_ms) / 1000)}
+                onClick={() => onSeek(Math.max(0, chapter.start_ms) / 1000, shouldPlay)}
                 style={chapterButtonStyle}
                 title={`跳转到 ${formatTimestamp(chapter.start_ms)}`}
               >
@@ -946,6 +1020,35 @@ function LanguageSelector({ value, onChange }: { value: string; onChange: (value
           <option key={option.value} value={option.value}>{option.label}</option>
         ))}
       </select>
+    </label>
+  );
+}
+
+function JumpPlaybackSelector({ value, onChange }: { value: AiSummaryJumpPlayback; onChange: (value: AiSummaryJumpPlayback) => void }) {
+  return (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--color-text-muted)", fontSize: "12px", fontWeight: 700 }}>
+      跳转
+      <select aria-label="章节跳转播放" value={value} onChange={(e) => onChange(normalizeJumpPlayback(e.target.value))} style={languageSelectStyle}>
+        {AI_SUMMARY_JUMP_PLAYBACK_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function NoteField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <label style={noteFieldStyle}>
+      <span style={noteLabelStyle}>本视频补充说明（可选）</span>
+      <input
+        aria-label="本视频补充说明"
+        type="text"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="例如：这是一部电影解说 / 教程内容"
+        style={noteInputStyle}
+      />
     </label>
   );
 }
@@ -1021,6 +1124,7 @@ const progressBarStyle: React.CSSProperties = { height: "100%", borderRadius: "i
 const emptyStateStyle: React.CSSProperties = { display: "grid", placeItems: "center", textAlign: "center", padding: "30px 14px 20px", color: "var(--color-text-muted)" };
 const contentBlockStyle: React.CSSProperties = { padding: "14px 15px", borderRadius: "11px", backgroundColor: "var(--color-bg-tertiary)" };
 const sectionTitleStyle: React.CSSProperties = { margin: "0 0 9px", color: "var(--color-text)", fontSize: "14px", fontWeight: 800 };
+const chapterHintStyle: React.CSSProperties = { display: "block", margin: "-5px 0 9px", color: "var(--color-text-muted)", fontSize: "11.5px" };
 const bodyTextStyle: React.CSSProperties = { margin: 0, color: "var(--color-text-secondary, var(--color-text-muted))", fontSize: "13.5px", lineHeight: 1.75, whiteSpace: "pre-wrap" };
 const listStyle: React.CSSProperties = { display: "grid", gap: "7px", margin: 0, paddingLeft: "20px", color: "var(--color-text-secondary, var(--color-text-muted))", fontSize: "13.5px", lineHeight: 1.6 };
 const chapterButtonStyle: React.CSSProperties = { display: "flex", alignItems: "flex-start", gap: "11px", width: "100%", padding: "10px 11px", border: "1px solid var(--color-border)", borderRadius: "9px", backgroundColor: "var(--color-bg-secondary)", color: "var(--color-text-muted)", cursor: "pointer", textAlign: "left" };
@@ -1031,3 +1135,6 @@ const cancelButtonStyle: React.CSSProperties = { minHeight: "27px", padding: "0 
 const secondaryButtonStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px", minHeight: "32px", padding: "0 10px", border: "1px solid var(--color-border)", borderRadius: "8px", backgroundColor: "var(--color-bg-secondary)", color: "var(--color-text-secondary, var(--color-text))", fontSize: "12px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" };
 const iconButtonStyle: React.CSSProperties = { display: "inline-grid", placeItems: "center", width: "28px", height: "28px", border: "1px solid var(--color-border)", borderRadius: "7px", background: "transparent", color: "inherit", cursor: "pointer" };
 const languageSelectStyle: React.CSSProperties = { minHeight: "30px", padding: "0 8px", border: "1px solid var(--color-border)", borderRadius: "8px", backgroundColor: "var(--color-bg-secondary)", color: "var(--color-text)", fontSize: "12px", fontWeight: 700, cursor: "pointer" };
+const noteFieldStyle: React.CSSProperties = { display: "grid", gap: "6px", width: "100%", textAlign: "left" };
+const noteLabelStyle: React.CSSProperties = { color: "var(--color-text-muted)", fontSize: "12px", fontWeight: 700 };
+const noteInputStyle: React.CSSProperties = { boxSizing: "border-box", width: "100%", padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-secondary)", color: "var(--color-text)", fontSize: "12.5px", outline: "none" };
