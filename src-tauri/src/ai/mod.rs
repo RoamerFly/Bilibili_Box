@@ -944,9 +944,19 @@ async fn call_model(
     system_prompt: &str,
     user_prompt: &str,
 ) -> Result<ModelSummaryPayload, String> {
-    let content = send_model_request(context, system_prompt, user_prompt).await?;
-    match parse_model_payload(&content) {
+    let response = send_model_request(context, system_prompt, user_prompt, None).await?;
+    match parse_model_payload(&response.content) {
         Ok(payload) => Ok(payload),
+        // 推理型模型（如 deepseek-v4-pro）会把 max_tokens 预算大量消耗在
+        // 思考链 reasoning_content 上，导致正文字段为空、finish_reason=length。
+        // 此时内容并未「格式错误」，只是被截断；关闭思考并放大输出预算后重试一次。
+        Err(_) if response.truncated => {
+            let retry_max_tokens = context.settings.max_output_tokens.max(8_192);
+            let retried =
+                send_model_request(context, system_prompt, user_prompt, Some(retry_max_tokens))
+                    .await?;
+            parse_model_payload(&retried.content).map_err(stable_model_response_error)
+        }
         Err(error) if is_retryable_payload_error(&error) => {
             // Some reasoning models (including a few DeepSeek-compatible
             // deployments) still add a short explanation around the JSON even
@@ -961,8 +971,8 @@ async fn call_model(
             let repair_user = format!(
                 "{user_prompt}\n\n请重新生成上一项任务的结果，并严格只返回合法 JSON 对象。"
             );
-            let repaired = send_model_request(context, &repair_system, &repair_user).await?;
-            parse_model_payload(&repaired).map_err(stable_model_response_error)
+            let repaired = send_model_request(context, &repair_system, &repair_user, None).await?;
+            parse_model_payload(&repaired.content).map_err(stable_model_response_error)
         }
         Err(error) => Err(error),
     }
@@ -979,12 +989,13 @@ async fn send_model_request(
     context: &AiClientContext,
     system_prompt: &str,
     user_prompt: &str,
-) -> Result<String, String> {
+    max_tokens_override: Option<u32>,
+) -> Result<ModelResponse, String> {
     let endpoint = chat_completions_url(&context.base_url)?;
     let mut payload = json!({
         "model": context.model,
         "temperature": context.settings.temperature,
-        "max_tokens": context.settings.max_output_tokens,
+        "max_tokens": max_tokens_override.unwrap_or(context.settings.max_output_tokens),
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -992,6 +1003,11 @@ async fn send_model_request(
     });
     if supports_json_object(&context.settings, &context.base_url) {
         payload["response_format"] = json!({"type": "json_object"});
+    }
+    // 总结任务明确要求「只输出 JSON、不要解释」，模型内部思考既非必需，又会
+    // 抢占 max_tokens 导致正文被截断。对支持关闭思考的供应商直接关闭。
+    if supports_reasoning_effort(&context.settings, &context.base_url) {
+        payload["reasoning_effort"] = json!("none");
     }
     let mut request = context
         .http
@@ -1032,8 +1048,27 @@ async fn send_model_request(
     }
     let value: Value = serde_json::from_slice(&body)
         .map_err(|_| "AI_SUMMARY_RESPONSE_INVALID: AI 服务返回了无效 JSON".to_string())?;
-    extract_response_content(&value)
-        .ok_or_else(|| "AI_SUMMARY_RESPONSE_INVALID: AI 服务缺少文本结果".to_string())
+    let truncated = choice_finish_reason(&value) == Some("length");
+    let content = extract_response_content(&value)
+        .ok_or_else(|| "AI_SUMMARY_RESPONSE_INVALID: AI 服务缺少文本结果".to_string())?;
+    Ok(ModelResponse { content, truncated })
+}
+
+/// A parsed model response plus whether the provider cut the generation short
+/// (`finish_reason == "length"`), which is what reasoning models do when their
+/// chain-of-thought consumes the whole `max_tokens` budget.
+struct ModelResponse {
+    content: String,
+    truncated: bool,
+}
+
+fn choice_finish_reason(value: &Value) -> Option<&str> {
+    value
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("finish_reason"))
+        .and_then(Value::as_str)
 }
 
 async fn call_model_with_cancel(
@@ -1373,6 +1408,21 @@ fn supports_json_object(provider: &AiProviderSettings, base_url: &Url) -> bool {
         kind.as_str(),
         "deepseek" | "openai" | "openai-compatible" | "openai_compatible" | "openrouter"
     ) {
+        return true;
+    }
+    base_url.host_str().is_some_and(|host| {
+        host.eq_ignore_ascii_case("api.deepseek.com") || host.eq_ignore_ascii_case("api.openai.com")
+    })
+}
+
+/// Whether the provider accepts a `reasoning_effort: "none"` hint to skip
+/// chain-of-thought. This is deliberately narrower than [`supports_json_object`]:
+/// OpenRouter and generic OpenAI-compatible endpoints may forward the request to
+/// models that do not understand the field, so we only disable reasoning for the
+/// official DeepSeek/OpenAI backends (whose reasoning models support it).
+fn supports_reasoning_effort(provider: &AiProviderSettings, base_url: &Url) -> bool {
+    let kind = provider.provider.trim().to_ascii_lowercase();
+    if matches!(kind.as_str(), "deepseek" | "openai") {
         return true;
     }
     base_url.host_str().is_some_and(|host| {
@@ -2232,6 +2282,56 @@ mod tests {
             end_ms,
             text: text.to_string(),
         }
+    }
+
+    #[test]
+    fn reasoning_effort_is_disabled_only_for_supporting_backends() {
+        let provider = |provider: &str, base_url: &str| AiProviderSettings {
+            provider: provider.to_string(),
+            base_url: base_url.to_string(),
+            ..AiProviderSettings::default()
+        };
+        let url = |value: &str| Url::parse(value).unwrap();
+
+        // Official DeepSeek/OpenAI backends accept the hint.
+        assert!(supports_reasoning_effort(
+            &provider("deepseek", "https://api.deepseek.com"),
+            &url("https://api.deepseek.com")
+        ));
+        assert!(supports_reasoning_effort(
+            &provider("openai", "https://api.openai.com"),
+            &url("https://api.openai.com")
+        ));
+        // An official host still wins even with a generic kind label.
+        assert!(supports_reasoning_effort(
+            &provider("openai-compatible", "https://api.deepseek.com"),
+            &url("https://api.deepseek.com")
+        ));
+        // Generic endpoints and aggregators are excluded so we never forward an
+        // unsupported field to an arbitrary model.
+        assert!(!supports_reasoning_effort(
+            &provider("openai-compatible", "https://example.com"),
+            &url("https://example.com")
+        ));
+        assert!(!supports_reasoning_effort(
+            &provider("openrouter", "https://openrouter.ai"),
+            &url("https://openrouter.ai")
+        ));
+    }
+
+    #[test]
+    fn detects_truncated_finish_reason() {
+        let parse = |value: &str| serde_json::from_str::<Value>(value).unwrap();
+        assert_eq!(
+            choice_finish_reason(&parse(r#"{"choices":[{"finish_reason":"length"}]}"#)),
+            Some("length")
+        );
+        assert_eq!(
+            choice_finish_reason(&parse(r#"{"choices":[{"finish_reason":"stop"}]}"#)),
+            Some("stop")
+        );
+        assert_eq!(choice_finish_reason(&parse(r#"{"choices":[]}"#)), None);
+        assert_eq!(choice_finish_reason(&parse("{}")), None);
     }
 
     #[test]
