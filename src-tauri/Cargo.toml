@@ -1,6 +1,6 @@
 [package]
 name = "bilibili-box"
-version = "1.0.9"
+version = "1.0.10"
 description = "BiliBox - Bilibili 媒体工作站"
 authors = ["BiliBox"]
 license-file = "../LICENSE"
@@ -78,9 +78,34 @@ minisign-verify = "0.2.5"
 # 懒初始化
 once_cell = "1"
 
+# 跨平台系统凭据存储（AI API key）
+# Linux 同时启用 native + sync-secret-service 时，keyring 官方默认选择
+# Secret Service；crypto-rust 避免额外的 OpenSSL 加密构建依赖。
+keyring = { version = "3.6.3", default-features = false, features = [
+    "apple-native",
+    "windows-native",
+    "linux-native",
+    "sync-secret-service",
+    "crypto-rust",
+] }
+
 # URL 编码
 serde_urlencoded = "0.7"
 url = "2"
 
 # FFmpeg 集成
 ffmpeg-sidecar = "1.1"
+
+# Local SenseVoice ASR. Use the official shared runtime so the Windows
+# toolchain does not need to link the prebuilt static MSVC archive. The
+# sherpa-onnx build script copies the matching runtime libraries beside each
+# Cargo profile executable and emits platform-appropriate runtime paths.
+sherpa-onnx = { version = "=1.13.4", default-features = false, features = ["shared"] }
+# Pin the native FFI package too; sherpa-onnx's semver range otherwise floats
+# to a newer native archive and makes reproducible CI builds impossible.
+sherpa-onnx-sys = { version = "=1.13.4", default-features = false, features = ["shared"] }
+
+# Model archive management and disk-space checks.
+tar = "0.4"
+bzip2 = "0.4"
+fs2 = "0.4"

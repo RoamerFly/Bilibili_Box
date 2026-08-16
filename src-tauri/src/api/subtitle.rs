@@ -100,17 +100,20 @@ impl Default for SubtitleInfo {
 impl super::BiliClient {
     /// 获取播放器信息中的字幕列表
     pub async fn get_subtitle_info(&self, aid: i64, cid: i64) -> Result<SubtitleInfo, String> {
-        let url = format!(
-            "https://api.bilibili.com/x/player/wbi/v2?aid={}&cid={}",
-            aid, cid
-        );
+        let url = player_info_url(aid, cid);
 
-        let cookie = self.get_cookie();
         let client = self.api_client();
 
         let response = client
             .get(&url)
-            .header("cookie", &cookie)
+            // Use the merged cookie value so runtime cookies (for example buvid
+            // and bili_ticket) remain available after the client has warmed up.
+            .header("cookie", self.get_cookie_for_url(&url))
+            // Bilibili returns an empty subtitle section when this request is
+            // sent with the generic home-page referer. The player endpoint is
+            // scoped to a video page, so use the stable video referer even
+            // though this API only needs aid/cid.
+            .header("referer", "https://www.bilibili.com/video/")
             .send()
             .await
             .map_err(|e| format!("请求播放器信息失败: {}", e))?;
@@ -120,42 +123,7 @@ impl super::BiliClient {
             .await
             .map_err(|e| format!("解析播放器信息失败: {}", e))?;
 
-        // 检查返回码
-        let code = json["code"].as_i64().unwrap_or(-1);
-        if code != 0 {
-            let message = json["message"].as_str().unwrap_or("未知错误");
-            return Err(format!("获取字幕信息失败: {}", message));
-        }
-
-        // 解析字幕信息
-        let subtitle_json = &json["data"]["subtitle"];
-        let subtitles = subtitle_json["subtitles"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|item| {
-                        Some(SubtitleDetail {
-                            id: item["id"].as_i64()?,
-                            lan: item["lan"].as_str().unwrap_or("").to_string(),
-                            lan_doc: item["lan_doc"].as_str().unwrap_or("").to_string(),
-                            is_lock: item["is_lock"].as_bool().unwrap_or(false),
-                            subtitle_url: item["subtitle_url"].as_str().unwrap_or("").to_string(),
-                            type_field: item["type"].as_i64().unwrap_or(0),
-                            id_str: item["id_str"].as_str().unwrap_or("").to_string(),
-                            ai_type: item["ai_type"].as_i64().unwrap_or(0),
-                            ai_status: item["ai_status"].as_i64().unwrap_or(0),
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        Ok(SubtitleInfo {
-            allow_submit: subtitle_json["allow_submit"].as_bool().unwrap_or(false),
-            lan: subtitle_json["lan"].as_str().unwrap_or("").to_string(),
-            lan_doc: subtitle_json["lan_doc"].as_str().unwrap_or("").to_string(),
-            subtitles,
-        })
+        parse_subtitle_info(&json)
     }
 
     /// 获取字幕内容
@@ -212,6 +180,56 @@ impl super::BiliClient {
     }
 }
 
+const PLAYER_INFO_ENDPOINT: &str = "https://api.bilibili.com/x/player/v2";
+
+fn player_info_url(aid: i64, cid: i64) -> String {
+    format!("{PLAYER_INFO_ENDPOINT}?aid={aid}&cid={cid}")
+}
+
+/// Parse and validate the common API envelope used by Bilibili's player
+/// information endpoint. This deliberately accepts a missing subtitle object
+/// as an empty list because videos without uploaded/AI subtitles are expected
+/// to fall through to local audio transcription.
+fn parse_subtitle_info(json: &serde_json::Value) -> Result<SubtitleInfo, String> {
+    let code = json["code"].as_i64().unwrap_or(-1);
+    if code != 0 {
+        let message = json["message"].as_str().unwrap_or("未知错误");
+        return Err(format!("获取字幕信息失败: {}", message));
+    }
+
+    let subtitle_json = json
+        .get("data")
+        .and_then(|data| data.get("subtitle"))
+        .unwrap_or(&serde_json::Value::Null);
+    let subtitles = subtitle_json["subtitles"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    Some(SubtitleDetail {
+                        id: item["id"].as_i64()?,
+                        lan: item["lan"].as_str().unwrap_or("").to_string(),
+                        lan_doc: item["lan_doc"].as_str().unwrap_or("").to_string(),
+                        is_lock: item["is_lock"].as_bool().unwrap_or(false),
+                        subtitle_url: item["subtitle_url"].as_str().unwrap_or("").to_string(),
+                        type_field: item["type"].as_i64().unwrap_or(0),
+                        id_str: item["id_str"].as_str().unwrap_or("").to_string(),
+                        ai_type: item["ai_type"].as_i64().unwrap_or(0),
+                        ai_status: item["ai_status"].as_i64().unwrap_or(0),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(SubtitleInfo {
+        allow_submit: subtitle_json["allow_submit"].as_bool().unwrap_or(false),
+        lan: subtitle_json["lan"].as_str().unwrap_or("").to_string(),
+        lan_doc: subtitle_json["lan_doc"].as_str().unwrap_or("").to_string(),
+        subtitles,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +266,78 @@ mod tests {
         assert!(srt.contains("Hello"));
         assert!(srt.contains("00:00:05,000 --> 00:00:08,000"));
         assert!(srt.contains("World"));
+    }
+
+    #[test]
+    fn test_player_info_url_uses_stable_endpoint() {
+        assert_eq!(
+            player_info_url(670277662, 257687474),
+            "https://api.bilibili.com/x/player/v2?aid=670277662&cid=257687474"
+        );
+    }
+
+    #[test]
+    fn test_parse_player_v2_subtitles() {
+        let response = serde_json::json!({
+            "code": 0,
+            "message": "0",
+            "data": {
+                "subtitle": {
+                    "allow_submit": false,
+                    "lan": "ai-zh",
+                    "lan_doc": "中文（自动生成）",
+                    "subtitles": [{
+                        "id": 123,
+                        "lan": "ai-zh",
+                        "lan_doc": "中文（自动生成）",
+                        "is_lock": false,
+                        "subtitle_url": "//aisubtitle.hdslb.com/bfs/ai_subtitle/example.json",
+                        "type": 0,
+                        "id_str": "123",
+                        "ai_type": 1,
+                        "ai_status": 2
+                    }]
+                }
+            }
+        });
+
+        let info = parse_subtitle_info(&response).expect("player v2 response should parse");
+        assert!(!info.allow_submit);
+        assert_eq!(info.lan, "ai-zh");
+        assert_eq!(info.lan_doc, "中文（自动生成）");
+        assert_eq!(info.subtitles.len(), 1);
+        assert_eq!(info.subtitles[0].id, 123);
+        assert_eq!(
+            info.subtitles[0].subtitle_url,
+            "//aisubtitle.hdslb.com/bfs/ai_subtitle/example.json"
+        );
+        assert_eq!(info.subtitles[0].ai_type, 1);
+        assert_eq!(info.subtitles[0].ai_status, 2);
+    }
+
+    #[test]
+    fn test_parse_player_v2_without_subtitles_is_empty() {
+        let response = serde_json::json!({
+            "code": 0,
+            "message": "0",
+            "data": {}
+        });
+
+        let info =
+            parse_subtitle_info(&response).expect("missing subtitle is a valid empty result");
+        assert!(info.subtitles.is_empty());
+    }
+
+    #[test]
+    fn test_parse_player_v2_api_error_is_stable() {
+        let response = serde_json::json!({
+            "code": -404,
+            "message": "啥也没有"
+        });
+
+        assert_eq!(
+            parse_subtitle_info(&response).unwrap_err(),
+            "获取字幕信息失败: 啥也没有"
+        );
     }
 }

@@ -1,8 +1,7 @@
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -10,12 +9,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Semaphore;
 
-use super::naming::sanitize_path_component;
+use super::assets;
 use super::ffmpeg::FfmpegExecutor;
-use super::persistence::{deserialize_progress, serialize_progress};
+use super::naming::sanitize_path_component;
+use super::selection::{select_audio_url, select_video_url};
 use super::speed::format_speed;
-use crate::config::{AudioQuality, CodecType, Config, FileExistAction, VideoQuality};
-use crate::danmaku::{convert_to_ass, AssConfig};
+use super::{paths, task_store};
+use crate::config::Config;
 use crate::events::{DownloadEvent, DownloadStage, TaskState};
 
 /// 下载任务状态
@@ -183,13 +183,13 @@ impl DownloadManager {
         for cid in params.cids.iter() {
             let play_info = bili_client.get_normal_url(&params.bvid, *cid).await?;
             let selected_video = if config.download_video && !params.audio_only {
-                Self::select_video_url(&play_info.video_list, &config)
+                select_video_url(&play_info.video_list, &config)
             } else {
                 None
             };
             let video_url = selected_video.as_ref().map(|(url, _)| url.clone());
             let selected_audio = if config.download_audio || params.audio_only {
-                Self::select_audio_url(&play_info.audio_list, &config)
+                select_audio_url(&play_info.audio_list, &config)
             } else {
                 None
             };
@@ -218,17 +218,17 @@ impl DownloadManager {
                 control.cancel();
             }
             let page_episode_title =
-                page_info.and_then(|page| Self::trimmed_string(Some(&page.part)));
-            let collection_title = Self::trimmed_string(params.collection_title.as_deref())
+                page_info.and_then(|page| paths::trimmed_string(Some(&page.part)));
+            let collection_title = paths::trimmed_string(params.collection_title.as_deref())
                 .or_else(|| (params.cids.len() > 1).then(|| video_info.title.clone()));
             let episode_title =
-                Self::trimmed_string(params.episode_title.as_deref()).or_else(|| {
+                paths::trimmed_string(params.episode_title.as_deref()).or_else(|| {
                     (video_info.pages.len() > 1 || params.cids.len() > 1)
                         .then(|| page_episode_title.clone())
                         .flatten()
                 });
-            let base_title = Self::trimmed_string(Some(&video_info.title))
-                .or_else(|| Self::trimmed_string(Some(&params.title)))
+            let base_title = paths::trimmed_string(Some(&video_info.title))
+                .or_else(|| paths::trimmed_string(Some(&params.title)))
                 .unwrap_or_else(|| "untitled".to_string());
             let title = if collection_title.is_some() {
                 episode_title.clone().unwrap_or(base_title)
@@ -507,7 +507,7 @@ impl DownloadManager {
                 }
             };
             if should_persist {
-                if let Err(error) = Self::save_progress_for_app(&app, &task_arc.read()) {
+                if let Err(error) = task_store::save(&app, &task_arc.read()) {
                     log::warn!("保存任务进度失败 [{}]: {}", task_id, error);
                 }
             }
@@ -564,9 +564,9 @@ impl DownloadManager {
 
         // 创建下载目录
         let download_root = Config::resolve_download_dir(app, &download_dir)?;
-        let output_dir = Self::output_dir_from_root(&download_root, &progress_snapshot);
-        let output_stem = Self::output_stem(&progress_snapshot);
-        let temp_dir = Self::task_temp_dir(app, &progress_snapshot)?;
+        let output_dir = paths::output_dir_from_root(&download_root, &progress_snapshot);
+        let output_stem = paths::output_stem(&progress_snapshot);
+        let temp_dir = paths::task_temp_dir(app, &progress_snapshot)?;
         let fragment_dir = if auto_merge || audio_only {
             temp_dir.clone()
         } else {
@@ -635,7 +635,7 @@ impl DownloadManager {
             };
             let expected_output_path = output_dir.join(format!("{}.mp3", output_stem));
             let Some(output_path) =
-                Self::resolve_existing_file(expected_output_path.clone(), &file_exist_action)?
+                paths::resolve_existing_file(expected_output_path.clone(), &file_exist_action)?
             else {
                 task.write().output_path = Some(expected_output_path.to_string_lossy().to_string());
                 let _ = tokio::fs::remove_file(audio).await;
@@ -676,7 +676,7 @@ impl DownloadManager {
         // 使用 FFmpeg 合并音视频
         if auto_merge {
             let (Some(video), Some(audio)) = (&video_path, &audio_path) else {
-                Self::download_extra_assets(
+                assets::download_extra_assets(
                     app,
                     &progress_snapshot,
                     &config_snapshot,
@@ -691,7 +691,7 @@ impl DownloadManager {
 
             let expected_output_path = output_dir.join(format!("{}.mp4", output_stem));
             let Some(output_path) =
-                Self::resolve_existing_file(expected_output_path.clone(), &file_exist_action)?
+                paths::resolve_existing_file(expected_output_path.clone(), &file_exist_action)?
             else {
                 task.write().output_path = Some(expected_output_path.to_string_lossy().to_string());
                 let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -743,7 +743,7 @@ impl DownloadManager {
             }
         }
 
-        Self::download_extra_assets(
+        assets::download_extra_assets(
             app,
             &progress_snapshot,
             &config_snapshot,
@@ -924,7 +924,7 @@ impl DownloadManager {
         }
 
         let download_root = Config::resolve_download_dir(app, &download_dir)?;
-        let output_dir = Self::output_dir_from_root(&download_root, &progress_snapshot);
+        let output_dir = paths::output_dir_from_root(&download_root, &progress_snapshot);
         tokio::fs::create_dir_all(&output_dir)
             .await
             .map_err(|e| format!("创建专栏下载目录失败: {e}"))?;
@@ -947,14 +947,14 @@ impl DownloadManager {
             if task.read().state == DownloadTaskState::Paused {
                 return Ok(DownloadEnd::Paused);
             }
-            let normalized_url = Self::normalize_remote_url(&image.url);
-            let extension = Self::url_extension(&normalized_url).unwrap_or("jpg");
-            let title = Self::trimmed_string(Some(&image.title))
+            let normalized_url = assets::normalize_remote_url(&image.url);
+            let extension = assets::url_extension(&normalized_url).unwrap_or("jpg");
+            let title = paths::trimmed_string(Some(&image.title))
                 .unwrap_or_else(|| format!("图片{:02}", index + 1));
             let safe_title = sanitize_path_component(&title);
             let expected =
                 output_dir.join(format!("{:02}-{}.{}", index + 1, safe_title, extension));
-            let Some(path) = Self::resolve_existing_file(expected.clone(), &file_exist_action)?
+            let Some(path) = paths::resolve_existing_file(expected.clone(), &file_exist_action)?
             else {
                 let mut progress = task.write();
                 progress.downloaded_size = (index + 1) as u64;
@@ -981,7 +981,7 @@ impl DownloadManager {
                 .await
                 .map_err(|e| format!("读取专栏图片失败: {e}"))?;
             byte_per_sec.fetch_add(bytes.len() as u64, Ordering::Relaxed);
-            Self::write_binary_asset(path.clone(), bytes.as_ref(), &file_exist_action).await?;
+            assets::write_binary_asset(path.clone(), bytes.as_ref(), &file_exist_action).await?;
             {
                 let mut progress = task.write();
                 progress.downloaded_size = (index + 1) as u64;
@@ -1197,7 +1197,7 @@ impl DownloadManager {
             }
         }
 
-        if let Ok(expected_path) = self.expected_output_file(progress) {
+        if let Ok(expected_path) = paths::expected_output_file(&self.app, progress) {
             if expected_path.is_file() {
                 return Some(expected_path);
             }
@@ -1206,8 +1206,8 @@ impl DownloadManager {
         let config = self.app.state::<Arc<RwLock<Config>>>();
         let root = Config::resolve_download_dir(&self.app, &config.read().download_dir).ok()?;
         let expected_extension = if progress.audio_only { "mp3" } else { "mp4" };
-        let expected_stem = Self::output_stem(progress);
-        let mut candidate_dirs = vec![Self::output_dir_from_root(&root, progress)];
+        let expected_stem = paths::output_stem(progress);
+        let mut candidate_dirs = vec![paths::output_dir_from_root(&root, progress)];
         let legacy_dir = root.join(sanitize_path_component(&progress.title));
         if !candidate_dirs.iter().any(|dir| dir == &legacy_dir) {
             candidate_dirs.push(legacy_dir);
@@ -1274,12 +1274,12 @@ impl DownloadManager {
         include_legacy_tasks: bool,
         include_guest_tasks: bool,
     ) -> Result<(), String> {
-        let dest_dir = Self::task_data_dir(&self.app)?;
+        let dest_dir = task_store::task_data_dir(&self.app)?;
         std::fs::create_dir_all(&dest_dir).map_err(|e| format!("创建任务目录失败: {}", e))?;
 
         let mut sources = Vec::new();
         if include_legacy_tasks {
-            if let Ok(dir) = Self::legacy_task_data_dir(&self.app) {
+            if let Ok(dir) = task_store::legacy_task_data_dir(&self.app) {
                 sources.push((dir, false));
             }
         }
@@ -1318,92 +1318,6 @@ impl DownloadManager {
         Ok(())
     }
 
-    fn expected_output_file(&self, progress: &DownloadProgress) -> Result<PathBuf, String> {
-        let config = self.app.state::<Arc<RwLock<Config>>>();
-        let root = Config::resolve_download_dir(&self.app, &config.read().download_dir)?;
-        if progress.media_kind == "article" {
-            return Ok(Self::output_dir_from_root(&root, progress));
-        }
-        let extension = if progress.audio_only { "mp3" } else { "mp4" };
-        Ok(Self::output_dir_from_root(&root, progress).join(format!(
-            "{}.{}",
-            Self::output_stem(progress),
-            extension
-        )))
-    }
-
-    fn output_dir_from_root(root: &Path, progress: &DownloadProgress) -> PathBuf {
-        if let Some(collection_title) = Self::trimmed_string(progress.collection_title.as_deref()) {
-            root.join(sanitize_path_component(&collection_title))
-        } else {
-            root.to_path_buf()
-        }
-    }
-
-    fn output_stem(progress: &DownloadProgress) -> String {
-        let name = if Self::trimmed_string(progress.collection_title.as_deref()).is_some() {
-            Self::trimmed_string(progress.episode_title.as_deref())
-                .unwrap_or_else(|| progress.title.clone())
-        } else {
-            progress.title.clone()
-        };
-        sanitize_path_component(&name)
-    }
-
-    fn task_temp_dir(app: &AppHandle, progress: &DownloadProgress) -> Result<PathBuf, String> {
-        let temp_name = if progress.created_at > 0 {
-            format!("{}_{}", progress.task_id, progress.created_at)
-        } else {
-            progress.task_id.clone()
-        };
-        Ok(Config::user_cache_dir(app)?
-            .join("download")
-            .join(sanitize_path_component(&temp_name)))
-    }
-
-    fn trimmed_string(value: Option<&str>) -> Option<String> {
-        value
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string)
-    }
-
-    fn legacy_task_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-        let app_data_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
-        Ok(app_data_dir.join(".download_tasks"))
-    }
-
-    fn safe_remove_empty_dir(path: &Path, root: &Path) {
-        if path == root || !path.starts_with(root) {
-            return;
-        }
-        let Ok(mut entries) = std::fs::read_dir(path) else {
-            return;
-        };
-        if entries.next().is_none() {
-            let _ = std::fs::remove_dir(path);
-        }
-    }
-
-    fn delete_related_sidecars(folder: &Path, stem: &str) {
-        let Ok(entries) = std::fs::read_dir(folder) else {
-            return;
-        };
-        let prefix = format!("{stem}.");
-        let renamed_prefix = format!("{stem} (");
-        for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
-            let Some(file_name) = path.file_name().and_then(|file_name| file_name.to_str()) else {
-                continue;
-            };
-            if file_name.starts_with(&prefix) || file_name.starts_with(&renamed_prefix) {
-                let _ = std::fs::remove_file(path);
-            }
-        }
-    }
-
     /// 获取任务数量
     pub fn task_count(&self) -> usize {
         self.tasks.read().len()
@@ -1425,56 +1339,17 @@ impl DownloadManager {
 
     /// 保存进度到文件
     fn save_progress(&self, progress: &DownloadProgress) -> Result<(), String> {
-        Self::save_progress_for_app(&self.app, progress)
-    }
-
-    fn save_progress_for_app(app: &AppHandle, progress: &DownloadProgress) -> Result<(), String> {
-        let task_dir = Self::task_data_dir(app)?;
-        std::fs::create_dir_all(&task_dir).map_err(|e| format!("创建任务目录失败: {}", e))?;
-
-        let task_file = task_dir.join(format!("{}.json", progress.task_id));
-        let json = serialize_progress(progress)?;
-        std::fs::write(task_file, json).map_err(|e| format!("写入进度文件失败: {}", e))?;
-
-        Ok(())
+        task_store::save(&self.app, progress)
     }
 
     /// 删除进度文件
     fn delete_progress_file(&self, task_id: &str) -> Result<(), String> {
-        let task_dir = Self::task_data_dir(&self.app)?;
-        let task_file = task_dir.join(format!("{}.json", task_id));
-        if task_file.exists() {
-            std::fs::remove_file(task_file).map_err(|e| format!("删除进度文件失败: {}", e))?;
-        }
-        Ok(())
-    }
-
-    /// 获取任务目录
-    fn get_task_dir(&self) -> Result<PathBuf, String> {
-        Self::task_data_dir(&self.app)
-    }
-
-    fn task_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-        Ok(Config::user_cache_dir(app)?.join("download_tasks"))
+        task_store::delete(&self.app, task_id)
     }
 
     fn restore_tasks(&self) {
-        self.cleanup_legacy_guest_task_leaks();
-
-        let Ok(task_dir) = self.get_task_dir() else {
-            return;
-        };
-        let Ok(entries) = std::fs::read_dir(task_dir) else {
-            return;
-        };
-
-        for entry in entries.filter_map(Result::ok) {
-            let Ok(content) = std::fs::read_to_string(entry.path()) else {
-                continue;
-            };
-            let Ok(mut progress) = deserialize_progress(&content) else {
-                continue;
-            };
+        task_store::cleanup_legacy_guest_leaks(&self.app);
+        for mut progress in task_store::load(&self.app) {
             if let Some(output_path) = self.find_existing_output_file(&progress) {
                 progress.output_path = Some(output_path.to_string_lossy().to_string());
                 progress.state = DownloadTaskState::Completed;
@@ -1502,34 +1377,6 @@ impl DownloadManager {
         }
     }
 
-    fn cleanup_legacy_guest_task_leaks(&self) {
-        if Config::current_profile_name(&self.app).ok().as_deref() != Some("guest") {
-            return;
-        }
-
-        let Ok(current_dir) = Self::task_data_dir(&self.app) else {
-            return;
-        };
-        let Ok(legacy_dir) = Self::legacy_task_data_dir(&self.app) else {
-            return;
-        };
-        if current_dir == legacy_dir || !current_dir.is_dir() || !legacy_dir.is_dir() {
-            return;
-        }
-
-        let Ok(entries) = std::fs::read_dir(&current_dir) else {
-            return;
-        };
-        for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
-            let Some(file_name) = path.file_name() else {
-                continue;
-            };
-            if legacy_dir.join(file_name).is_file() {
-                let _ = std::fs::remove_file(path);
-            }
-        }
-    }
-
     fn task_output_dir(&self, progress: &DownloadProgress) -> Result<PathBuf, String> {
         if let Some(output_path) = progress.output_path.as_deref().map(PathBuf::from) {
             if progress.media_kind == "article" && output_path.is_dir() {
@@ -1545,7 +1392,7 @@ impl DownloadManager {
         if legacy_dir.is_dir() {
             return Ok(legacy_dir);
         }
-        Ok(Self::output_dir_from_root(&root, progress))
+        Ok(paths::output_dir_from_root(&root, progress))
     }
 
     async fn delete_task_files(&self, progress: &DownloadProgress) -> Result<(), String> {
@@ -1576,11 +1423,11 @@ impl DownloadManager {
             .and_then(|path| path.file_stem())
             .and_then(|stem| stem.to_str())
             .map(ToString::to_string)
-            .unwrap_or_else(|| Self::output_stem(progress));
-        Self::delete_related_sidecars(&folder, &output_stem);
-        Self::delete_related_sidecars(&folder, &Self::output_stem(progress));
+            .unwrap_or_else(|| paths::output_stem(progress));
+        paths::delete_related_sidecars(&folder, &output_stem);
+        paths::delete_related_sidecars(&folder, &paths::output_stem(progress));
 
-        let temp_dir = Self::task_temp_dir(&self.app, progress)?;
+        let temp_dir = paths::task_temp_dir(&self.app, progress)?;
         if temp_dir.exists() && temp_dir.starts_with(Config::user_cache_dir(&self.app)?) {
             let _ = tokio::fs::remove_dir_all(temp_dir).await;
         }
@@ -1588,14 +1435,14 @@ impl DownloadManager {
         let legacy_dir = root.join(sanitize_path_component(&progress.title));
         if folder == legacy_dir
             && folder != root
-            && Self::trimmed_string(progress.collection_title.as_deref()).is_none()
+            && paths::trimmed_string(progress.collection_title.as_deref()).is_none()
             && folder.exists()
         {
             tokio::fs::remove_dir_all(&folder)
                 .await
                 .map_err(|e| format!("删除本地文件失败: {}", e))?;
         } else {
-            Self::safe_remove_empty_dir(&folder, &root);
+            paths::safe_remove_empty_dir(&folder, &root);
         }
         Ok(())
     }
@@ -1607,519 +1454,7 @@ impl DownloadManager {
             .unwrap_or_default()
     }
 
-    fn resolve_existing_file(
-        path: PathBuf,
-        action: &FileExistAction,
-    ) -> Result<Option<PathBuf>, String> {
-        if !path.exists() {
-            return Ok(Some(path));
-        }
-
-        match action {
-            FileExistAction::Overwrite => Ok(Some(path)),
-            FileExistAction::Skip => Ok(None),
-            FileExistAction::Rename => {
-                let parent = path
-                    .parent()
-                    .ok_or_else(|| "输出路径缺少父目录".to_string())?;
-                let stem = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .ok_or_else(|| "输出文件名无效".to_string())?;
-                let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-
-                for index in 1..1000 {
-                    let candidate_name = if extension.is_empty() {
-                        format!("{stem} ({index})")
-                    } else {
-                        format!("{stem} ({index}).{extension}")
-                    };
-                    let candidate = parent.join(candidate_name);
-                    if !candidate.exists() {
-                        return Ok(Some(candidate));
-                    }
-                }
-
-                Err("无法生成不冲突的输出文件名".to_string())
-            }
-        }
-    }
-
-    async fn download_extra_assets(
-        app: &AppHandle,
-        progress: &DownloadProgress,
-        config: &Config,
-        download_path: &PathBuf,
-        safe_title: &str,
-        file_exist_action: &FileExistAction,
-    ) {
-        let bili_client = app.state::<Arc<crate::api::BiliClient>>();
-
-        if config.download_xml_danmaku
-            || config.download_ass_danmaku
-            || config.download_json_danmaku
-        {
-            match bili_client
-                .get_danmaku(progress.aid, progress.cid, progress.duration)
-                .await
-            {
-                Ok(danmaku) => {
-                    if config.download_xml_danmaku {
-                        let xml = danmaku.to_xml(progress.cid);
-                        if let Err(error) = Self::write_text_asset(
-                            download_path.join(format!("{safe_title}.xml")),
-                            xml,
-                            file_exist_action,
-                        )
-                        .await
-                        {
-                            log::warn!("保存 XML 弹幕失败 [{}]: {}", progress.task_id, error);
-                        }
-                    }
-
-                    if config.download_json_danmaku {
-                        match danmaku.to_json() {
-                            Ok(json_content) => {
-                                if let Err(error) = Self::write_text_asset(
-                                    download_path.join(format!("{safe_title}.danmaku.json")),
-                                    json_content,
-                                    file_exist_action,
-                                )
-                                .await
-                                {
-                                    log::warn!(
-                                        "保存 JSON 弹幕失败 [{}]: {}",
-                                        progress.task_id,
-                                        error
-                                    );
-                                }
-                            }
-                            Err(error) => {
-                                log::warn!(
-                                    "序列化 JSON 弹幕失败 [{}]: {}",
-                                    progress.task_id,
-                                    error
-                                );
-                            }
-                        }
-                    }
-
-                    if config.download_ass_danmaku {
-                        let xml = danmaku.to_xml(progress.cid);
-                        match convert_to_ass(&xml, &AssConfig::default(), &progress.title) {
-                            Ok(ass_content) => {
-                                if let Err(error) = Self::write_text_asset(
-                                    download_path.join(format!("{safe_title}.ass")),
-                                    ass_content,
-                                    file_exist_action,
-                                )
-                                .await
-                                {
-                                    log::warn!(
-                                        "保存 ASS 弹幕失败 [{}]: {}",
-                                        progress.task_id,
-                                        error
-                                    );
-                                }
-                            }
-                            Err(error) => {
-                                log::warn!("转换 ASS 弹幕失败 [{}]: {}", progress.task_id, error);
-                            }
-                        }
-                    }
-                }
-                Err(error) => {
-                    log::warn!("获取弹幕失败 [{}]: {}", progress.task_id, error);
-                }
-            }
-        }
-
-        if config.download_subtitle {
-            match bili_client
-                .get_all_subtitles_srt(progress.aid, progress.cid)
-                .await
-            {
-                Ok(subtitles) => {
-                    for (language, srt) in subtitles {
-                        let language = sanitize_path_component(&language);
-                        let file_name = if language.is_empty() {
-                            format!("{safe_title}.srt")
-                        } else {
-                            format!("{safe_title}.{language}.srt")
-                        };
-
-                        if let Err(error) = Self::write_text_asset(
-                            download_path.join(file_name),
-                            srt,
-                            file_exist_action,
-                        )
-                        .await
-                        {
-                            log::warn!("保存字幕失败 [{}]: {}", progress.task_id, error);
-                        }
-                    }
-                }
-                Err(error) => {
-                    log::warn!("获取字幕失败 [{}]: {}", progress.task_id, error);
-                }
-            }
-        }
-
-        if config.download_cover && !progress.cover.trim().is_empty() {
-            if let Err(error) = Self::download_cover_asset(
-                app,
-                download_path,
-                safe_title,
-                &progress.cover,
-                file_exist_action,
-            )
-            .await
-            {
-                log::warn!("保存封面失败 [{}]: {}", progress.task_id, error);
-            }
-        }
-
-        if config.download_json || config.download_nfo {
-            match bili_client.get_normal_info(&progress.bvid).await {
-                Ok(video_info) => {
-                    let page_info = video_info
-                        .pages
-                        .iter()
-                        .find(|page| page.cid == progress.cid)
-                        .cloned();
-
-                    if config.download_json {
-                        let metadata = json!({
-                            "task_id": progress.task_id,
-                            "aid": progress.aid,
-                            "bvid": progress.bvid,
-                            "cid": progress.cid,
-                            "title": progress.title,
-                            "cover": progress.cover,
-                            "duration": progress.duration,
-                            "video": video_info.clone(),
-                            "page": page_info,
-                        });
-
-                        match serde_json::to_string_pretty(&metadata) {
-                            Ok(content) => {
-                                if let Err(error) = Self::write_text_asset(
-                                    download_path.join(format!("{safe_title}.info.json")),
-                                    content,
-                                    file_exist_action,
-                                )
-                                .await
-                                {
-                                    log::warn!(
-                                        "保存信息 JSON 失败 [{}]: {}",
-                                        progress.task_id,
-                                        error
-                                    );
-                                }
-                            }
-                            Err(error) => {
-                                log::warn!(
-                                    "序列化信息 JSON 失败 [{}]: {}",
-                                    progress.task_id,
-                                    error
-                                );
-                            }
-                        }
-                    }
-
-                    if config.download_nfo {
-                        let plot = Self::xml_escape(&video_info.description);
-                        let title = Self::xml_escape(&progress.title);
-                        let uploader = Self::xml_escape(&video_info.owner.name);
-                        let cover = Self::xml_escape(&progress.cover);
-                        let nfo = format!(
-                            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<movie>\n  <title>{title}</title>\n  <plot>{plot}</plot>\n  <director>{uploader}</director>\n  <studio>Bilibili</studio>\n  <uniqueid type=\"bilibili-bvid\">{bvid}</uniqueid>\n  <uniqueid type=\"bilibili-aid\">{aid}</uniqueid>\n  <tag>cid:{cid}</tag>\n  <thumb>{cover}</thumb>\n</movie>\n",
-                            bvid = progress.bvid,
-                            aid = progress.aid,
-                            cid = progress.cid
-                        );
-
-                        if let Err(error) = Self::write_text_asset(
-                            download_path.join(format!("{safe_title}.nfo")),
-                            nfo,
-                            file_exist_action,
-                        )
-                        .await
-                        {
-                            log::warn!("保存 NFO 失败 [{}]: {}", progress.task_id, error);
-                        }
-                    }
-                }
-                Err(error) => {
-                    log::warn!("获取元信息失败 [{}]: {}", progress.task_id, error);
-                }
-            }
-        }
-    }
-
-    async fn write_text_asset(
-        path: PathBuf,
-        content: String,
-        action: &FileExistAction,
-    ) -> Result<(), String> {
-        let Some(path) = Self::resolve_existing_file(path, action)? else {
-            return Ok(());
-        };
-
-        tokio::fs::write(&path, content)
-            .await
-            .map_err(|e| format!("写入文件失败 ({}): {}", path.display(), e))
-    }
-
-    async fn write_binary_asset(
-        path: PathBuf,
-        bytes: &[u8],
-        action: &FileExistAction,
-    ) -> Result<(), String> {
-        let Some(path) = Self::resolve_existing_file(path, action)? else {
-            return Ok(());
-        };
-
-        tokio::fs::write(&path, bytes)
-            .await
-            .map_err(|e| format!("写入文件失败 ({}): {}", path.display(), e))
-    }
-
-    async fn download_cover_asset(
-        app: &AppHandle,
-        download_path: &PathBuf,
-        safe_title: &str,
-        cover_url: &str,
-        action: &FileExistAction,
-    ) -> Result<(), String> {
-        let normalized_url = Self::normalize_remote_url(cover_url);
-        let extension = Self::url_extension(&normalized_url).unwrap_or("jpg");
-        let client = app.state::<Arc<crate::api::BiliClient>>().media_client();
-        let response = client
-            .get(&normalized_url)
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            )
-            .header("Referer", "https://www.bilibili.com/")
-            .send()
-            .await
-            .map_err(|e| format!("请求封面失败: {}", e))?;
-
-        if !response.status().is_success() {
-            return Err(format!("下载封面失败: HTTP {}", response.status()));
-        }
-
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| format!("读取封面失败: {}", e))?;
-
-        Self::write_binary_asset(
-            download_path.join(format!("{safe_title}.cover.{extension}")),
-            bytes.as_ref(),
-            action,
-        )
-        .await
-    }
-
-    fn normalize_remote_url(url: &str) -> String {
-        if url.starts_with("//") {
-            format!("https:{url}")
-        } else if url.starts_with("http://") {
-            url.replacen("http://", "https://", 1)
-        } else {
-            url.to_string()
-        }
-    }
-
-    fn url_extension(url: &str) -> Option<&str> {
-        let clean = url.split('?').next().unwrap_or(url);
-        clean.rsplit('.').next().filter(|ext| {
-            matches!(
-                ext.to_ascii_lowercase().as_str(),
-                "jpg" | "jpeg" | "png" | "webp" | "avif"
-            )
-        })
-    }
-
-    fn xml_escape(input: &str) -> String {
-        input
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-            .replace('\'', "&apos;")
-    }
-
-    fn preferred_video_qualities(config: &Config) -> Vec<VideoQuality> {
-        let preferred = match config.download_quality.trim().to_ascii_lowercase().as_str() {
-            "8k" => Some(vec![
-                VideoQuality::Video8K,
-                VideoQuality::VideoDolby,
-                VideoQuality::VideoHDR,
-                VideoQuality::Video4K,
-                VideoQuality::Video1080P60,
-                VideoQuality::Video1080PPlus,
-                VideoQuality::Video1080P,
-                VideoQuality::Video720P60,
-                VideoQuality::Video720P,
-                VideoQuality::Video480P,
-                VideoQuality::Video360P,
-                VideoQuality::Video240P,
-            ]),
-            "dolby_vision" => Some(vec![
-                VideoQuality::VideoDolby,
-                VideoQuality::VideoHDR,
-                VideoQuality::Video4K,
-                VideoQuality::Video1080P60,
-                VideoQuality::Video1080PPlus,
-                VideoQuality::Video1080P,
-                VideoQuality::Video720P60,
-                VideoQuality::Video720P,
-                VideoQuality::Video480P,
-                VideoQuality::Video360P,
-                VideoQuality::Video240P,
-            ]),
-            "hdr" => Some(vec![
-                VideoQuality::VideoHDR,
-                VideoQuality::Video4K,
-                VideoQuality::Video1080P60,
-                VideoQuality::Video1080PPlus,
-                VideoQuality::Video1080P,
-                VideoQuality::Video720P60,
-                VideoQuality::Video720P,
-                VideoQuality::Video480P,
-                VideoQuality::Video360P,
-                VideoQuality::Video240P,
-            ]),
-            "4k" => Some(vec![
-                VideoQuality::Video4K,
-                VideoQuality::Video1080P60,
-                VideoQuality::Video1080PPlus,
-                VideoQuality::Video1080P,
-                VideoQuality::Video720P60,
-                VideoQuality::Video720P,
-                VideoQuality::Video480P,
-                VideoQuality::Video360P,
-                VideoQuality::Video240P,
-            ]),
-            "1080p60" => Some(vec![
-                VideoQuality::Video1080P60,
-                VideoQuality::Video1080PPlus,
-                VideoQuality::Video1080P,
-                VideoQuality::Video720P60,
-                VideoQuality::Video720P,
-                VideoQuality::Video480P,
-                VideoQuality::Video360P,
-                VideoQuality::Video240P,
-            ]),
-            "1080p_plus" => Some(vec![
-                VideoQuality::Video1080PPlus,
-                VideoQuality::Video1080P,
-                VideoQuality::Video720P60,
-                VideoQuality::Video720P,
-                VideoQuality::Video480P,
-                VideoQuality::Video360P,
-                VideoQuality::Video240P,
-            ]),
-            "ai_repair" => Some(vec![
-                VideoQuality::VideoAiRepair,
-                VideoQuality::Video1080P,
-                VideoQuality::Video720P60,
-                VideoQuality::Video720P,
-                VideoQuality::Video480P,
-                VideoQuality::Video360P,
-                VideoQuality::Video240P,
-            ]),
-            "1080p" => Some(vec![
-                VideoQuality::Video1080P,
-                VideoQuality::Video720P60,
-                VideoQuality::Video720P,
-                VideoQuality::Video480P,
-                VideoQuality::Video360P,
-                VideoQuality::Video240P,
-            ]),
-            "720p60" => Some(vec![
-                VideoQuality::Video720P60,
-                VideoQuality::Video720P,
-                VideoQuality::Video480P,
-                VideoQuality::Video360P,
-                VideoQuality::Video240P,
-            ]),
-            "720p" => Some(vec![
-                VideoQuality::Video720P,
-                VideoQuality::Video480P,
-                VideoQuality::Video360P,
-                VideoQuality::Video240P,
-            ]),
-            "480p" => Some(vec![
-                VideoQuality::Video480P,
-                VideoQuality::Video360P,
-                VideoQuality::Video240P,
-            ]),
-            "360p" => Some(vec![VideoQuality::Video360P, VideoQuality::Video240P]),
-            "240p" => Some(vec![VideoQuality::Video240P]),
-            _ => None,
-        };
-
-        preferred.unwrap_or_else(|| config.video_quality_priority.clone())
-    }
-
-    fn select_video_url(
-        videos: &[crate::api::video::DashVideo],
-        config: &Config,
-    ) -> Option<(String, String)> {
-        for quality in &Self::preferred_video_qualities(config) {
-            let quality_id = *quality as i64;
-            for codec in &config.codec_type_priority {
-                if let Some(video) = videos.iter().find(|video| {
-                    video.id == quality_id && Self::codec_matches(&video.codecs, *codec)
-                }) {
-                    return Some((video.base_url.clone(), quality.name().to_string()));
-                }
-            }
-
-            if let Some(video) = videos.iter().find(|video| video.id == quality_id) {
-                return Some((video.base_url.clone(), quality.name().to_string()));
-            }
-        }
-
-        videos.first().map(|video| {
-            (
-                video.base_url.clone(),
-                quality_name_from_id(video.id).to_string(),
-            )
-        })
-    }
-
-    fn select_audio_url(
-        audios: &[crate::api::video::DashAudio],
-        config: &Config,
-    ) -> Option<(String, String)> {
-        for quality in &config.audio_quality_priority {
-            let quality_id = *quality as i64;
-            if let Some(audio) = audios.iter().find(|audio| audio.id == quality_id) {
-                return Some((audio.base_url.clone(), quality.name().to_string()));
-            }
-        }
-
-        audios.first().map(|audio| {
-            (
-                audio.base_url.clone(),
-                audio_quality_name_from_id(audio.id).to_string(),
-            )
-        })
-    }
-
-    fn codec_matches(codecs: &str, codec_type: CodecType) -> bool {
-        let codecs = codecs.to_ascii_lowercase();
-        match codec_type {
-            CodecType::AVC => codecs.contains("avc"),
-            CodecType::HEVC => codecs.contains("hev") || codecs.contains("hvc"),
-            CodecType::AV1 => codecs.contains("av01"),
-        }
-    }
+    // Media stream selection is implemented in the side-effect-free selection module.
 }
 
 fn default_quality_label() -> String {
@@ -2128,36 +1463,6 @@ fn default_quality_label() -> String {
 
 fn default_media_kind() -> String {
     "video".to_string()
-}
-
-fn quality_name_from_id(id: i64) -> &'static str {
-    match id {
-        127 => "8K",
-        126 => "杜比视界",
-        125 => "HDR",
-        120 => "4K",
-        116 => "1080P60",
-        112 => "1080P+",
-        100 => "AI修复",
-        80 => "1080P",
-        74 => "720P60",
-        64 => "720P",
-        32 => "480P",
-        16 => "360P",
-        6 => "240P",
-        _ => "自动",
-    }
-}
-
-fn audio_quality_name_from_id(id: i64) -> &'static str {
-    match id {
-        value if value == AudioQuality::AudioHiRes as i64 => "无损",
-        value if value == AudioQuality::AudioDolby as i64 => "杜比全景声",
-        value if value == AudioQuality::Audio192K as i64 => "192K",
-        value if value == AudioQuality::Audio132K as i64 => "132K",
-        value if value == AudioQuality::Audio64K as i64 => "64K",
-        _ => "音频",
-    }
 }
 
 /// 创建下载任务参数

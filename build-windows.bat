@@ -120,7 +120,11 @@ mkdir "%OUTPUT_DIR%\env" >nul
 mkdir "%OUTPUT_DIR%\data\guest" >nul
 mkdir "%OUTPUT_DIR%\data\guest\cache" >nul
 mkdir "%OUTPUT_DIR%\data\guest\download" >nul
-if exist "THIRD_PARTY_NOTICES.md" copy "THIRD_PARTY_NOTICES.md" "%OUTPUT_DIR%\" /y >nul
+if not exist "THIRD_PARTY_NOTICES.md" (
+    echo ERROR: THIRD_PARTY_NOTICES.md was not found.
+    exit /b 1
+)
+copy "THIRD_PARTY_NOTICES.md" "%OUTPUT_DIR%\" /y >nul
 
 if exist "%TAURI_RELEASE_DIR%\bilibili-box.exe" (
     copy "%TAURI_RELEASE_DIR%\bilibili-box.exe" "%OUTPUT_DIR%\" /y >nul
@@ -135,8 +139,19 @@ if not "!ERRORLEVEL!"=="0" (
     exit /b 1
 )
 
-if exist "%TAURI_RELEASE_DIR%\*.dll" (
-    copy "%TAURI_RELEASE_DIR%\*.dll" "%OUTPUT_DIR%\env\" /y >nul
+rem Copy only the official sherpa-onnx shared runtime allowlist. In
+rem particular, do not ship bilibili_box_lib.dll from Cargo's cdylib output.
+set "SHERPA_DLLS=onnxruntime.dll onnxruntime_providers_shared.dll sherpa-onnx-c-api.dll sherpa-onnx-cxx-api.dll"
+for %%D in (%SHERPA_DLLS%) do (
+    if not exist "%TAURI_RELEASE_DIR%\%%D" (
+        echo ERROR: Required sherpa-onnx runtime %%D was not produced.
+        exit /b 1
+    )
+    copy "%TAURI_RELEASE_DIR%\%%D" "%OUTPUT_DIR%\" /y >nul
+    if not "!ERRORLEVEL!"=="0" (
+        echo ERROR: Failed to copy sherpa-onnx runtime %%D.
+        exit /b 1
+    )
 )
 
 set "PROJECT_ENV=%PROJECT_ROOT%env"

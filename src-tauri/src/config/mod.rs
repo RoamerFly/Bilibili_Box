@@ -106,6 +106,438 @@ impl AudioQuality {
     }
 }
 
+fn default_ai_provider() -> String {
+    "openai-compatible".to_string()
+}
+
+fn default_ai_provider_name() -> String {
+    "OpenAI Compatible".to_string()
+}
+
+fn default_ai_provider_id() -> String {
+    "openai-compatible".to_string()
+}
+
+fn default_ai_base_url() -> String {
+    "https://api.openai.com/v1".to_string()
+}
+
+fn default_ai_base_url_for_provider(provider: &str) -> String {
+    if provider.trim().eq_ignore_ascii_case("deepseek") {
+        // DeepSeek's OpenAI-compatible API documents the origin as its base
+        // URL; `/models` and `/chat/completions` are appended by the client.
+        "https://api.deepseek.com".to_string()
+    } else {
+        default_ai_base_url()
+    }
+}
+
+fn default_ai_temperature() -> f64 {
+    0.2
+}
+
+fn default_ai_max_output_tokens() -> u32 {
+    2048
+}
+
+fn default_ai_timeout_secs() -> u64 {
+    60
+}
+
+fn default_ai_asr_engine() -> String {
+    "sensevoice".to_string()
+}
+
+fn default_ai_asr_model() -> String {
+    "sensevoice-small-int8".to_string()
+}
+
+fn default_ai_asr_language() -> String {
+    "auto".to_string()
+}
+
+/// Non-sensitive settings for one AI provider. API keys are stored separately in
+/// the platform keyring under the current profile and this provider's stable id.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AiProviderSettings {
+    #[serde(
+        rename = "provider_id",
+        alias = "id",
+        default = "default_ai_provider_id"
+    )]
+    pub id: String,
+    #[serde(default = "default_ai_provider_name")]
+    pub name: String,
+    #[serde(rename = "kind", alias = "provider", default = "default_ai_provider")]
+    pub provider: String,
+    #[serde(default = "default_ai_base_url")]
+    pub base_url: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default = "default_ai_temperature")]
+    pub temperature: f64,
+    #[serde(default = "default_ai_max_output_tokens")]
+    pub max_output_tokens: u32,
+    #[serde(default = "default_ai_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+impl Default for AiProviderSettings {
+    fn default() -> Self {
+        Self {
+            id: default_ai_provider_id(),
+            name: default_ai_provider_name(),
+            provider: default_ai_provider(),
+            base_url: default_ai_base_url(),
+            model: String::new(),
+            temperature: default_ai_temperature(),
+            max_output_tokens: default_ai_max_output_tokens(),
+            timeout_secs: default_ai_timeout_secs(),
+        }
+    }
+}
+
+/// Non-sensitive AI provider and ASR preferences.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct AiSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub providers: Vec<AiProviderSettings>,
+    #[serde(default)]
+    pub active_provider_id: String,
+    #[serde(default = "default_ai_asr_engine")]
+    pub asr_engine: String,
+    #[serde(default = "default_ai_asr_model")]
+    pub asr_model: String,
+    #[serde(default = "default_ai_asr_language")]
+    pub asr_language: String,
+}
+
+/// Deserialize both the current multi-provider shape and the previous single
+/// provider shape. Legacy fields are accepted only here and migrated into one
+/// stable provider; they are never written back after normalization.
+impl<'de> Deserialize<'de> for AiSettings {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize, Default)]
+        struct Wire {
+            #[serde(default)]
+            enabled: bool,
+            #[serde(default)]
+            providers: Option<Vec<AiProviderSettings>>,
+            #[serde(default)]
+            active_provider_id: Option<String>,
+            #[serde(default)]
+            provider: Option<String>,
+            #[serde(default)]
+            base_url: Option<String>,
+            #[serde(default)]
+            model: Option<String>,
+            #[serde(default)]
+            temperature: Option<f64>,
+            #[serde(default)]
+            max_output_tokens: Option<u32>,
+            #[serde(default)]
+            timeout_secs: Option<u64>,
+            #[serde(default = "default_ai_asr_engine")]
+            asr_engine: String,
+            #[serde(default = "default_ai_asr_model")]
+            asr_model: String,
+            #[serde(default = "default_ai_asr_language")]
+            asr_language: String,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        let providers = wire.providers.unwrap_or_else(|| {
+            let provider = wire.provider.unwrap_or_else(default_ai_provider);
+            vec![AiProviderSettings {
+                id: default_ai_provider_id(),
+                name: default_ai_provider_name(),
+                base_url: wire
+                    .base_url
+                    .unwrap_or_else(|| default_ai_base_url_for_provider(&provider)),
+                provider,
+                model: wire.model.unwrap_or_default(),
+                temperature: wire.temperature.unwrap_or_else(default_ai_temperature),
+                max_output_tokens: wire
+                    .max_output_tokens
+                    .unwrap_or_else(default_ai_max_output_tokens),
+                timeout_secs: wire.timeout_secs.unwrap_or_else(default_ai_timeout_secs),
+            }]
+        });
+        Ok(Self {
+            enabled: wire.enabled,
+            providers,
+            active_provider_id: wire
+                .active_provider_id
+                .unwrap_or_else(default_ai_provider_id),
+            asr_engine: wire.asr_engine,
+            asr_model: wire.asr_model,
+            asr_language: wire.asr_language,
+        })
+    }
+}
+
+impl Default for AiSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            providers: vec![AiProviderSettings::default()],
+            active_provider_id: default_ai_provider_id(),
+            asr_engine: default_ai_asr_engine(),
+            asr_model: default_ai_asr_model(),
+            asr_language: default_ai_asr_language(),
+        }
+    }
+}
+
+impl AiSettings {
+    pub const MAX_PROVIDERS: usize = 20;
+    pub const MAX_PROVIDER_ID_CHARS: usize = 64;
+    pub const MAX_PROVIDER_NAME_CHARS: usize = 128;
+    pub const MAX_PROVIDER_KIND_CHARS: usize = 64;
+    const MAX_BASE_URL_CHARS: usize = 2048;
+    const MAX_MODEL_CHARS: usize = 256;
+    const MAX_ASR_ENGINE_CHARS: usize = 64;
+    const MAX_ASR_MODEL_CHARS: usize = 256;
+    const MAX_ASR_LANGUAGE_CHARS: usize = 32;
+
+    /// Normalize user-provided values before persisting or using them.
+    pub fn normalize(mut self) -> Self {
+        let mut providers = Vec::with_capacity(self.providers.len().min(Self::MAX_PROVIDERS));
+        for (index, mut provider) in self.providers.into_iter().enumerate() {
+            if providers.len() >= Self::MAX_PROVIDERS {
+                break;
+            }
+            let fallback_id = if index == 0 {
+                default_ai_provider_id()
+            } else {
+                format!("provider-{}", index + 1)
+            };
+            provider.id = normalize_provider_id(&provider.id, &fallback_id);
+            if providers
+                .iter()
+                .any(|item: &AiProviderSettings| item.id == provider.id)
+            {
+                provider.id = fallback_id;
+            }
+            if providers
+                .iter()
+                .any(|item: &AiProviderSettings| item.id == provider.id)
+            {
+                continue;
+            }
+            provider.name = normalize_string(
+                &provider.name,
+                Self::MAX_PROVIDER_NAME_CHARS,
+                &default_ai_provider_name(),
+            );
+            provider.provider = normalize_string(
+                &provider.provider,
+                Self::MAX_PROVIDER_KIND_CHARS,
+                &default_ai_provider(),
+            );
+            provider.base_url = provider.base_url.trim().to_string();
+            if provider.base_url.is_empty()
+                && provider.provider.trim().eq_ignore_ascii_case("deepseek")
+            {
+                provider.base_url = default_ai_base_url_for_provider(&provider.provider);
+            }
+            if provider.base_url.is_empty() || Self::validate_base_url(&provider.base_url).is_err()
+            {
+                provider.base_url = default_ai_base_url();
+            }
+            provider.model = normalize_string(&provider.model, Self::MAX_MODEL_CHARS, "");
+            if !provider.temperature.is_finite() {
+                provider.temperature = default_ai_temperature();
+            }
+            provider.temperature = provider.temperature.clamp(0.0, 2.0);
+            provider.max_output_tokens = provider.max_output_tokens.clamp(1, 200_000);
+            provider.timeout_secs = provider.timeout_secs.clamp(1, 600);
+            providers.push(provider);
+        }
+        if providers.is_empty() {
+            providers.push(AiProviderSettings::default());
+        }
+        self.providers = providers;
+        self.active_provider_id =
+            normalize_provider_id(&self.active_provider_id, &self.providers[0].id);
+        if !self
+            .providers
+            .iter()
+            .any(|provider| provider.id == self.active_provider_id)
+        {
+            self.active_provider_id = self.providers[0].id.clone();
+        }
+        self.asr_engine = normalize_string(
+            &self.asr_engine,
+            Self::MAX_ASR_ENGINE_CHARS,
+            &default_ai_asr_engine(),
+        );
+        self.asr_model = normalize_string(
+            &self.asr_model,
+            Self::MAX_ASR_MODEL_CHARS,
+            &default_ai_asr_model(),
+        );
+        self.asr_language = normalize_string(
+            &self.asr_language,
+            Self::MAX_ASR_LANGUAGE_CHARS,
+            &default_ai_asr_language(),
+        );
+
+        self
+    }
+
+    /// Validate the normalized settings before writing them to config.json.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.providers.is_empty() {
+            return Err("AI 至少需要一个供应商".to_string());
+        }
+        if self.providers.len() > Self::MAX_PROVIDERS {
+            return Err(format!("AI 供应商数量不能超过 {}", Self::MAX_PROVIDERS));
+        }
+        if !self
+            .providers
+            .iter()
+            .any(|provider| provider.id == self.active_provider_id)
+        {
+            return Err("AI active_provider_id 不存在".to_string());
+        }
+        let mut ids = std::collections::HashSet::new();
+        for provider in &self.providers {
+            if !ids.insert(&provider.id) || !valid_provider_id(&provider.id) {
+                return Err("AI 供应商 id 无效或重复".to_string());
+            }
+            if provider.name.trim().is_empty()
+                || provider.name.chars().count() > Self::MAX_PROVIDER_NAME_CHARS
+            {
+                return Err("AI 供应商名称无效".to_string());
+            }
+            if provider.provider.trim().is_empty()
+                || provider.provider.chars().count() > Self::MAX_PROVIDER_KIND_CHARS
+            {
+                return Err("AI 供应商类型无效".to_string());
+            }
+            if provider.base_url.chars().count() > Self::MAX_BASE_URL_CHARS {
+                return Err("AI base_url 过长".to_string());
+            }
+            Self::validate_base_url(&provider.base_url)?;
+        }
+        Ok(())
+    }
+
+    pub fn active_provider(&self) -> Option<&AiProviderSettings> {
+        self.providers
+            .iter()
+            .find(|provider| provider.id == self.active_provider_id)
+    }
+
+    /// Base URLs must use HTTPS, except for loopback HTTP endpoints used by local
+    /// Ollama deployments. Userinfo, query strings, and fragments are rejected so
+    /// credentials cannot be smuggled into a persisted endpoint.
+    pub fn validate_base_url(base_url: &str) -> Result<(), String> {
+        let base_url = base_url.trim();
+        if base_url.is_empty() {
+            return Err("AI base_url 不能为空".to_string());
+        }
+        let parsed = url::Url::parse(base_url).map_err(|_| "AI base_url 无效".to_string())?;
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Err("AI base_url 不得包含用户名或密码".to_string());
+        }
+        if parsed.query().is_some() {
+            return Err("AI base_url 不得包含查询参数".to_string());
+        }
+        if parsed.fragment().is_some() {
+            return Err("AI base_url 不得包含片段".to_string());
+        }
+        let Some(host) = parsed.host() else {
+            return Err("AI base_url 必须包含主机名".to_string());
+        };
+        let is_loopback = match host {
+            url::Host::Domain(host) => host.eq_ignore_ascii_case("localhost"),
+            url::Host::Ipv4(address) => address.is_loopback(),
+            url::Host::Ipv6(address) => address.is_loopback(),
+        };
+        if parsed.scheme() == "https" {
+            return Ok(());
+        }
+        if parsed.scheme() == "http" && is_loopback {
+            return Ok(());
+        }
+        if parsed.scheme() == "http" {
+            return Err("AI base_url 的 http 仅允许 localhost 或 loopback 地址".to_string());
+        }
+        Err("AI base_url 仅支持 https；本地服务可使用 loopback http".to_string())
+    }
+}
+
+fn valid_provider_id(value: &str) -> bool {
+    let chars = value.chars().collect::<Vec<_>>();
+    !chars.is_empty()
+        && chars.len() <= AiSettings::MAX_PROVIDER_ID_CHARS
+        && chars.first().is_some_and(|ch| ch.is_ascii_alphanumeric())
+        && chars.last().is_some_and(|ch| ch.is_ascii_alphanumeric())
+        && chars.iter().enumerate().all(|(index, ch)| {
+            ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_' || (*ch == '.' && index > 0)
+        })
+}
+
+fn normalize_provider_id(value: &str, fallback: &str) -> String {
+    let trimmed = value.trim();
+    if valid_provider_id(trimmed) {
+        trimmed.to_string()
+    } else {
+        fallback.to_string()
+    }
+}
+
+fn replace_config_atomically(
+    temporary: &std::path::Path,
+    destination: &std::path::Path,
+) -> std::io::Result<()> {
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(temporary, destination)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+
+        const MOVEFILE_REPLACE_EXISTING: u32 = 0x00000001;
+        extern "system" {
+            fn MoveFileExW(
+                existing_file_name: *const u16,
+                new_file_name: *const u16,
+                flags: u32,
+            ) -> i32;
+        }
+
+        let source: Vec<u16> = temporary.as_os_str().encode_wide().chain(Some(0)).collect();
+        let target: Vec<u16> = destination
+            .as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        let result =
+            unsafe { MoveFileExW(source.as_ptr(), target.as_ptr(), MOVEFILE_REPLACE_EXISTING) };
+        if result == 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn normalize_string(value: &str, max_chars: usize, default: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return default.to_string();
+    }
+    trimmed.chars().take(max_chars).collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub download_dir: PathBuf,
@@ -148,6 +580,8 @@ pub struct Config {
     pub chunk_download_interval_sec: u64,
     pub file_exist_action: FileExistAction,
     pub auto_start_download_task: bool,
+    #[serde(default)]
+    pub ai: AiSettings,
 }
 
 impl Default for Config {
@@ -555,6 +989,7 @@ impl Config {
             chunk_download_interval_sec: 0,
             file_exist_action: FileExistAction::Rename,
             auto_start_download_task: true,
+            ai: AiSettings::default(),
         }
     }
 
@@ -619,6 +1054,13 @@ impl Config {
         config.card_page_columns = config.card_page_columns.clamp(1, 8);
         config.card_page_size = config.card_page_rows * config.card_page_columns;
 
+        let normalized_ai = config.ai.normalize();
+        config.ai = if normalized_ai.validate().is_ok() {
+            normalized_ai
+        } else {
+            AiSettings::default()
+        };
+
         config
     }
 
@@ -634,6 +1076,7 @@ impl Config {
     }
 
     pub fn save(&self, app: &AppHandle) -> Result<(), String> {
+        self.ai.validate()?;
         let user_data_dir = Self::user_data_dir(app)?;
         Self::ensure_user_dirs(app)?;
 
@@ -641,9 +1084,185 @@ impl Config {
         let config_string =
             serde_json::to_string_pretty(self).map_err(|e| format!("序列化配置失败: {e}"))?;
 
-        std::fs::write(&config_path, config_string)
-            .map_err(|e| format!("写入配置文件失败: {e}"))?;
+        let temporary = config_path.with_file_name(format!(".config.{}.tmp", uuid::Uuid::new_v4()));
+        std::fs::write(&temporary, config_string)
+            .map_err(|e| format!("写入配置临时文件失败: {e}"))?;
+        if let Err(error) = replace_config_atomically(&temporary, &config_path) {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(format!("写入配置文件失败: {error}"));
+        }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AiProviderSettings, AiSettings, Config};
+
+    #[test]
+    fn ai_settings_defaults_are_stable() {
+        let settings = AiSettings::default();
+        assert!(!settings.enabled);
+        assert_eq!(settings.active_provider_id, "openai-compatible");
+        let provider = settings.active_provider().unwrap();
+        assert_eq!(provider.provider, "openai-compatible");
+        assert_eq!(provider.base_url, "https://api.openai.com/v1");
+        assert_eq!(provider.model, "");
+        assert_eq!(provider.temperature, 0.2);
+        assert_eq!(provider.max_output_tokens, 2048);
+        assert_eq!(provider.timeout_secs, 60);
+        assert_eq!(settings.asr_engine, "sensevoice");
+        assert_eq!(settings.asr_model, "sensevoice-small-int8");
+        assert_eq!(settings.asr_language, "auto");
+    }
+
+    #[test]
+    fn config_without_ai_settings_remains_compatible() {
+        let mut value = serde_json::to_value(Config::default()).unwrap();
+        value.as_object_mut().unwrap().remove("ai");
+        let config: Config = serde_json::from_value(value).unwrap();
+        assert_eq!(config.ai, AiSettings::default());
+    }
+
+    #[test]
+    fn config_serialization_never_persists_transient_credential_fields() {
+        let mut value = serde_json::to_value(Config::default()).unwrap();
+        let provider = value["ai"]["providers"][0].as_object_mut().unwrap();
+        provider.insert("api_key_configured".to_string(), serde_json::json!(true));
+        provider.insert("api_key_hint".to_string(), serde_json::json!("****1234"));
+
+        let config: Config = serde_json::from_value(value).unwrap();
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(!serialized.contains("api_key_configured"));
+        assert!(!serialized.contains("api_key_hint"));
+        assert!(!serialized.contains("****1234"));
+    }
+
+    #[test]
+    fn ai_settings_normalize_bounds_and_strings() {
+        let settings = AiSettings {
+            providers: vec![AiProviderSettings {
+                id: "local".to_string(),
+                provider: "  custom  ".to_string(),
+                base_url: " http://localhost:11434/v1 ".to_string(),
+                temperature: 99.0,
+                max_output_tokens: 0,
+                timeout_secs: 9999,
+                ..AiProviderSettings::default()
+            }],
+            active_provider_id: "local".to_string(),
+            asr_engine: "  ".to_string(),
+            asr_model: "  whisper  ".to_string(),
+            asr_language: " zh ".to_string(),
+            ..AiSettings::default()
+        }
+        .normalize();
+
+        let provider = settings.active_provider().unwrap();
+        assert_eq!(provider.provider, "custom");
+        assert_eq!(provider.base_url, "http://localhost:11434/v1");
+        assert_eq!(provider.temperature, 2.0);
+        assert_eq!(provider.max_output_tokens, 1);
+        assert_eq!(provider.timeout_secs, 600);
+        assert_eq!(settings.asr_engine, "sensevoice");
+        assert_eq!(settings.asr_model, "whisper");
+        assert_eq!(settings.asr_language, "zh");
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn ai_base_url_validation_rejects_empty_and_non_http() {
+        assert!(AiSettings::validate_base_url("").is_err());
+        assert!(AiSettings::validate_base_url("file:///tmp/model").is_err());
+        assert!(AiSettings::validate_base_url("http://localhost:11434/v1").is_ok());
+        assert!(AiSettings::validate_base_url("http://192.168.1.5:11434/v1").is_err());
+        assert!(AiSettings::validate_base_url("https://api.openai.com/v1").is_ok());
+        assert!(AiSettings::validate_base_url("https://user:pass@example.com/v1").is_err());
+        assert!(AiSettings::validate_base_url("https://api.example.com/v1?key=secret").is_err());
+        assert!(AiSettings::validate_base_url("https://api.example.com/v1#fragment").is_err());
+    }
+
+    #[test]
+    fn legacy_single_provider_json_migrates_without_resetting_values() {
+        let value = serde_json::json!({
+            "enabled": true,
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+            "temperature": 0.7,
+            "max_output_tokens": 1234,
+            "timeout_secs": 42,
+            "asr_model": "whisper"
+        });
+        let settings: AiSettings = serde_json::from_value(value).unwrap();
+        let settings = settings.normalize();
+        let provider = settings.active_provider().unwrap();
+        assert!(settings.enabled);
+        assert_eq!(provider.id, "openai-compatible");
+        assert_eq!(provider.provider, "deepseek");
+        assert_eq!(provider.base_url, "https://api.deepseek.com/v1");
+        assert_eq!(provider.model, "deepseek-chat");
+        assert_eq!(provider.max_output_tokens, 1234);
+        assert_eq!(settings.asr_model, "whisper");
+    }
+
+    #[test]
+    fn legacy_deepseek_without_base_url_uses_official_openai_root() {
+        let settings: AiSettings = serde_json::from_value(serde_json::json!({
+            "provider": "deepseek"
+        }))
+        .unwrap();
+        let settings = settings.normalize();
+        assert_eq!(
+            settings.active_provider().unwrap().base_url,
+            "https://api.deepseek.com"
+        );
+    }
+
+    #[test]
+    fn legacy_deepseek_with_empty_base_url_uses_official_openai_root() {
+        let settings: AiSettings = serde_json::from_value(serde_json::json!({
+            "provider": "deepseek",
+            "base_url": ""
+        }))
+        .unwrap();
+        let settings = settings.normalize();
+        assert_eq!(
+            settings.active_provider().unwrap().base_url,
+            "https://api.deepseek.com"
+        );
+    }
+
+    #[test]
+    fn legacy_openai_without_base_url_keeps_openai_v1_default() {
+        let settings: AiSettings = serde_json::from_value(serde_json::json!({
+            "provider": "openai-compatible"
+        }))
+        .unwrap();
+        let settings = settings.normalize();
+        assert_eq!(
+            settings.active_provider().unwrap().base_url,
+            "https://api.openai.com/v1"
+        );
+    }
+
+    #[test]
+    fn provider_normalization_limits_count_and_keeps_active_provider() {
+        let providers = (0..25)
+            .map(|index| AiProviderSettings {
+                id: format!("p{index}"),
+                ..AiProviderSettings::default()
+            })
+            .collect();
+        let settings = AiSettings {
+            providers,
+            active_provider_id: "p22".to_string(),
+            ..AiSettings::default()
+        }
+        .normalize();
+        assert_eq!(settings.providers.len(), AiSettings::MAX_PROVIDERS);
+        assert!(settings.validate().is_ok());
+        assert_eq!(settings.active_provider_id, settings.providers[0].id);
     }
 }

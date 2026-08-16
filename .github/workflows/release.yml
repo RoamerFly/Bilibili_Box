@@ -47,6 +47,7 @@ env:
     - macOS Intel：下载 `Bilibili_Box-v*-macos-x64-installer.dmg`
     - Linux Debian/Ubuntu：下载 `Bilibili_Box-v*-linux-x64-installer.deb`
     - Linux Fedora/openSUSE/RHEL：下载 `Bilibili_Box-v*-linux-x64-installer.rpm`
+    - Linux 通用 AppImage：下载 `Bilibili_Box-v*-linux-x64-appimage.AppImage`
     - Linux 通用便携：下载 `Bilibili_Box-v*-linux-x64-portable.tar.gz`
 
     `.sig` 和 `latest.json` 主要用于自动更新与签名校验，普通安装通常不需要手动下载。
@@ -93,6 +94,7 @@ jobs:
             build-essential \
             curl \
             file \
+            libdbus-1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
@@ -100,6 +102,7 @@ jobs:
             libxdo-dev \
             patchelf \
             rpm \
+            squashfs-tools \
             wget
 
       - name: Prepare standalone FFmpeg runtime
@@ -108,12 +111,56 @@ jobs:
       - name: Build portable application directory
         run: chmod +x build-linux.sh && ./build-linux.sh
 
+      - name: Build Linux AppImage
+        run: npm run tauri -- build --bundles appimage -- --locked
+
       - name: Verify bundled Linux runtime
         run: |
+          for library in libonnxruntime.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so; do
+            test -f "dist_linux/$library"
+          done
+          test -f dist_linux/THIRD_PARTY_NOTICES.md
+          if find dist_linux -maxdepth 1 -type f -name 'bilibili_box_lib.so*' | grep -q .; then
+            echo "The private Cargo cdylib must not be included in the Linux package." >&2
+            exit 1
+          fi
+          readelf -d dist_linux/bilibili-box | grep -E 'RPATH|RUNPATH' | grep '\$ORIGIN'
+          linux_dependencies="$(ldd dist_linux/bilibili-box)"
+          printf '%s\n' "$linux_dependencies" | grep 'libsherpa-onnx-c-api.so'
+          if printf '%s\n' "$linux_dependencies" | grep -F 'not found'; then
+            echo "Linux executable has unresolved shared library dependencies." >&2
+            exit 1
+          fi
           test -x dist_linux/env/ffmpeg
           test -x dist_linux/env/ffprobe
           dist_linux/env/ffmpeg -version | head -n 1
           dist_linux/env/ffprobe -version | head -n 1
+
+          mapfile -t appimages < <(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f -iname '*.appimage' -print)
+          if [ "${#appimages[@]}" -ne 1 ]; then
+            echo "Expected exactly one Linux AppImage, found ${#appimages[@]}." >&2
+            exit 1
+          fi
+          appimage="${appimages[0]}"
+          chmod +x "$appimage"
+          extract_dir="$(mktemp -d)"
+          (
+            cd "$extract_dir"
+            "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null
+          )
+          app_root="$extract_dir/squashfs-root"
+          test -x "$app_root/usr/bin/bilibili-box"
+          for library in libonnxruntime.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so; do
+            test -f "$app_root/usr/bin/$library"
+          done
+          test -f "$app_root/usr/bin/THIRD_PARTY_NOTICES.md"
+          test ! -e "$app_root/usr/bin/bilibili_box_lib.so"
+          appimage_dependencies="$(ldd "$app_root/usr/bin/bilibili-box")"
+          printf '%s\n' "$appimage_dependencies" | grep 'libsherpa-onnx-c-api.so'
+          if printf '%s\n' "$appimage_dependencies" | grep -F 'not found'; then
+            echo "Linux AppImage has unresolved shared library dependencies." >&2
+            exit 1
+          fi
 
       - name: Package Linux assets
         shell: bash
@@ -124,6 +171,9 @@ jobs:
           mkdir -p release-assets
 
           tar -C dist_linux -czf "release-assets/${base}-portable.tar.gz" .
+          appimage_path="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f -iname '*.appimage' -print -quit)"
+          test -n "$appimage_path"
+          cp "$appimage_path" "release-assets/${base}-appimage.AppImage"
 
           package_root="$(mktemp -d)"
           mkdir -p \
@@ -204,6 +254,19 @@ jobs:
           cp "$rpm_topdir/RPMS/x86_64/"*.rpm \
             "release-assets/${base}-installer.rpm"
 
+          deb_listing="$(dpkg-deb -c "release-assets/${base}-installer.deb")"
+          rpm_listing="$(rpm -qpl "release-assets/${base}-installer.rpm")"
+          for library in libonnxruntime.so libsherpa-onnx-c-api.so libsherpa-onnx-cxx-api.so; do
+            printf '%s\n' "$deb_listing" | grep -F "$library"
+            printf '%s\n' "$rpm_listing" | grep -F "$library"
+          done
+          printf '%s\n' "$deb_listing" | grep -F 'THIRD_PARTY_NOTICES.md'
+          printf '%s\n' "$rpm_listing" | grep -F 'THIRD_PARTY_NOTICES.md'
+          if printf '%s\n' "$deb_listing" "$rpm_listing" | grep -F 'bilibili_box_lib.so'; then
+            echo "The private Cargo cdylib was included in a Linux installer." >&2
+            exit 1
+          fi
+
       - name: Upload Linux assets
         uses: actions/upload-artifact@v4
         with:
@@ -236,7 +299,7 @@ jobs:
       - name: Install packaging dependencies
         shell: pwsh
         run: |
-          choco install nsis -y --no-progress
+          choco install nsis 7zip -y --no-progress
           if (!(Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) {
             throw "NSIS was not installed to the expected location."
           }
@@ -260,6 +323,44 @@ jobs:
       - name: Verify bundled Windows runtime
         shell: pwsh
         run: |
+          $requiredSherpaDlls = @(
+            "onnxruntime.dll",
+            "onnxruntime_providers_shared.dll",
+            "sherpa-onnx-c-api.dll",
+            "sherpa-onnx-cxx-api.dll"
+          )
+          foreach ($dll in $requiredSherpaDlls) {
+            $path = Join-Path "dist_windows" $dll
+            if (!(Test-Path $path)) {
+              throw "$dll is missing beside the Windows executable."
+            }
+            Write-Host ("Verified {0} ({1} bytes)" -f $dll, (Get-Item $path).Length)
+          }
+          if (Test-Path "dist_windows\bilibili_box_lib.dll") {
+            throw "The private Cargo cdylib must not be included in the Windows package."
+          }
+          if (!(Test-Path "dist_windows\THIRD_PARTY_NOTICES.md")) {
+            throw "THIRD_PARTY_NOTICES.md is missing from the Windows portable package."
+          }
+          $dumpbin = (Get-Command dumpbin.exe -ErrorAction SilentlyContinue).Source
+          if (!$dumpbin) {
+            $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+            if (Test-Path $vswhere) {
+              $vsInstallation = & $vswhere -latest -products * -property installationPath
+              $dumpbin = (Get-ChildItem "$vsInstallation\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" -ErrorAction SilentlyContinue |
+                Sort-Object FullName | Select-Object -Last 1).FullName
+            }
+          }
+          if (!$dumpbin) {
+            throw "dumpbin.exe was not found for Windows dependency verification."
+          }
+          $exeDependencies = & $dumpbin /DEPENDENTS "dist_windows\Bilibili_Box.exe" | Out-String
+          if ($exeDependencies -notmatch "sherpa-onnx-c-api\.dll") {
+            throw "The Windows executable does not declare sherpa-onnx-c-api.dll as a dependency."
+          }
+          if ($exeDependencies -match "bilibili_box_lib\.dll") {
+            throw "The Windows executable unexpectedly depends on bilibili_box_lib.dll."
+          }
           foreach ($tool in @("ffmpeg.exe", "ffprobe.exe")) {
             $path = Join-Path "dist_windows\env" $tool
             if (!(Test-Path $path) -or (Get-Item $path).Length -lt 5MB) {
@@ -297,6 +398,27 @@ jobs:
             "packaging\windows\installer.nsi"
           if (!(Test-Path $output)) {
             throw "NSIS installer was not generated."
+          }
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          if (!(Test-Path $sevenZip)) {
+            throw "7z.exe was not installed for installer-content verification."
+          }
+          $installerListing = & $sevenZip l $output | Out-String
+          foreach ($dll in @(
+            "onnxruntime.dll",
+            "onnxruntime_providers_shared.dll",
+            "sherpa-onnx-c-api.dll",
+            "sherpa-onnx-cxx-api.dll"
+          )) {
+            if ($installerListing -notmatch [regex]::Escape($dll)) {
+              throw "$dll is missing from the Windows installer."
+            }
+          }
+          if ($installerListing -match "bilibili_box_lib\.dll") {
+            throw "The private Cargo cdylib was included in the Windows installer."
+          }
+          if ($installerListing -notmatch "THIRD_PARTY_NOTICES\.md") {
+            throw "THIRD_PARTY_NOTICES.md is missing from the Windows installer."
           }
 
       - name: Upload Windows assets
@@ -336,6 +458,50 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Configure optional Apple signing and notarization
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APPLE_CERTIFICATE_BASE64:-}" ] && \
+            [ -n "${APPLE_CERTIFICATE_PASSWORD:-}" ] && \
+            [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            keychain_path="$RUNNER_TEMP/bilibox-signing.keychain-db"
+            keychain_password="$(openssl rand -hex 16)"
+            security create-keychain -p "$keychain_password" "$keychain_path"
+            security set-keychain-settings -lut 21600 "$keychain_path"
+            security unlock-keychain -p "$keychain_password" "$keychain_path"
+            certificate_path="$RUNNER_TEMP/apple-signing.p12"
+            printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+            security import "$certificate_path" -P "$APPLE_CERTIFICATE_PASSWORD" \
+              -A -t cert -f pkcs12 -k "$keychain_path"
+            security set-key-partition-list -S apple-tool:,apple: \
+              -s -k "$keychain_password" "$keychain_path"
+            security list-keychains -d user -s "$keychain_path"
+            security default-keychain -s "$keychain_path"
+            security find-identity -v -p codesigning "$keychain_path"
+            echo "APPLE_DEVELOPER_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+            if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] && \
+              [ -n "${APPLE_APP_PASSWORD:-}" ]; then
+              echo "APPLE_NOTARIZE_READY=1" >> "$GITHUB_ENV"
+              echo "APPLE_NOTARIZE_APPLE_ID=$APPLE_ID" >> "$GITHUB_ENV"
+              echo "APPLE_NOTARIZE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
+              echo "APPLE_NOTARIZE_PASSWORD=$APPLE_APP_PASSWORD" >> "$GITHUB_ENV"
+              echo "Developer ID signing and notarization credentials configured."
+            else
+              echo "APPLE_NOTARIZE_READY=0" >> "$GITHUB_ENV"
+              echo "::notice::Developer ID signing is configured, but notarization secrets are absent; the DMG is not notarized."
+            fi
+          else
+            echo "APPLE_NOTARIZE_READY=0" >> "$GITHUB_ENV"
+            echo "::notice::Apple signing secrets absent; using ad-hoc signing only. Artifacts are not notarized or Gatekeeper-ready."
+          fi
+
       - name: Prepare standalone FFmpeg runtime
         run: chmod +x scripts/prepare-ffmpeg-runtime.sh && ./scripts/prepare-ffmpeg-runtime.sh macos-${{ matrix.arch }}
 
@@ -344,6 +510,39 @@ jobs:
 
       - name: Verify bundled macOS runtime
         run: |
+          sherpa_libs=(
+            libonnxruntime.1.27.0.dylib
+            libonnxruntime.dylib
+            libsherpa-onnx-c-api.dylib
+            libsherpa-onnx-cxx-api.dylib
+          )
+          for library in "${sherpa_libs[@]}"; do
+            test -f "dist_macos/$library"
+          done
+          test -f dist_macos/THIRD_PARTY_NOTICES.md
+          if find dist_macos -maxdepth 1 -type f -name 'bilibili_box_lib.dylib' | grep -q .; then
+            echo "The private Cargo cdylib must not be included in the macOS package." >&2
+            exit 1
+          fi
+          expected_arch="${{ matrix.arch == 'arm64' && 'arm64' || 'x86_64' }}"
+          for library in "${sherpa_libs[@]}"; do
+            file "dist_macos/$library" | grep -E "$expected_arch|Universal" >/dev/null || {
+              echo "Architecture mismatch for dist_macos/$library (expected $expected_arch)." >&2
+              exit 1
+            }
+          done
+          file dist_macos/bilibili-box | grep -E "$expected_arch|Universal" >/dev/null || {
+            echo "Architecture mismatch for dist_macos/bilibili-box (expected $expected_arch)." >&2
+            exit 1
+          }
+          otool -L dist_macos/bilibili-box | grep 'libsherpa-onnx-c-api.dylib'
+          otool -l dist_macos/bilibili-box | grep -A2 LC_RPATH | grep '@loader_path'
+          for library in "${sherpa_libs[@]}"; do
+            otool -L "dist_macos/$library" | grep -E 'libonnxruntime|libsherpa-onnx' >/dev/null || {
+              echo "Unable to inspect dependencies of dist_macos/$library." >&2
+              exit 1
+            }
+          done
           test -x dist_macos/env/ffmpeg
           test -x dist_macos/env/ffprobe
           dist_macos/env/ffmpeg -version | head -n 1
@@ -359,6 +558,21 @@ jobs:
           dmg_root="$RUNNER_TEMP/dmg-root"
           mkdir -p release-assets "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
           cp dist_macos/bilibili-box "$app_dir/Contents/MacOS/bilibili-box"
+          macos_runtime_libraries=(
+            dist_macos/libonnxruntime.1.27.0.dylib
+            dist_macos/libonnxruntime.dylib
+            dist_macos/libsherpa-onnx-c-api.dylib
+            dist_macos/libsherpa-onnx-cxx-api.dylib
+          )
+          for library in "${macos_runtime_libraries[@]}"; do
+            test -f "$library" || {
+              echo "Missing sherpa-onnx shared dylib $library for ${{ matrix.arch }}." >&2
+              exit 1
+            }
+          done
+          cp "${macos_runtime_libraries[@]}" "$app_dir/Contents/MacOS/"
+          test -f dist_macos/THIRD_PARTY_NOTICES.md
+          cp dist_macos/THIRD_PARTY_NOTICES.md "$app_dir/Contents/Resources/THIRD_PARTY_NOTICES.md"
           cp -R dist_macos/env "$app_dir/Contents/MacOS/env"
           cp -R dist_macos/data "$app_dir/Contents/MacOS/data"
           cp src-tauri/icons/icon.icns "$app_dir/Contents/Resources/icon.icns"
@@ -393,11 +607,37 @@ jobs:
           chmod +x "$app_dir/Contents/MacOS/bilibili-box" \
             "$app_dir/Contents/MacOS/env/ffmpeg" \
             "$app_dir/Contents/MacOS/env/ffprobe"
-          codesign --force --deep --sign - "$app_dir"
+          sign_app() {
+            if [ -n "${APPLE_DEVELOPER_IDENTITY:-}" ]; then
+              for library in "${macos_runtime_libraries[@]}"; do
+                codesign --force --options runtime --timestamp \
+                  --sign "$APPLE_DEVELOPER_IDENTITY" "$app_dir/Contents/MacOS/$(basename "$library")"
+              done
+              codesign --force --deep --options runtime --timestamp \
+                --sign "$APPLE_DEVELOPER_IDENTITY" "$app_dir"
+            else
+              echo "::notice::Signing macOS app ad-hoc; this artifact is not notarized or Gatekeeper-ready."
+              for library in "${macos_runtime_libraries[@]}"; do
+                codesign --force --sign - "$app_dir/Contents/MacOS/$(basename "$library")"
+              done
+              codesign --force --deep --sign - "$app_dir"
+            fi
+            codesign --verify --deep --strict --verbose=2 "$app_dir"
+          }
+          sign_app
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
             "$app_dir" "release-assets/${base}-portable.zip"
+          portable_listing="$(unzip -Z1 "release-assets/${base}-portable.zip")"
+          for library in \
+            libonnxruntime.1.27.0.dylib \
+            libonnxruntime.dylib \
+            libsherpa-onnx-c-api.dylib \
+            libsherpa-onnx-cxx-api.dylib; do
+            printf '%s\n' "$portable_listing" | grep -F "Contents/MacOS/$library"
+          done
+          printf '%s\n' "$portable_listing" | grep -F 'Contents/Resources/THIRD_PARTY_NOTICES.md'
           rm -rf "$app_dir/Contents/MacOS/data"
-          codesign --force --deep --sign - "$app_dir"
+          sign_app
           mkdir -p "$dmg_root"
           cp -R "$app_dir" "$dmg_root/"
           ln -s /Applications "$dmg_root/Applications"
@@ -415,6 +655,32 @@ jobs:
             echo "hdiutil reported a temporary failure; retrying (${attempt}/3)." >&2
             sleep 5
           done
+          if [ "${APPLE_NOTARIZE_READY:-0}" = 1 ]; then
+            xcrun notarytool submit "$dmg_path" \
+              --apple-id "$APPLE_NOTARIZE_APPLE_ID" \
+              --team-id "$APPLE_NOTARIZE_TEAM_ID" \
+              --password "$APPLE_NOTARIZE_PASSWORD" \
+              --wait
+            xcrun stapler staple "$dmg_path"
+            xcrun stapler validate "$dmg_path"
+            echo "Developer ID signed and notarized DMG created."
+          elif [ -n "${APPLE_DEVELOPER_IDENTITY:-}" ]; then
+            echo "::notice::Developer ID signed DMG is not notarized because Apple notarization secrets are absent."
+          else
+            echo "::notice::Ad-hoc signed DMG is not notarized and is not Gatekeeper-ready."
+          fi
+          mount_point="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount_point" "$dmg_path" >/dev/null
+          for library in \
+            libonnxruntime.1.27.0.dylib \
+            libonnxruntime.dylib \
+            libsherpa-onnx-c-api.dylib \
+            libsherpa-onnx-cxx-api.dylib; do
+            test -f "$mount_point/${APP_NAME}.app/Contents/MacOS/$library"
+          done
+          test -f "$mount_point/${APP_NAME}.app/Contents/Resources/THIRD_PARTY_NOTICES.md"
+          test ! -e "$mount_point/${APP_NAME}.app/Contents/MacOS/bilibili_box_lib.dylib"
+          hdiutil detach "$mount_point" >/dev/null
 
       - name: Upload macOS assets
         uses: actions/upload-artifact@v4
@@ -547,11 +813,32 @@ jobs:
       - name: Generate updater metadata
         shell: bash
         env:
-          GITHUB_REPOSITORY: ${{ env.PUBLIC_RELEASE_REPOSITORY }}
+          RELEASE_REPOSITORY: ${{ env.PUBLIC_RELEASE_REPOSITORY }}
           RELEASE_ASSET_DIR: release-assets
           RELEASE_TAG_NAME: ${{ steps.meta.outputs.tag_name }}
           RELEASE_NOTES_FILE: ${{ steps.meta.outputs.notes_file }}
         run: node scripts/finalize-updater-metadata.mjs
+
+      - name: Validate updater metadata URLs
+        shell: bash
+        env:
+          RELEASE_REPOSITORY: ${{ env.PUBLIC_RELEASE_REPOSITORY }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const metadata = JSON.parse(await readFile("release-assets/latest.json", "utf8"));
+          const expectedPrefix = `https://github.com/${process.env.RELEASE_REPOSITORY}/releases/download/`;
+          const urls = [
+            ...Object.values(metadata.platforms || {}).map((platform) => platform.url),
+            ...(metadata.artifacts || []).map((artifact) => artifact.url),
+          ];
+
+          if (urls.length === 0 || urls.some((url) => !url.startsWith(expectedPrefix))) {
+            throw new Error(`latest.json contains a non-public release URL; expected prefix ${expectedPrefix}`);
+          }
+          console.log(`Validated ${urls.length} public updater URLs.`);
+          NODE
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2

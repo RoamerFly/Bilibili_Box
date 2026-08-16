@@ -23,11 +23,11 @@ mod tests {
 
     #[test]
     fn download_path_component_is_safe_and_bounded() {
-        assert_eq!(
-            sanitize_path_component("标题: 第一/集?"),
-            "标题_ 第一_集_"
-        );
+        assert_eq!(sanitize_path_component("标题: 第一/集?"), "标题_ 第一_集_");
         assert_eq!(sanitize_path_component("..."), "untitled");
-        assert_eq!(sanitize_path_component(&"a".repeat(121)).chars().count(), 120);
+        assert_eq!(
+            sanitize_path_component(&"a".repeat(121)).chars().count(),
+            120
+        );
     }
 }

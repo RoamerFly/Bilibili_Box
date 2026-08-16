@@ -13,6 +13,7 @@ import {
   Play,
   RefreshCw,
   Share2,
+  Sparkles,
   Star,
   ThumbsUp,
   Volume2,
@@ -24,6 +25,7 @@ import { motion } from "framer-motion";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CommentsSection } from "@/components/comments-section";
+import { AiSummaryPanel, type AiSummarySettingsLike } from "./ai-summary-panel";
 import { invoke } from "@/lib/api";
 import { showNotice } from "@/lib/coming-soon";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
@@ -101,6 +103,8 @@ const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 export function PlayerView() {
   const playerState = useAppStore((s) => s.playerState);
   const closePlayer = useAppStore((s) => s.closePlayer);
+  const setView = useAppStore((s) => s.setView);
+  const appConfig = useAppStore((s) => s.config);
   const openUpProfile = useAppStore((s) => s.openUpProfile);
   const showComments = useAppStore((s) => s.config?.show_comments !== false);
   const [loading, setLoading] = useState(true);
@@ -118,6 +122,8 @@ export function PlayerView() {
   const [favoriteFoldersLoading, setFavoriteFoldersLoading] = useState(false);
   const [actionNotice, setActionNotice] = useState<ActionNoticeState | null>(null);
   const [commentRefreshKey, setCommentRefreshKey] = useState(0);
+  const [aiSummaryDialogOpen, setAiSummaryDialogOpen] = useState(false);
+  const [aiGenerating, setAiGenerating] = useState(false);
   const [bangumiInfo, setBangumiInfo] = useState<BangumiInfo | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeOption[]>([]);
   const [selectedEpisode, setSelectedEpisode] = useState<EpisodeOption | null>(null);
@@ -145,6 +151,9 @@ export function PlayerView() {
   const coinActionRectRef = useRef<DOMRect | null>(null);
   const favoriteActionRectRef = useRef<DOMRect | null>(null);
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
+
+  const openAiSummaryDialog = useCallback(() => setAiSummaryDialogOpen(true), []);
+  const closeAiSummaryDialog = useCallback(() => setAiSummaryDialogOpen(false), []);
 
   const playbackHint =
     "当前内容没有返回可播放的媒体流，可能受登录、会员权限或内容版权限制。";
@@ -383,6 +392,7 @@ export function PlayerView() {
 
   const currentEpisodeTitle = selectedEpisode?.title || playerState?.title || currentTitle;
   const cover = bangumiInfo?.cover || videoInfo?.pic || playerState?.cover || "";
+  const aiSettings = (appConfig?.ai as AiSummarySettingsLike | undefined) ?? undefined;
   const commentOid = videoInfo?.aid || selectedEpisode?.aid || null;
   const commentType = commentOid ? 1 : null;
   const browserUrl = useMemo(() => {
@@ -863,6 +873,12 @@ export function PlayerView() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          <HeaderButton
+            onClick={openAiSummaryDialog}
+            icon={aiGenerating ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Sparkles style={{ width: 15, height: 15 }} />}
+          >
+            {aiGenerating ? "总结中…" : "AI 总结"}
+          </HeaderButton>
           <HeaderButton onClick={() => void refresh()} icon={<RefreshCw style={{ width: 15, height: 15 }} />}>
             刷新
           </HeaderButton>
@@ -1275,6 +1291,17 @@ export function PlayerView() {
         </aside>
       </div>
       {showComments ? <CommentsSection oid={commentOid} typeId={commentType} refreshKey={commentRefreshKey} /> : null}
+      <AiSummaryPanel
+        active={aiSummaryDialogOpen}
+        bvid={selectedEpisode?.bvid || playerState.bvid}
+        cid={selectedEpisode?.cid || playerState.cid}
+        title={currentEpisodeTitle}
+        settings={aiSettings}
+        onSeek={handleSeek}
+        onClose={closeAiSummaryDialog}
+        onOpenSettings={() => setView("settings")}
+        onGeneratingChange={setAiGenerating}
+      />
       {actionNotice ? (
         <motion.div
           key={actionNotice.id}
@@ -1333,6 +1360,7 @@ function HeaderButton({
 }) {
   return (
     <motion.button
+      type="button"
       whileHover={{ scale: 1.04 }}
       whileTap={{ scale: 0.96 }}
       onClick={onClick}
