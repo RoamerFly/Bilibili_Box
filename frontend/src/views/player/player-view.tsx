@@ -11,6 +11,7 @@ import {
   Pause,
   PictureInPicture2,
   Play,
+  Plus,
   RefreshCw,
   Share2,
   Sparkles,
@@ -30,9 +31,9 @@ import { invoke } from "@/lib/api";
 import { showNotice } from "@/lib/coming-soon";
 import { notifyDownloadQueued } from "@/lib/download-feedback";
 import { openExternalUrl } from "@/lib/open-external";
-import type { BangumiInfo, VideoActionResult, VideoFavoriteFolder, VideoInfo, VideoInteractionState } from "@/lib/types";
+import type { BangumiInfo, DownloadProgress, VideoActionResult, VideoFavoriteFolder, VideoInfo, VideoInteractionState } from "@/lib/types";
 import { formatBiliImageUrl, formatDuration, formatNumber } from "@/lib/utils";
-import { useAppStore } from "@/stores/app-store";
+import { useAppStore, type DownloadPlaylistItem } from "@/stores/app-store";
 import { ClickableAvatar } from "@/components/video-card";
 import coin22Img from "@/assets/22-coin-ani.png";
 import coin33Img from "@/assets/33-coin-ani.png";
@@ -129,6 +130,10 @@ export function PlayerView() {
   const [selectedEpisode, setSelectedEpisode] = useState<EpisodeOption | null>(null);
   const [downloadingEpisodeKey, setDownloadingEpisodeKey] = useState("");
   const [downloadingAllEpisodes, setDownloadingAllEpisodes] = useState(false);
+  const [downloadPlaylist, setDownloadPlaylist] = useState<DownloadPlaylistItem[]>([]);
+  const [addPlaylistOpen, setAddPlaylistOpen] = useState(false);
+  const [playlistCandidates, setPlaylistCandidates] = useState<DownloadPlaylistItem[]>([]);
+  const [playlistCandidatesLoading, setPlaylistCandidatesLoading] = useState(false);
   const [playbackQuality, setPlaybackQuality] = useState(80);
   const [availableQualities, setAvailableQualities] = useState<number[]>([80]);
   const [playbackRate, setPlaybackRate] = useState(1);
@@ -147,6 +152,7 @@ export function PlayerView() {
   const controlHideTimerRef = useRef<number | null>(null);
   const resumePlaybackRef = useRef<{ time: number; playing: boolean } | null>(null);
   const dashPlayerRef = useRef<MediaPlayerClass | null>(null);
+  const dashStreamReadyRef = useRef(false);
   const actionNoticeTimerRef = useRef<number | null>(null);
   const coinActionRectRef = useRef<DOMRect | null>(null);
   const favoriteActionRectRef = useRef<DOMRect | null>(null);
@@ -177,6 +183,8 @@ export function PlayerView() {
       throw new Error("缺少视频标识");
     }
 
+    setDownloadPlaylist(playerState.playlist ?? []);
+
     const localPlayUrl = playerState.localTaskId
       ? await invoke<string>("get_downloaded_play_url", { taskId: playerState.localTaskId }).catch(() => "")
       : "";
@@ -190,17 +198,31 @@ export function PlayerView() {
       info = await invoke<VideoInfo>("get_normal_info", { bvid: playerState.bvid });
     } catch (err) {
       if (!localPlayUrl) throw err;
-      const fallbackEpisode = {
-        label: "本地文件",
-        title: playerState.title,
-        bvid: playerState.bvid,
-        cid: playerState.cid ?? 0,
-        localTaskId: playerState.localTaskId,
-      };
+      const fallbackEpisodes: EpisodeOption[] =
+        playerState.playlist && playerState.playlist.length > 0
+          ? playerState.playlist.map((item, index) => ({
+              label: `P${index + 1}`,
+              title: item.title,
+              bvid: item.bvid || playerState.bvid || "",
+              cid: item.cid ?? playerState.cid ?? 0,
+              localTaskId: item.taskId,
+            }))
+          : [
+              {
+                label: "本地文件",
+                title: playerState.title,
+                bvid: playerState.bvid || "",
+                cid: playerState.cid ?? 0,
+                localTaskId: playerState.localTaskId,
+              },
+            ];
+      const fallbackSelected = playerState.localTaskId
+        ? fallbackEpisodes.find((episode) => episode.localTaskId === playerState.localTaskId)
+        : fallbackEpisodes[0];
       setVideoInfo(null);
       setBangumiInfo(null);
-      setEpisodes([fallbackEpisode]);
-      setSelectedEpisode(fallbackEpisode);
+      setEpisodes(fallbackEpisodes);
+      setSelectedEpisode(fallbackSelected ?? fallbackEpisodes[0] ?? null);
       setAvailableQualities([]);
       setDashPlayback(null);
       setPlayUrl(localPlayUrl);
@@ -209,32 +231,56 @@ export function PlayerView() {
     setVideoInfo(info);
     setBangumiInfo(null);
 
-    const nextEpisodes =
-      info.pages?.length > 0
-        ? info.pages.map((page, index) => ({
-            label: `P${page.page || index + 1}`,
-            title: page.part || info.title,
-            bvid: info.bvid,
-            cid: page.cid,
-            localTaskId: page.cid === playerState.cid ? playerState.localTaskId : undefined,
-          }))
-        : [
-            {
-              label: "正片",
-              title: info.title,
-              bvid: info.bvid,
-              cid: playerState.cid ?? info.cid,
-              localTaskId: playerState.localTaskId,
-            },
-          ];
+    let nextEpisodes: EpisodeOption[];
+    if (playerState.playlist && playerState.playlist.length > 0) {
+      nextEpisodes = playerState.playlist.map((item, index) => ({
+        label: `P${index + 1}`,
+        title: item.title,
+        bvid: item.bvid || info.bvid,
+        cid: item.cid ?? playerState.cid ?? info.cid,
+        localTaskId: item.taskId,
+      }));
+    } else if (info.pages?.length > 0) {
+      nextEpisodes = info.pages.map((page, index) => ({
+        label: `P${page.page || index + 1}`,
+        title: page.part || info.title,
+        bvid: info.bvid,
+        cid: page.cid,
+        localTaskId: page.cid === playerState.cid ? playerState.localTaskId : undefined,
+      }));
+    } else {
+      nextEpisodes = [
+        {
+          label: "正片",
+          title: info.title,
+          bvid: info.bvid,
+          cid: playerState.cid ?? info.cid,
+          localTaskId: playerState.localTaskId,
+        },
+      ];
+    }
 
     setEpisodes(nextEpisodes);
-    const nextSelected = nextEpisodes.find((episode) => episode.cid === (playerState.cid ?? info.cid)) ?? nextEpisodes[0] ?? null;
+    const nextSelected =
+      (playerState.localTaskId
+        ? nextEpisodes.find((episode) => episode.localTaskId === playerState.localTaskId)
+        : nextEpisodes.find((episode) => episode.cid === (playerState.cid ?? info.cid))) ??
+      nextEpisodes[0] ??
+      null;
     setSelectedEpisode(nextSelected);
     if (localPlayUrl) {
       setAvailableQualities([]);
       setDashPlayback(null);
       setPlayUrl(localPlayUrl);
+    } else if (nextSelected?.localTaskId) {
+      const selectedLocalUrl = await invoke<string>("get_downloaded_play_url", { taskId: nextSelected.localTaskId }).catch(() => "");
+      if (selectedLocalUrl) {
+        setAvailableQualities([]);
+        setDashPlayback(null);
+        setPlayUrl(selectedLocalUrl);
+      } else {
+        setPlayUrl(await loadPlayableUrl(nextSelected.bvid, nextSelected.cid));
+      }
     } else {
       setPlayUrl(nextSelected ? await loadPlayableUrl(nextSelected.bvid, nextSelected.cid) : "");
     }
@@ -244,6 +290,9 @@ export function PlayerView() {
     if (!playerState?.seasonId && !playerState?.epId) {
       throw new Error("缺少番剧标识");
     }
+
+    setDownloadPlaylist([]);
+    setAddPlaylistOpen(false);
 
     const info = await invoke<BangumiInfo>("get_bangumi_info", {
       seasonId: playerState.seasonId,
@@ -303,14 +352,46 @@ export function PlayerView() {
     );
     let disposed = false;
     let dashPlayer: MediaPlayerClass | null = null;
+    let recoveryTimer: number | null = null;
     void import("dashjs")
       .then((dashjs) => {
         if (disposed) return;
         dashPlayer = dashjs.MediaPlayer().create();
         dashPlayerRef.current = dashPlayer;
+        dashStreamReadyRef.current = false;
+
         dashPlayer.on(dashjs.MediaPlayer.events.ERROR, () => {
-          setError("DASH 媒体流加载失败，请刷新或选择其他清晰度重试。");
+          // Transient DASH errors (e.g. a segment fetch racing a seek or quality
+          // switch) usually self-recover. Only surface the banner if playback
+          // is still stalled after a short grace period.
+          if (recoveryTimer !== null) {
+            window.clearTimeout(recoveryTimer);
+          }
+          recoveryTimer = window.setTimeout(() => {
+            recoveryTimer = null;
+            const current = videoRef.current;
+            if (current && current.paused && !current.ended) {
+              setError("DASH 媒体流加载失败，请刷新或选择其他清晰度重试。");
+            }
+          }, 900);
         });
+
+        // Seek/resume must happen after dashjs has built its segment index,
+        // otherwise the seek is silently dropped and playback restarts from 0.
+        dashPlayer.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
+          dashStreamReadyRef.current = true;
+          const resume = resumePlaybackRef.current;
+          if (resume) {
+            dashPlayer?.seek(Math.max(0, resume.time));
+            if (resume.playing) {
+              dashPlayer?.play();
+            } else {
+              dashPlayer?.pause();
+            }
+            resumePlaybackRef.current = null;
+          }
+        });
+
         dashPlayer.initialize(video, manifestUrl, resumePlaybackRef.current?.playing ?? true);
       })
       .catch(() => {
@@ -321,6 +402,10 @@ export function PlayerView() {
 
     return () => {
       disposed = true;
+      dashStreamReadyRef.current = false;
+      if (recoveryTimer !== null) {
+        window.clearTimeout(recoveryTimer);
+      }
       dashPlayer?.reset();
       if (dashPlayerRef.current === dashPlayer) {
         dashPlayerRef.current = null;
@@ -635,6 +720,37 @@ export function PlayerView() {
     }
   };
 
+  const openAddPlaylist = useCallback(async () => {
+    setAddPlaylistOpen(true);
+    setPlaylistCandidatesLoading(true);
+    try {
+      const tasks = await invoke<DownloadProgress[]>("get_download_tasks");
+      const existing = new Set(downloadPlaylist.map((item) => item.taskId));
+      const candidates = tasks
+        .filter((task) => task.state === "Completed" && task.media_kind !== "article" && !task.audio_only)
+        .filter((task) => !existing.has(task.task_id))
+        .sort((left, right) => (left.created_at ?? 0) - (right.created_at ?? 0))
+        .map((task) => ({ taskId: task.task_id, title: task.title, cover: task.cover, bvid: task.bvid, cid: task.cid }));
+      setPlaylistCandidates(candidates);
+    } catch {
+      setPlaylistCandidates([]);
+    } finally {
+      setPlaylistCandidatesLoading(false);
+    }
+  }, [downloadPlaylist]);
+
+  const closeAddPlaylist = useCallback(() => setAddPlaylistOpen(false), []);
+
+  const handleAddPlaylistItem = useCallback((item: DownloadPlaylistItem) => {
+    setDownloadPlaylist((current) => (current.some((existing) => existing.taskId === item.taskId) ? current : [...current, item]));
+    setEpisodes((current) => {
+      if (current.some((episode) => episode.localTaskId === item.taskId)) return current;
+      return [...current, { label: `P${current.length + 1}`, title: item.title, bvid: item.bvid || playerState?.bvid || "", cid: item.cid ?? 0, localTaskId: item.taskId }];
+    });
+    setPlaylistCandidates((current) => current.filter((candidate) => candidate.taskId !== item.taskId));
+    showNotice(`已添加到播放列表：${item.title}`);
+  }, [playerState?.bvid]);
+
   const handleEpisodeDownload = async (episode: EpisodeOption) => {
     const episodeKey = `${episode.bvid}-${episode.cid}`;
     if (downloadingEpisodeKey || downloadingAllEpisodes) return;
@@ -768,13 +884,64 @@ export function PlayerView() {
     }
   };
 
+  const playVideo = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    const dash = dashPlayerRef.current;
+    if (dash) {
+      dash.play();
+      return;
+    }
+    const result = video.play();
+    if (result && typeof result.catch === "function") {
+      result.catch(() => {
+        // play() can be interrupted by a concurrent seek or buffer change;
+        // retry once shortly after so a paused video doesn't get stuck.
+        window.setTimeout(() => {
+          const current = videoRef.current;
+          if (current && current.paused && !current.ended) {
+            void current.play().catch(() => {});
+          }
+        }, 120);
+      });
+    }
+  };
+
+  const pauseVideo = () => {
+    const video = videoRef.current;
+    const dash = dashPlayerRef.current;
+    if (dash) {
+      dash.pause();
+    } else if (video) {
+      video.pause();
+    }
+  };
+
+  const seekTo = (time: number, shouldPlay: boolean) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const target = Math.max(0, time);
+    setCurrentTime(target);
+    const dash = dashPlayerRef.current;
+    if (dash && dashStreamReadyRef.current) {
+      dash.seek(target);
+    } else {
+      video.currentTime = target;
+    }
+    if (shouldPlay) {
+      playVideo();
+    } else {
+      pauseVideo();
+    }
+  };
+
   const togglePlayback = () => {
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
-      void video.play();
+      playVideo();
     } else {
-      video.pause();
+      pauseVideo();
     }
     revealControls();
   };
@@ -782,8 +949,13 @@ export function PlayerView() {
   const handleSeek = (time: number) => {
     const video = videoRef.current;
     if (!video) return;
-    video.currentTime = time;
-    setCurrentTime(time);
+    seekTo(time, !video.paused);
+  };
+
+  const handleChapterSeek = (time: number, shouldPlay: boolean) => {
+    seekTo(time, shouldPlay);
+    closeAiSummaryDialog();
+    revealControls();
   };
 
   const handleVolumeChange = (nextVolume: number) => {
@@ -853,26 +1025,25 @@ export function PlayerView() {
         transition={{ duration: 0.3 }}
         style={{
           display: "flex",
-          alignItems: "center",
+          alignItems: "flex-start",
           justifyContent: "space-between",
           gap: "14px",
           marginBottom: "20px",
-          flexWrap: "wrap",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", minWidth: 0, flex: "1 1 auto" }}>
           <HeaderButton onClick={closePlayer} icon={<ArrowLeft style={{ width: 15, height: 15 }} />}>
             返回
           </HeaderButton>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <h1 style={{ fontSize: "24px", fontWeight: 800, color: "var(--color-text)", lineHeight: 1.25 }}>
               通用播放页
             </h1>
-            <p style={{ fontSize: "14px", color: "var(--color-text-muted)", marginTop: "4px" }}>{currentEpisodeTitle}</p>
+            <p style={{ fontSize: "14px", color: "var(--color-text-muted)", marginTop: "4px", overflowWrap: "anywhere" }}>{currentEpisodeTitle}</p>
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", flexShrink: 0, justifyContent: "flex-end" }}>
           <HeaderButton
             onClick={openAiSummaryDialog}
             icon={aiGenerating ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Sparkles style={{ width: 15, height: 15 }} />}
@@ -951,7 +1122,9 @@ export function PlayerView() {
                   video.playbackRate = playbackRate;
                   video.volume = volume;
                   video.muted = isMuted;
-                  if (resumePlaybackRef.current) {
+                  // For DASH the resume (seek + play state) is applied on
+                  // STREAM_INITIALIZED, after dashjs has built its segment index.
+                  if (playUrl && resumePlaybackRef.current) {
                     video.currentTime = resumePlaybackRef.current.time;
                     if (resumePlaybackRef.current.playing) {
                       void video.play();
@@ -1037,37 +1210,6 @@ export function PlayerView() {
                     <PlayerIconButton title="下载音频为 MP3" onClick={() => void handleAudioDownload()}>
                       <Music2 size={18} />
                     </PlayerIconButton>
-                    <Select
-                      value={String(playbackQuality)}
-                      onValueChange={(val) => void handlePlaybackQualityChange(Number(val))}
-                      disabled={!availableQualities.length}
-                    >
-                      <SelectTrigger style={playerSelectStyle} className="min-w-[80px] border-white/30 bg-black/40 text-white h-[30px] rounded-[7px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent side="top" className="z-[1050] max-h-[320px] overflow-y-auto">
-                        {availableQualities.length ? availableQualities.map((quality) => (
-                          <SelectItem key={quality} value={String(quality)}>
-                            {PLAYBACK_QUALITY_LABELS[quality] || `${quality}P`}
-                          </SelectItem>
-                        )) : <SelectItem value={String(playbackQuality)}>本地</SelectItem>}
-                      </SelectContent>
-                    </Select>
-                    <Select
-                      value={String(playbackRate)}
-                      onValueChange={(val) => handlePlaybackRateChange(Number(val))}
-                    >
-                      <SelectTrigger style={playerSelectStyle} className="min-w-[65px] border-white/30 bg-black/40 text-white h-[30px] rounded-[7px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent side="top" className="z-[1050] max-h-[320px] overflow-y-auto">
-                        {PLAYBACK_SPEEDS.map((rate) => (
-                          <SelectItem key={rate} value={String(rate)}>
-                            {rate}x
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                     <PlayerIconButton
                       title={isPictureInPicture ? "退出画中画" : "画中画"}
                       disabled={!canPictureInPicture}
@@ -1080,6 +1222,41 @@ export function PlayerView() {
                     </PlayerIconButton>
                   </div>
                 </div>
+              </div>
+            ) : null}
+            {hasPlayableSource ? (
+              <div style={playerTopControlsStyle}>
+                <Select
+                  value={String(playbackQuality)}
+                  onValueChange={(val) => void handlePlaybackQualityChange(Number(val))}
+                  disabled={!availableQualities.length}
+                >
+                  <SelectTrigger style={playerSelectStyle} className="min-w-[80px] border-white/30 bg-black/40 text-white h-[30px] rounded-[7px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent side="bottom" className="z-[1050] max-h-[320px] overflow-y-auto">
+                    {availableQualities.length ? availableQualities.map((quality) => (
+                      <SelectItem key={quality} value={String(quality)}>
+                        {PLAYBACK_QUALITY_LABELS[quality] || `${quality}P`}
+                      </SelectItem>
+                    )) : <SelectItem value={String(playbackQuality)}>本地</SelectItem>}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={String(playbackRate)}
+                  onValueChange={(val) => handlePlaybackRateChange(Number(val))}
+                >
+                  <SelectTrigger style={playerSelectStyle} className="min-w-[65px] border-white/30 bg-black/40 text-white h-[30px] rounded-[7px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent side="bottom" className="z-[1050] max-h-[320px] overflow-y-auto">
+                    {PLAYBACK_SPEEDS.map((rate) => (
+                      <SelectItem key={rate} value={String(rate)}>
+                        {rate}x
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             ) : null}
           </div>
@@ -1165,7 +1342,16 @@ export function PlayerView() {
               <h3 style={{ fontSize: "15px", fontWeight: 700, color: "var(--color-text)" }}>
                 {playerState.kind === "bangumi" ? "剧集列表" : "分 P 列表"}
               </h3>
-              {episodes.length > 1 ? (
+              {downloadPlaylist.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void openAddPlaylist()}
+                  style={episodeActionButtonStyle}
+                >
+                  <Plus style={{ width: 13, height: 13 }} />
+                  添加下载视频
+                </button>
+              ) : episodes.length > 1 ? (
                 <button
                   type="button"
                   disabled={downloadingAllEpisodes || Boolean(downloadingEpisodeKey)}
@@ -1296,8 +1482,10 @@ export function PlayerView() {
         bvid={selectedEpisode?.bvid || playerState.bvid}
         cid={selectedEpisode?.cid || playerState.cid}
         title={currentEpisodeTitle}
+        description={videoInfo?.description || bangumiInfo?.evaluate || ""}
+        owner={videoInfo?.owner?.name || ""}
         settings={aiSettings}
-        onSeek={handleSeek}
+        onSeek={handleChapterSeek}
         onClose={closeAiSummaryDialog}
         onOpenSettings={() => setView("settings")}
         onGeneratingChange={setAiGenerating}
@@ -1342,6 +1530,14 @@ export function PlayerView() {
           onSelect={(multiply) => void handleConfirmCoin(multiply)}
           onCancel={() => setCoinDialogOpen(false)}
           disabled={interactionLoading}
+        />
+      ) : null}
+      {addPlaylistOpen ? (
+        <AddPlaylistDialog
+          candidates={playlistCandidates}
+          loading={playlistCandidatesLoading}
+          onAdd={handleAddPlaylistItem}
+          onClose={closeAddPlaylist}
         />
       ) : null}
       {downloadQualityDialog}
@@ -1608,6 +1804,83 @@ function FavoriteDialog({
           <button type="button" disabled={loading} onClick={onConfirm} style={{ ...dialogPrimaryButtonStyle, opacity: loading ? 0.65 : 1 }}>
             {loading ? "保存中..." : "确认"}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddPlaylistDialog({
+  candidates,
+  loading,
+  onAdd,
+  onClose,
+}: {
+  candidates: DownloadPlaylistItem[];
+  loading: boolean;
+  onAdd: (item: DownloadPlaylistItem) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div style={dialogBackdropStyle} onClick={onClose}>
+      <div style={{ ...favoriteDialogStyle, width: "min(520px, 100%)" }} onClick={(event) => event.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "14px" }}>
+          <h3 style={{ fontSize: "17px", fontWeight: 850, color: "var(--color-text)" }}>添加下载视频</h3>
+          <button type="button" title="关闭" onClick={onClose} style={dialogIconButtonStyle}>
+            <X style={{ width: 18, height: 18 }} />
+          </button>
+        </div>
+
+        {loading ? (
+          <div style={{ height: "130px", display: "grid", placeItems: "center", color: "#2ea9f7" }}>
+            <Loader2 className="animate-spin" style={{ width: 24, height: 24 }} />
+          </div>
+        ) : candidates.length === 0 ? (
+          <div style={{ color: "var(--color-text-muted)", fontSize: "14px", padding: "22px 0", textAlign: "center" }}>
+            没有更多可添加的已下载视频
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: "8px", maxHeight: "360px", overflowY: "auto", paddingRight: "4px" }}>
+            {candidates.map((item) => (
+              <div
+                key={item.taskId}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "10px",
+                  padding: "10px 12px",
+                  borderRadius: "10px",
+                  border: "1px solid var(--color-border)",
+                  backgroundColor: "var(--color-bg-secondary)",
+                }}
+              >
+                <span style={{ minWidth: 0, color: "var(--color-text)", fontSize: "13.5px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</span>
+                <button
+                  type="button"
+                  onClick={() => onAdd(item)}
+                  style={{
+                    height: "30px",
+                    padding: "0 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #2ea9f7",
+                    backgroundColor: "#2ea9f7",
+                    color: "#fff",
+                    fontSize: "12.5px",
+                    fontWeight: 750,
+                    cursor: "pointer",
+                    flexShrink: 0,
+                  }}
+                >
+                  添加
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+          <button type="button" onClick={onClose} style={dialogSecondaryButtonStyle}>关闭</button>
         </div>
       </div>
     </div>
@@ -2013,6 +2286,17 @@ const playerControlsStyle: React.CSSProperties = {
   padding: "32px 14px 12px",
   background: "linear-gradient(transparent, rgba(0, 0, 0, 0.82))",
   transition: "opacity 0.18s ease",
+};
+
+// 清晰度 / 倍速始终可见，不随底部控制条一起自动隐藏。
+const playerTopControlsStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "10px",
+  right: "10px",
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
+  zIndex: 6,
 };
 
 const playerToolbarStyle: React.CSSProperties = {

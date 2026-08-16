@@ -1,6 +1,6 @@
 [package]
 name = "bilibili-box"
-version = "1.0.10"
+version = "1.1.0"
 description = "BiliBox - Bilibili 媒体工作站"
 authors = ["BiliBox"]
 license-file = "../LICENSE"

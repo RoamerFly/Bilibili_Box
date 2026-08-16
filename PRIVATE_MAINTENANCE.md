@@ -51,3 +51,34 @@
 5. 验证公开克隆、标签和 Source code 压缩包均不包含后端路径或敏感实现。
 
 改写公开引用无法撤回第三方此前已经完成的克隆、分叉或缓存；发现真实凭据泄露时必须立即轮换凭据，不能只依赖删除 Git 历史。
+
+## 应用内更新与签名校验
+
+应用内「检查更新 → 下载安装」依赖 Minisign 签名校验。公私钥配对关系跨越三处（构建、CI 签名、运行时验签），理解它才能排查「签名校验失败」。
+
+### 原理流程
+
+1. **构建嵌入公钥**：`BILIBOX_UPDATER_PUBLIC_KEY`（Minisign 公钥，整体 base64 编码）通过 `option_env!` 注入二进制，运行时由 `src-tauri/src/commands/update.rs` 的 `parse_update_public_key` 解析。它是公开的，写在 `.github/workflows/release.yml` 的 `env` 里，不是机密。
+2. **发布时签名**：CI 用私钥（Actions secret `TAURI_UPDATER_PRIVATE_KEY`，回退 `TAURI_SIGNING_PRIVATE_KEY`）经 `npx @tauri-apps/cli@2 signer sign` 为每个安装包生成 `.sig`。
+3. **生成清单**：`scripts/finalize-updater-metadata.mjs` 读取 `.sig` 内容写入 `latest.json` 的 `platforms.<platform>.signature`；找不到任何带签名的资产时会直接报错退出。
+4. **运行时验签**：`download_and_install_update` 下载安装包后调用 `verify_update_signature`，用嵌入的公钥对 `Signature::decode(signature)` 做 `PublicKey::verify`，通过后才启动安装。
+
+### 关键坑（接手必读）
+
+- **公钥为何 base64**：Minisign 公钥是「注释行 + 密钥行」两行，中间换行在环境变量里会被吞掉，所以整体 base64 编码后再注入。`parse_update_public_key` 依次尝试三种形态：标准多行文本 → base64 整体解码后的文本 → 纯 base64 密钥行。改动前先看 `update.rs` 里的回归测试 `parses_base64_encoded_update_public_key`。
+- **私钥不在仓库**：私钥只存在于私有仓库的 Actions secrets，代码里搜不到是正常的。公私钥必须来自同一对，否则运行时验签必失败。
+- **本地开发验签失败是预期**：`cargo build`/`cargo check` 产出的本地程序没有注入 `BILIBOX_UPDATER_PUBLIC_KEY`，`option_env!` 返回空，`verify_update_signature` 会拒绝安装并报「当前构建未配置更新验签公钥」。这是有意为之，不是 bug；用正式发布产物验证更新链路。
+- **`installable` 标志**：`check_update` 返回的 `installable` 仅在「存在安装包且签名非空」时为 true，前端据此决定是否显示「下载更新」。检查能成功但下载会失败的最常见原因，是回退源（GitHub API / 网页 / GitCode）没有签名。
+
+### 签名失败排查清单
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| 「更新验签公钥无效」 | 公钥 base64 解析问题（历史 bug，已修复） | 确认 `BILIBOX_UPDATER_PUBLIC_KEY` 是完整 base64，且密钥行可被 `PublicKey::from_base64` 解析 |
+| 「当前构建未配置更新验签公钥」 | 本地/非发布构建没有注入公钥 | 预期行为，用正式发布产物验证 |
+| 「更新包缺少数字签名」 | `latest.json` 的 signature 为空，或走了无签名的回退源 | 检查 `.sig` 是否生成并上传、`finalize-updater-metadata.mjs` 是否成功 |
+| 「更新包签名验证失败」 | 公私钥不匹配，或 `.sig` 与安装包版本不对应 | 确认 CI secret 私钥与嵌入公钥同对，重新发布 |
+
+### 轮换密钥
+
+需要更换签名密钥时，用 Tauri CLI 的 signer 命令重新生成 Minisign 密钥对，同步更新私有仓库 secrets 里的私钥（`TAURI_UPDATER_PRIVATE_KEY`）和 `release.yml` env 里的 `BILIBOX_UPDATER_PUBLIC_KEY`（base64 编码新公钥），二者必须成对。旧版本客户端嵌入的是旧公钥，无法验证新签名，只能提示去发布页手动更新。

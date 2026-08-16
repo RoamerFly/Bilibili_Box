@@ -39,6 +39,7 @@ pub struct AiSettingsResponseSettings {
     pub asr_engine: String,
     pub asr_model: String,
     pub asr_language: String,
+    pub prompt_template: String,
 }
 
 impl AiSettingsResponseSettings {
@@ -50,6 +51,7 @@ impl AiSettingsResponseSettings {
             asr_engine: settings.asr_engine,
             asr_model: settings.asr_model,
             asr_language: settings.asr_language,
+            prompt_template: settings.prompt_template,
         }
     }
 }
@@ -324,35 +326,29 @@ pub fn save_ai_settings(
 }
 
 /// Store an API key only in the platform keyring for the current profile.
+///
+/// The keyring entry is scoped by provider id, so a key can be stored before
+/// its provider is persisted — letting the editor set a key and fetch models
+/// without an intermediate save step.
 #[tauri::command]
 pub fn set_ai_api_key(app: AppHandle, request: AiApiKeyRequest) -> Result<(), String> {
     let api_key = validate_api_key(request.api_key.as_deref().unwrap_or_default())?;
-    let provider_id = request.provider_id;
-    let settings = crate::config::Config::load(&app)?.ai.normalize();
-    if !settings
-        .providers
-        .iter()
-        .any(|provider| provider.id == provider_id.trim())
-    {
+    let provider_id = request.provider_id.trim();
+    if provider_id.is_empty() {
         return Err("AI 供应商不存在".to_string());
     }
-    let store = current_secret_store(&app, provider_id.trim())?;
+    let store = current_secret_store(&app, provider_id)?;
     store.set(api_key)
 }
 
 /// Explicitly remove the current profile's API key from the platform keyring.
 #[tauri::command]
 pub fn clear_ai_api_key(app: AppHandle, request: AiApiKeyRequest) -> Result<(), String> {
-    let provider_id = request.provider_id;
-    let settings = crate::config::Config::load(&app)?.ai.normalize();
-    if !settings
-        .providers
-        .iter()
-        .any(|provider| provider.id == provider_id.trim())
-    {
+    let provider_id = request.provider_id.trim();
+    if provider_id.is_empty() {
         return Err("AI 供应商不存在".to_string());
     }
-    let store = current_secret_store(&app, provider_id.trim())?;
+    let store = current_secret_store(&app, provider_id)?;
     store.clear()
 }
 
@@ -475,6 +471,15 @@ pub fn delete_ai_provider(
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListAiModelsRequest {
     pub provider_id: String,
+    /// Inline provider details for a provider that has not been persisted yet.
+    /// When present alongside an unknown provider id, they let the editor fetch
+    /// a model list without saving the provider first.
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -655,8 +660,10 @@ fn fetched_at_rfc3339() -> String {
     chrono::DateTime::<chrono::Utc>::from(UNIX_EPOCH + elapsed).to_rfc3339()
 }
 
-/// Fetch an OpenAI-compatible `/models` list for a saved provider. The caller
-/// supplies only providerId; endpoint and key are always resolved server-side.
+/// Fetch an OpenAI-compatible `/models` list. The provider's endpoint and key
+/// are resolved server-side; for a provider that has not been saved yet the
+/// editor supplies its base URL, kind and timeout inline so no save step is
+/// required before fetching the model list.
 #[tauri::command]
 pub async fn list_ai_models(
     app: AppHandle,
@@ -664,35 +671,46 @@ pub async fn list_ai_models(
     request: ListAiModelsRequest,
 ) -> Result<AiModelsResponse, String> {
     let settings = config.read().ai.clone().normalize();
-    let provider_id = request.provider_id.trim();
-    let provider = settings
+    let provider_id = request.provider_id.trim().to_string();
+    let persisted = settings
         .providers
         .iter()
         .find(|provider| provider.id == provider_id)
-        .cloned()
-        .ok_or_else(|| "AI_MODELS_PROVIDER_NOT_FOUND: 供应商不存在".to_string())?;
-    settings.validate()?;
-    let base_url = Url::parse(provider.base_url.trim())
+        .cloned();
+    let (kind, base_url, timeout_secs, is_active) = match persisted {
+        Some(provider) => (
+            provider.provider,
+            provider.base_url,
+            provider.timeout_secs,
+            provider_id == settings.active_provider_id,
+        ),
+        None => {
+            let base_url = request
+                .base_url
+                .clone()
+                .ok_or_else(|| "AI_MODELS_PROVIDER_NOT_FOUND: 供应商不存在".to_string())?;
+            let kind = request.kind.unwrap_or_default();
+            let timeout_secs = request.timeout_secs.unwrap_or(60);
+            (kind, base_url, timeout_secs, false)
+        }
+    };
+    let base_url = Url::parse(base_url.trim())
         .map_err(|_| "AI_MODELS_ENDPOINT_INVALID: AI 服务地址无效".to_string())?;
     let is_loopback = base_url.host_str().is_some_and(|host| {
         host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
     });
-    let api_key = read_ai_api_key_for_provider(
-        &app,
-        provider_id,
-        provider_id == settings.active_provider_id,
-    )
-    .map_err(|_| "AI_MODELS_KEY_UNAVAILABLE: 无法读取该供应商的系统凭据".to_string())?;
+    let api_key = read_ai_api_key_for_provider(&app, &provider_id, is_active)
+        .map_err(|_| "AI_MODELS_KEY_UNAVAILABLE: 无法读取该供应商的系统凭据".to_string())?;
     if api_key.is_none() && !is_loopback {
         return Err("AI_MODELS_KEY_MISSING: 请先配置该供应商的 API key".to_string());
     }
     let http = Client::builder()
         .redirect(Policy::none())
-        .timeout(Duration::from_secs(provider.timeout_secs))
+        .timeout(Duration::from_secs(timeout_secs.max(1)))
         .build()
         .map_err(|_| "AI_MODELS_CLIENT_FAILED: 创建 AI 请求客户端失败".to_string())?;
     let mut request = http
-        .get(models_url(&provider.provider, &base_url)?)
+        .get(models_url(&kind, &base_url)?)
         .header("accept", "application/json");
     if let Some(api_key) = api_key.as_deref() {
         request = request.bearer_auth(api_key);

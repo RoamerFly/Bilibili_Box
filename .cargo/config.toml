@@ -1,0 +1,16 @@
+# Make the distributable bundle resolve the sherpa-onnx ASR shared runtime
+# that is copied beside the executable by the build scripts. sherpa-onnx's own
+# rpath points at the Cargo build directory, which only exists on the CI
+# machine; `$ORIGIN` (Linux) and `@loader_path` (macOS) make the loader look in
+# the directory that actually ships with the app.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,-rpath,$ORIGIN"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,-rpath,$ORIGIN"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-rpath,@loader_path"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-rpath,@loader_path"]

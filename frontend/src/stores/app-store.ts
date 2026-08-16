@@ -38,6 +38,17 @@ export interface PlayerState {
   epId?: number;
   cover?: string;
   localTaskId?: string;
+  /** Ordered downloaded-video queue rendered as the player's P list. */
+  playlist?: DownloadPlaylistItem[];
+}
+
+/** A single downloaded task exposed as one entry of the player's P list. */
+export interface DownloadPlaylistItem {
+  taskId: string;
+  title: string;
+  cover?: string;
+  bvid?: string;
+  cid?: number;
 }
 
 export interface UpProfileState {

@@ -12,6 +12,7 @@ import {
   Star,
   ThumbsUp,
   UserRound,
+  X,
   Info,
   History,
   Square,
@@ -244,6 +245,7 @@ export function SearchView() {
   const setCardViewMode = useAppStore((s) => s.setCardViewMode);
   const searchRequestIdRef = useRef(0);
   const [loading, setLoading] = useState(false);
+  const [searchButtonHover, setSearchButtonHover] = useState(false);
   const [error, setError] = useState("");
   const [webSearchOffer, setWebSearchOffer] = useState<WebSearchOffer | null>(null);
   const [isFocused, setIsFocused] = useState(false);
@@ -517,6 +519,14 @@ export function SearchView() {
       }
     }
   }, [pageSize, setSearchPageState]);
+
+  const cancelSearch = useCallback(() => {
+    // 使进行中的搜索请求失效（runSearch 通过 requestId 比对忽略过期结果），
+    // 并立即结束「搜索中」状态。
+    searchRequestIdRef.current += 1;
+    setLoading(false);
+    setSearchButtonHover(false);
+  }, []);
 
   const handleSearch = useCallback(
     async (rawInput = searchInput, scope?: "all" | "video" | "bangumi" | "film" | "live" | "article" | "user") => {
@@ -1152,10 +1162,13 @@ export function SearchView() {
         ) : null}
 
         <motion.button
-          onClick={() => void handleSearch()}
-          disabled={loading || !searchInput.trim()}
-          whileHover={loading || !searchInput.trim() ? {} : { scale: 1.02 }}
-          whileTap={loading || !searchInput.trim() ? {} : { scale: 0.97 }}
+          type="button"
+          onClick={() => (loading ? cancelSearch() : void handleSearch())}
+          disabled={!loading && !searchInput.trim()}
+          onMouseEnter={() => setSearchButtonHover(true)}
+          onMouseLeave={() => setSearchButtonHover(false)}
+          whileHover={!loading && !searchInput.trim() ? {} : { scale: 1.02 }}
+          whileTap={!loading && !searchInput.trim() ? {} : { scale: 0.97 }}
           style={{
             display: "flex",
             alignItems: "center",
@@ -1167,19 +1180,27 @@ export function SearchView() {
             fontSize: "14px",
             fontWeight: 600,
             color: "#fff",
-            backgroundColor: loading || !searchInput.trim() ? "var(--color-text-disabled)" : "var(--color-primary)",
-            cursor: loading || !searchInput.trim() ? "not-allowed" : "pointer",
+            backgroundColor: loading && searchButtonHover
+              ? "var(--color-error)"
+              : !loading && !searchInput.trim()
+                ? "var(--color-text-disabled)"
+                : "var(--color-primary)",
+            cursor: !loading && !searchInput.trim() ? "not-allowed" : "pointer",
             border: "none",
             fontFamily: "inherit",
             whiteSpace: "nowrap",
           }}
         >
           {loading ? (
-            <Loader2 className="animate-spin" style={{ width: 16, height: 16 }} />
+            searchButtonHover ? (
+              <X style={{ width: 16, height: 16 }} />
+            ) : (
+              <Loader2 className="animate-spin" style={{ width: 16, height: 16 }} />
+            )
           ) : (
             <Search style={{ width: 16, height: 16 }} />
           )}
-          {loading ? "搜索中" : "搜索"}
+          {loading ? (searchButtonHover ? "取消" : "搜索中") : "搜索"}
         </motion.button>
       </motion.div>
 

@@ -212,7 +212,7 @@ describe("AI settings helpers", () => {
     const persistedIds = new Set(settings.providers.map((provider) => provider.provider_id));
     const persistedProviders = Object.fromEntries(settings.providers.map((provider) => [provider.provider_id, { kind: provider.kind, base_url: provider.base_url.trim(), name: provider.name.trim(), model: provider.model.trim(), temperature: provider.temperature, max_output_tokens: provider.max_output_tokens, timeout_secs: provider.timeout_secs }]));
 
-    expect(settingsAreDirty(settings, settings.enabled, settings.active_provider_id, persistedIds, persistedProviders)).toBe(false);
+    expect(settingsAreDirty(settings, settings.enabled, settings.active_provider_id, persistedIds, persistedProviders, settings.prompt_template)).toBe(false);
   });
 
   it("reports settings as dirty when an editable field diverges from the persisted snapshot", () => {
@@ -224,9 +224,9 @@ describe("AI settings helpers", () => {
     const persistedIds = new Set(settings.providers.map((provider) => provider.provider_id));
     const persistedProviders = Object.fromEntries(settings.providers.map((provider) => [provider.provider_id, { kind: provider.kind, base_url: provider.base_url.trim(), name: provider.name.trim(), model: provider.model.trim(), temperature: provider.temperature, max_output_tokens: provider.max_output_tokens, timeout_secs: provider.timeout_secs }]));
 
-    expect(settingsAreDirty({ ...settings, enabled: true }, settings.enabled, settings.active_provider_id, persistedIds, persistedProviders)).toBe(true);
-    expect(settingsAreDirty({ ...settings, active_provider_id: "other" }, settings.enabled, settings.active_provider_id, persistedIds, persistedProviders)).toBe(true);
+    expect(settingsAreDirty({ ...settings, enabled: true }, settings.enabled, settings.active_provider_id, persistedIds, persistedProviders, settings.prompt_template)).toBe(true);
+    expect(settingsAreDirty({ ...settings, active_provider_id: "other" }, settings.enabled, settings.active_provider_id, persistedIds, persistedProviders, settings.prompt_template)).toBe(true);
     const changedModel = { ...settings, providers: [{ ...settings.providers[0], model: "different-model" }] };
-    expect(settingsAreDirty(changedModel, settings.enabled, settings.active_provider_id, persistedIds, persistedProviders)).toBe(true);
+    expect(settingsAreDirty(changedModel, settings.enabled, settings.active_provider_id, persistedIds, persistedProviders, settings.prompt_template)).toBe(true);
   });
 });

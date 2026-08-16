@@ -134,6 +134,7 @@ pub fn run() {
             ai::generate_ai_summary,
             ai::delete_ai_summary_cache,
             ai::cancel_ai_summary,
+            ai::preview_ai_summary_prompt,
             commands::config_cache::get_config,
             commands::config_cache::save_config,
             commands::config_cache::reset_config,
