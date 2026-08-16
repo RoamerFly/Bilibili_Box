@@ -1,26 +1,16 @@
-import { useLayoutEffect, useRef, useEffect, useState, type MouseEvent } from "react";
+import { lazy, Suspense, useLayoutEffect, useRef, useEffect, useState, type ComponentType, type MouseEvent } from "react";
 import { useAppStore, type ViewType } from "@/stores/app-store";
 import { useConfigWatch } from "@/hooks/use-config-watch";
 import { useDownloadEvents } from "@/hooks/use-download-events";
 import { Sidebar } from "./sidebar";
 import { BottomBar } from "./bottom-bar";
-import { HomeView } from "@/views/home/home-view";
-import { RecommendView } from "@/views/recommend/recommend-view";
-import { SearchView } from "@/views/search/search-view";
-import { PlayerView } from "@/views/player/player-view";
-import { FavoritesView } from "@/views/favorites/favorites-view";
-import { WatchLaterView } from "@/views/watchlater/watchlater-view";
-import { HistoryView } from "@/views/history/history-view";
-import { BangumiView } from "@/views/bangumi/bangumi-view";
-import { UpProfileView } from "@/views/up/up-profile-view";
-import { ContentDetailView } from "@/views/content/content-detail-view";
-import { DownloadsView } from "@/views/downloads/downloads-view";
-import { SettingsView } from "@/views/settings/settings-view";
+import { RouteLoadingFallback } from "./route-loading-fallback";
 import { AnimatePresence, motion } from "framer-motion";
 import { easeConfig } from "@/lib/utils";
 import { Minus, Square, X } from "lucide-react";
 import { invoke } from "@/lib/api";
 import { COMING_SOON_EVENT } from "@/lib/coming-soon";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 interface Config {
   sessdata: string;
@@ -40,8 +30,28 @@ const CACHEABLE_VIEWS: ViewType[] = [
   "history", "bangumi", "downloads", "settings",
 ];
 
+/**
+ * Route chunks are declared once at module scope so React can preserve their
+ * identity while cached views are mounted/unmounted by navigation.
+ */
+const lazyView = <T extends ComponentType>(loader: () => Promise<{ default: T }>) => lazy(loader);
+
+const HomeView = lazyView(() => import("@/views/home/home-view").then(({ HomeView: view }) => ({ default: view })));
+const RecommendView = lazyView(() => import("@/views/recommend/recommend-view").then(({ RecommendView: view }) => ({ default: view })));
+const SearchView = lazyView(() => import("@/views/search/search-view").then(({ SearchView: view }) => ({ default: view })));
+const PlayerView = lazyView(() => import("@/views/player/player-view").then(({ PlayerView: view }) => ({ default: view })));
+const FavoritesView = lazyView(() => import("@/views/favorites/favorites-view").then(({ FavoritesView: view }) => ({ default: view })));
+const WatchLaterView = lazyView(() => import("@/views/watchlater/watchlater-view").then(({ WatchLaterView: view }) => ({ default: view })));
+const HistoryView = lazyView(() => import("@/views/history/history-view").then(({ HistoryView: view }) => ({ default: view })));
+const BangumiView = lazyView(() => import("@/views/bangumi/bangumi-view").then(({ BangumiView: view }) => ({ default: view })));
+const UpProfileView = lazyView(() => import("@/views/up/up-profile-view").then(({ UpProfileView: view }) => ({ default: view })));
+const ContentDetailView = lazyView(() => import("@/views/content/content-detail-view").then(({ ContentDetailView: view }) => ({ default: view })));
+const DownloadsView = lazyView(() => import("@/views/downloads/downloads-view").then(({ DownloadsView: view }) => ({ default: view })));
+const SettingsView = lazyView(() => import("@/views/settings/settings-view").then(({ SettingsView: view }) => ({ default: view })));
+
 export function AppShell() {
   const currentView = useAppStore((s) => s.currentView);
+  const setView = useAppStore((s) => s.setView);
   const setConfig = useAppStore((s) => s.setConfig);
   const setUserInfo = useAppStore((s) => s.setUserInfo);
   const setRecommendPageState = useAppStore((s) => s.setRecommendPageState);
@@ -191,12 +201,26 @@ export function AppShell() {
                 className={view === currentView ? "bb-view-layer active" : "bb-view-layer"}
                 aria-hidden={view !== currentView}
               >
-                {renderView(view, accountViewVersion)}
+                <ErrorBoundary
+                  title="页面加载失败"
+                  resetKey={`${view}:${accountViewVersion}:${view === currentView ? "active" : "cached"}`}
+                  onBackHome={() => setView("home")}
+                >
+                  {renderView(view, accountViewVersion)}
+                </ErrorBoundary>
               </div>
             ))}
             {!CACHEABLE_VIEWS.includes(currentView) ? (
               <AnimatePresence initial={false} mode="sync">
-                <div className="bb-view-layer active">{renderView(currentView, accountViewVersion)}</div>
+                <div className="bb-view-layer active">
+                  <ErrorBoundary
+                    title="页面加载失败"
+                    resetKey={`${currentView}:${accountViewVersion}`}
+                    onBackHome={() => setView("home")}
+                  >
+                    {renderView(currentView, accountViewVersion)}
+                  </ErrorBoundary>
+                </div>
               </AnimatePresence>
             ) : null}
           </div>
@@ -260,7 +284,7 @@ function WindowControls() {
   };
 
   return (
-    <div
+    <div 
       className="absolute right-0 top-0 z-[9000] flex h-9 select-none"
       onMouseDown={stop}
     >
@@ -309,83 +333,89 @@ function renderView(view: string, accountViewVersion: number) {
   };
   const viewKey = (name: string) => `${name}:${accountViewVersion}`;
 
+  const withSuspense = (View: ComponentType, name: string) => (
+    <Suspense fallback={<RouteLoadingFallback view={name} />}>
+      <View />
+    </Suspense>
+  );
+
   switch (view) {
     case "home":
       return (
         <motion.div key={viewKey("home")} {...variants} transition={transition}>
-          <HomeView />
+          {withSuspense(HomeView, "home")}
         </motion.div>
       );
     case "recommend":
       return (
         <motion.div key={viewKey("recommend")} {...variants} transition={transition}>
-          <RecommendView />
+          {withSuspense(RecommendView, "recommend")}
         </motion.div>
       );
     case "search":
       return (
         <motion.div key={viewKey("search")} {...variants} transition={transition}>
-          <SearchView />
+          {withSuspense(SearchView, "search")}
         </motion.div>
       );
     case "player":
       return (
         <motion.div key={viewKey("player")} {...variants} transition={transition}>
-          <PlayerView />
+          {withSuspense(PlayerView, "player")}
         </motion.div>
       );
     case "favorites":
       return (
         <motion.div key={viewKey("favorites")} {...variants} transition={transition}>
-          <FavoritesView />
+          {withSuspense(FavoritesView, "favorites")}
         </motion.div>
       );
     case "watchlater":
       return (
         <motion.div key={viewKey("watchlater")} {...variants} transition={transition}>
-          <WatchLaterView />
+          {withSuspense(WatchLaterView, "watchlater")}
         </motion.div>
       );
     case "history":
       return (
         <motion.div key={viewKey("history")} {...variants} transition={transition}>
-          <HistoryView />
+          {withSuspense(HistoryView, "history")}
         </motion.div>
       );
     case "bangumi":
       return (
         <motion.div key={viewKey("bangumi")} {...variants} transition={transition}>
-          <BangumiView />
+          {withSuspense(BangumiView, "bangumi")}
         </motion.div>
       );
     case "up":
       return (
         <motion.div key={viewKey("up")} {...variants} transition={transition}>
-          <UpProfileView />
+          {withSuspense(UpProfileView, "up")}
         </motion.div>
       );
     case "content":
       return (
         <motion.div key={viewKey("content")} {...variants} transition={transition}>
-          <ContentDetailView />
+          {withSuspense(ContentDetailView, "content")}
         </motion.div>
       );
     case "downloads":
       return (
         <motion.div key={viewKey("downloads")} {...variants} transition={transition}>
-          <DownloadsView />
+          {withSuspense(DownloadsView, "downloads")}
         </motion.div>
       );
     case "settings":
       return (
         <motion.div key={viewKey("settings")} {...variants} transition={transition}>
-          <SettingsView />
+          {withSuspense(SettingsView, "settings")}
         </motion.div>
       );
     default:
       return (
         <motion.div key={viewKey("home")} {...variants} transition={transition}>
-          <HomeView />
+          {withSuspense(HomeView, "home")}
         </motion.div>
       );
   }
