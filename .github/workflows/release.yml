@@ -65,9 +65,35 @@ jobs:
             exit 1
           fi
 
+  prepare-public-release:
+    name: Prepare public draft release
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+      TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+    steps:
+      - name: Create or reuse draft release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG_NAME" --repo "$PUBLIC_RELEASE_REPOSITORY" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$TAG_NAME" --repo "$PUBLIC_RELEASE_REPOSITORY" --json isDraft --jq .isDraft)"
+            if [ "$is_draft" != true ]; then
+              echo "::error::Public release $TAG_NAME already exists and is not a draft."
+              exit 1
+            fi
+          else
+            gh release create "$TAG_NAME" \
+              --repo "$PUBLIC_RELEASE_REPOSITORY" \
+              --target main \
+              --title "Bilibili_Box $TAG_NAME" \
+              --draft
+          fi
+
   linux:
     name: Build Linux x64
-    needs: validate
+    needs: prepare-public-release
     runs-on: ubuntu-22.04
     env:
       TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
@@ -268,15 +294,18 @@ jobs:
           fi
 
       - name: Upload Linux assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-x64
-          path: release-assets/*
-          if-no-files-found: error
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+          TAURI_UPDATER_PRIVATE_KEY_VALUE: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+          TAURI_UPDATER_PRIVATE_KEY_PASSWORD_VALUE: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY_VALUE: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD_VALUE: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: chmod +x scripts/upload-release-assets.sh && ./scripts/upload-release-assets.sh
 
   windows:
     name: Build Windows x64
-    needs: validate
+    needs: prepare-public-release
     runs-on: windows-latest
     env:
       TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
@@ -422,15 +451,18 @@ jobs:
           }
 
       - name: Upload Windows assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-x64
-          path: release-assets/*
-          if-no-files-found: error
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+          TAURI_UPDATER_PRIVATE_KEY_VALUE: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+          TAURI_UPDATER_PRIVATE_KEY_PASSWORD_VALUE: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY_VALUE: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD_VALUE: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: chmod +x scripts/upload-release-assets.sh && ./scripts/upload-release-assets.sh
 
   macos:
     name: Build macOS ${{ matrix.arch }}
-    needs: validate
+    needs: prepare-public-release
     runs-on: ${{ matrix.runner }}
     env:
       TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
@@ -683,11 +715,14 @@ jobs:
           hdiutil detach "$mount_point" >/dev/null
 
       - name: Upload macOS assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-${{ matrix.arch }}
-          path: release-assets/*
-          if-no-files-found: error
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+          TAURI_UPDATER_PRIVATE_KEY_VALUE: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+          TAURI_UPDATER_PRIVATE_KEY_PASSWORD_VALUE: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY_VALUE: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD_VALUE: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: chmod +x scripts/upload-release-assets.sh && ./scripts/upload-release-assets.sh
 
   release:
     name: Publish Release
@@ -700,11 +735,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download release assets
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-          merge-multiple: true
+      - name: Download release assets from public draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+        run: |
+          mkdir -p release-assets
+          gh release download "$TAG_NAME" \
+            --repo "$PUBLIC_RELEASE_REPOSITORY" \
+            --dir release-assets
 
       - name: List release assets
         run: ls -lh release-assets
@@ -768,48 +808,6 @@ jobs:
           echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
           echo "body_file=$body_file" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare updater signing key
-        shell: bash
-        env:
-          TAURI_UPDATER_PRIVATE_KEY_VALUE: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
-          TAURI_UPDATER_PRIVATE_KEY_PASSWORD_VALUE: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
-          TAURI_SIGNING_PRIVATE_KEY_VALUE: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD_VALUE: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [ -n "$TAURI_UPDATER_PRIVATE_KEY_VALUE" ]; then
-            key="$TAURI_UPDATER_PRIVATE_KEY_VALUE"
-            password="$TAURI_UPDATER_PRIVATE_KEY_PASSWORD_VALUE"
-          else
-            key="$TAURI_SIGNING_PRIVATE_KEY_VALUE"
-            password="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_VALUE"
-          fi
-          if [ -z "$key" ]; then
-            echo "::error::Missing TAURI_UPDATER_PRIVATE_KEY or TAURI_SIGNING_PRIVATE_KEY repository secret."
-            exit 1
-          fi
-          key_path="$RUNNER_TEMP/tauri-updater-private.key"
-          printf '%s' "$key" > "$key_path"
-          chmod 600 "$key_path"
-          echo "TAURI_SIGNING_PRIVATE_KEY_PATH=$key_path" >> "$GITHUB_ENV"
-          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$password" >> "$GITHUB_ENV"
-
-      - name: Sign updater assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          for asset in release-assets/*; do
-            case "$asset" in
-              *.sig|*.json) continue ;;
-            esac
-            echo "Signing $(basename "$asset")"
-            npx --yes @tauri-apps/cli@2 signer sign \
-              --private-key-path "$TAURI_SIGNING_PRIVATE_KEY_PATH" \
-              --password "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
-              "$asset"
-          done
-
       - name: Generate updater metadata
         shell: bash
         env:
@@ -851,5 +849,5 @@ jobs:
           body_path: ${{ steps.meta.outputs.body_file }}
           draft: ${{ steps.meta.outputs.draft == 'true' }}
           prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
-          files: release-assets/*
+          files: release-assets/latest.json
           fail_on_unmatched_files: true

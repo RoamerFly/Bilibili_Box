@@ -32,7 +32,7 @@ mkdir -p "$ENV_DIR"
 
 case "$PLATFORM" in
     linux-x64)
-        archive_name="ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz"
+        archive_name="ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"
         base_url="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
         archive="$TEMP_DIR/$archive_name"
         download "$base_url/$archive_name" "$archive"
@@ -82,7 +82,7 @@ case "$PLATFORM" in
         ;;
 esac
 
-download "https://raw.githubusercontent.com/FFmpeg/FFmpeg/n7.1/COPYING.GPLv3" \
+download "https://raw.githubusercontent.com/FFmpeg/FFmpeg/n8.1/COPYING.GPLv3" \
     "$ENV_DIR/FFmpeg-GPL-3.0.txt"
 verify_tool ffmpeg
 verify_tool ffprobe

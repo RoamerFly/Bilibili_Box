@@ -13,7 +13,7 @@
 
 ## 跨仓库 Release
 
-完整应用由本私有仓库的 `.github/workflows/release.yml` 构建。工作流完成 Linux、Windows、macOS 构建、签名和 `latest.json` 生成后，会把产物发布到公开仓库 `RoamerFly/Bilibili_Box` 的同名 Release。
+完整应用由本私有仓库的 `.github/workflows/release.yml` 构建。工作流先在公开仓库创建不可见的草稿 Release，各平台构建完成后直接签名并上传产物；所有平台成功后生成 `latest.json`、写入发布说明并将草稿正式发布。该流程不依赖 GitHub Actions 临时 Artifact 存储配额。
 
 在本私有仓库的 Actions secrets 中配置：
 
@@ -34,9 +34,9 @@
 1. 更新所有版本号和 `docs/version-updates.md`。
 2. 在本私有仓库提交并推送完整源码。
 3. 创建并推送版本标签，例如 `v1.0.9`。
-4. 私有 Actions 自动构建完整应用。
-5. 工作流使用 `PUBLIC_RELEASE_TOKEN` 在公开仓库创建或更新同名 Release，并上传安装包、便携包、签名和 `latest.json`。
-6. 检查公开 Release 的正文、资产名称、签名和更新清单；公开标签只应指向公开外壳的安全提交。
+4. 私有 Actions 自动创建公开草稿 Release，并构建完整应用。
+5. 各平台将安装包、便携包及签名直接上传到草稿 Release；全部构建成功后生成 `latest.json` 并正式发布。
+6. 检查公开 Release 的正文、资产名称、签名和更新清单；公开标签只应指向公开外壳的安全提交。构建失败时草稿保持不可见，排障后可由同一版本工作流复用。
 
 ## 公开仓库历史维护
 
