@@ -83,10 +83,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .on_window_event(commands::window::handle_window_event)
         .setup(move |app| {
             let config_val = Config::load(app.handle())?;
             let config = Arc::new(RwLock::new(config_val.clone()));
             app.manage(config.clone());
+            commands::window::setup_tray(app)?;
 
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(not(target_os = "macos"))]
@@ -159,6 +161,7 @@ pub fn run() {
             commands::window::window_minimize,
             commands::window::window_toggle_maximize,
             commands::window::window_close,
+            commands::window::window_resolve_close,
             commands::window::window_start_dragging,
             commands::browser_auth::browser_login,
             commands::media::search_video,

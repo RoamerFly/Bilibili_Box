@@ -558,6 +558,8 @@ fn normalize_string(value: &str, max_chars: usize, default: &str) -> String {
 pub struct Config {
     pub download_dir: PathBuf,
     pub start_maximized: bool,
+    #[serde(default)]
+    pub close_window_behavior: CloseWindowBehavior,
     pub card_scale: f64,
     pub card_page_size: usize,
     pub card_page_rows: usize,
@@ -598,6 +600,15 @@ pub struct Config {
     pub auto_start_download_task: bool,
     #[serde(default)]
     pub ai: AiSettings,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CloseWindowBehavior {
+    #[default]
+    Ask,
+    MinimizeToTray,
+    Exit,
 }
 
 impl Default for Config {
@@ -948,6 +959,7 @@ impl Config {
         Self {
             download_dir: Self::default_download_dir(),
             start_maximized: false,
+            close_window_behavior: CloseWindowBehavior::Ask,
             card_scale: 1.0,
             card_page_size: 6,
             card_page_rows: 3,
@@ -1114,7 +1126,7 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use super::{AiProviderSettings, AiSettings, Config};
+    use super::{AiProviderSettings, AiSettings, CloseWindowBehavior, Config};
 
     #[test]
     fn ai_settings_defaults_are_stable() {
@@ -1139,6 +1151,17 @@ mod tests {
         value.as_object_mut().unwrap().remove("ai");
         let config: Config = serde_json::from_value(value).unwrap();
         assert_eq!(config.ai, AiSettings::default());
+    }
+
+    #[test]
+    fn config_without_close_window_behavior_defaults_to_ask() {
+        let mut value = serde_json::to_value(Config::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("close_window_behavior");
+        let config: Config = serde_json::from_value(value).unwrap();
+        assert_eq!(config.close_window_behavior, CloseWindowBehavior::Ask);
     }
 
     #[test]

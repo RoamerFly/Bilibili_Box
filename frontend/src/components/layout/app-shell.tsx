@@ -9,6 +9,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { easeConfig } from "@/lib/utils";
 import { Minus, Square, X } from "lucide-react";
 import { invoke } from "@/lib/api";
+import { listen } from "@tauri-apps/api/event";
 import { COMING_SOON_EVENT } from "@/lib/coming-soon";
 import { ErrorBoundary } from "@/components/error-boundary";
 
@@ -64,6 +65,7 @@ export function AppShell() {
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [noticeText, setNoticeText] = useState("正在实现中，敬请期待");
   const [accountViewVersion, setAccountViewVersion] = useState(0);
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
 
   if (CACHEABLE_VIEWS.includes(currentView)) {
     visitedViewsRef.current.add(currentView);
@@ -178,6 +180,31 @@ export function AppShell() {
     return () => window.removeEventListener("bilibili-box:account-switched", handleAccountSwitched);
   }, []);
 
+  useEffect(() => {
+    let disposed = false;
+    let disposeListener: (() => void) | undefined;
+    void listen("app://close-requested", () => {
+      if (!disposed) setCloseDialogOpen(true);
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else disposeListener = unlisten;
+      })
+      .catch((error) => console.error("Failed to listen for close requests:", error));
+    return () => {
+      disposed = true;
+      disposeListener?.();
+    };
+  }, []);
+
+  const resolveCloseRequest = (action: "minimize_to_tray" | "exit") => {
+    setCloseDialogOpen(false);
+    void invoke("window_resolve_close", { action }).catch((error) => {
+      console.error("Failed to resolve close request:", error);
+      setCloseDialogOpen(true);
+    });
+  };
+
   return (
     <div className="bb-app-frame flex h-screen w-screen overflow-hidden">
       {/* Sidebar */}
@@ -239,6 +266,13 @@ export function AppShell() {
           ) : null}
         </AnimatePresence>
       </main>
+      {closeDialogOpen ? (
+        <CloseWindowDialog
+          onCancel={() => setCloseDialogOpen(false)}
+          onMinimizeToTray={() => resolveCloseRequest("minimize_to_tray")}
+          onExit={() => resolveCloseRequest("exit")}
+        />
+      ) : null}
     </div>
   );
 }
@@ -318,6 +352,79 @@ function WindowControls() {
     </div>
   );
 }
+
+function CloseWindowDialog({
+  onCancel,
+  onMinimizeToTray,
+  onExit,
+}: {
+  onCancel: () => void;
+  onMinimizeToTray: () => void;
+  onExit: () => void;
+}) {
+  return (
+    <div
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) onCancel();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 12000,
+        display: "grid",
+        placeItems: "center",
+        padding: "24px",
+        backgroundColor: "rgba(15, 23, 42, 0.46)",
+        backdropFilter: "blur(5px)",
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="close-window-dialog-title"
+        style={{
+          width: "min(470px, calc(100vw - 40px))",
+          padding: "24px",
+          borderRadius: "18px",
+          border: "1px solid var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+          boxShadow: "0 24px 70px rgba(15, 23, 42, 0.28)",
+        }}
+      >
+        <h2 id="close-window-dialog-title" style={{ margin: 0, color: "var(--color-text)", fontSize: "20px", fontWeight: 850 }}>
+          关闭 BiliBox？
+        </h2>
+        <p style={{ margin: "10px 0 0", color: "var(--color-text-muted)", fontSize: "14px", lineHeight: 1.7 }}>
+          最小化到托盘后，正在进行的下载和后台任务会继续运行；退出程序则会停止当前后台任务。
+        </p>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px", marginTop: "22px", flexWrap: "wrap" }}>
+          <button type="button" onClick={onCancel} style={closeDialogSecondaryButtonStyle}>取消</button>
+          <button type="button" onClick={onMinimizeToTray} style={closeDialogSecondaryButtonStyle}>最小化到托盘</button>
+          <button type="button" onClick={onExit} style={closeDialogExitButtonStyle}>退出程序</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const closeDialogSecondaryButtonStyle = {
+  padding: "9px 14px",
+  borderRadius: "9px",
+  border: "1px solid var(--color-border)",
+  backgroundColor: "var(--color-bg-tertiary)",
+  color: "var(--color-text-secondary)",
+  fontSize: "13.5px",
+  fontWeight: 750,
+  cursor: "pointer",
+} as const;
+
+const closeDialogExitButtonStyle = {
+  ...closeDialogSecondaryButtonStyle,
+  border: "1px solid var(--color-error-text)",
+  backgroundColor: "var(--color-error-bg)",
+  color: "var(--color-error-text)",
+} as const;
 
 function renderView(view: string, accountViewVersion: number) {
   const variants = {

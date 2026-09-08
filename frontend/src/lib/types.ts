@@ -4,6 +4,7 @@
 export interface Config {
   download_dir: string;
   start_maximized: boolean;
+  close_window_behavior: "ask" | "minimize_to_tray" | "exit";
   card_scale: number;
   card_page_size: number;
   card_page_rows: number;

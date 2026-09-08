@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDown, ChevronUp, Download, FolderOpen, Pause, Play, Trash2 } from "lucide-react";
+import { ArrowDown, ChevronUp, Download, FolderOpen, Pause, Play, RotateCcw, Trash2 } from "lucide-react";
 import { invoke } from "@/lib/api";
 import { formatFileSize } from "@/lib/utils";
 import { useAppStore, useDownloadStore, useLogStore } from "@/stores/app-store";
@@ -214,6 +214,12 @@ export function BottomBar() {
                   <Pause size={14} />
                   全部暂停
                 </button>
+                {tasksList.some((task) => task.status === "error") ? (
+                  <button type="button" onClick={() => void runTaskAction("restart_download_tasks", tasksList.filter((task) => task.status === "error").map((task) => task.id))}>
+                    <RotateCcw size={14} />
+                    重试失败
+                  </button>
+                ) : null}
                 <button type="button" className="danger" onClick={() => setPendingDeleteIds(tasksList.map((task) => task.id))}>
                   <Trash2 size={14} />
                   全部删除
@@ -263,6 +269,11 @@ export function BottomBar() {
                           {task.status === "paused" ? (
                             <button type="button" title="继续" onClick={() => void runTaskAction("resume_download_tasks", [task.id])}>
                               <Play size={14} />
+                            </button>
+                          ) : null}
+                          {task.status === "error" ? (
+                            <button type="button" title="重新下载" onClick={() => void runTaskAction("restart_download_tasks", [task.id])}>
+                              <RotateCcw size={14} />
                             </button>
                           ) : null}
                           <button type="button" title="打开文件夹" onClick={(event) => openTaskFolder(event, task.id)}>

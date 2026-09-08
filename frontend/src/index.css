@@ -234,6 +234,41 @@ body {
   outline-offset: 2px;
 }
 
+/* 播放器进入浏览器全屏后必须完全脱离应用窗口的圆角、焦点框和滚动区域。 */
+html.bb-player-fullscreen-active,
+html.bb-player-fullscreen-active body {
+  overflow: hidden !important;
+  background: #000 !important;
+}
+
+.bb-player-surface--fullscreen,
+.bb-player-surface:fullscreen,
+.bb-player-surface:-webkit-full-screen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483647 !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  overflow: hidden !important;
+  overscroll-behavior: none;
+  background: #000 !important;
+}
+
+.bb-player-surface:fullscreen::-webkit-scrollbar,
+.bb-player-surface:-webkit-full-screen::-webkit-scrollbar,
+.bb-player-surface--fullscreen::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* 动画 */
 @keyframes fadeIn {
   from { opacity: 0; }

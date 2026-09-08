@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { MediaPlayerClass } from "dashjs";
 import { motion } from "framer-motion";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useDownloadQualityPrompt } from "@/components/download-quality-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CommentsSection } from "@/components/comments-section";
@@ -45,6 +46,16 @@ interface EpisodeOption {
   cid: number;
   epId?: number;
   localTaskId?: string;
+  cover?: string;
+}
+
+interface ArrowHoldState {
+  key: "ArrowLeft" | "ArrowRight";
+  timerId: number | null;
+  rewindIntervalId: number | null;
+  longPress: boolean;
+  previousRate: number;
+  wasPaused: boolean;
 }
 
 interface PlayableUrlInfo {
@@ -148,6 +159,7 @@ export function PlayerView() {
   const [isPictureInPicture, setIsPictureInPicture] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const playerContainerRef = useRef<HTMLDivElement | null>(null);
+  const nativeFullscreenRef = useRef(false);
   const volumeControlRef = useRef<HTMLDivElement | null>(null);
   const controlHideTimerRef = useRef<number | null>(null);
   const resumePlaybackRef = useRef<{ time: number; playing: boolean } | null>(null);
@@ -156,6 +168,8 @@ export function PlayerView() {
   const actionNoticeTimerRef = useRef<number | null>(null);
   const coinActionRectRef = useRef<DOMRect | null>(null);
   const favoriteActionRectRef = useRef<DOMRect | null>(null);
+  const episodeChangeSequenceRef = useRef(0);
+  const arrowHoldRef = useRef<ArrowHoldState | null>(null);
   const { requestDownloadQuality, downloadQualityDialog } = useDownloadQualityPrompt();
 
   const openAiSummaryDialog = useCallback(() => setAiSummaryDialogOpen(true), []);
@@ -206,6 +220,7 @@ export function PlayerView() {
               bvid: item.bvid || playerState.bvid || "",
               cid: item.cid ?? playerState.cid ?? 0,
               localTaskId: item.taskId,
+              cover: item.cover,
             }))
           : [
               {
@@ -239,6 +254,7 @@ export function PlayerView() {
         bvid: item.bvid || info.bvid,
         cid: item.cid ?? playerState.cid ?? info.cid,
         localTaskId: item.taskId,
+        cover: item.cover,
       }));
     } else if (info.pages?.length > 0) {
       nextEpisodes = info.pages.map((page, index) => ({
@@ -437,11 +453,32 @@ export function PlayerView() {
   }, [revealControls]);
 
   useEffect(() => {
+    const applyFullscreenState = (active: boolean) => {
+      setIsFullscreen(active);
+      document.documentElement.classList.toggle("bb-player-fullscreen-active", active);
+    };
     const handleFullscreenChange = () => {
-      setIsFullscreen(document.fullscreenElement === playerContainerRef.current);
+      const playerIsFullscreen = document.fullscreenElement === playerContainerRef.current;
+      if (playerIsFullscreen) {
+        applyFullscreenState(true);
+        return;
+      }
+
+      if (nativeFullscreenRef.current) {
+        nativeFullscreenRef.current = false;
+        void getCurrentWindow().setFullscreen(false).catch(() => {});
+      }
+      applyFullscreenState(false);
     };
     document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.documentElement.classList.remove("bb-player-fullscreen-active");
+      if (nativeFullscreenRef.current) {
+        nativeFullscreenRef.current = false;
+        void getCurrentWindow().setFullscreen(false).catch(() => {});
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -472,11 +509,11 @@ export function PlayerView() {
     if (playerState?.kind === "bangumi") {
       return bangumiInfo?.title || playerState?.title || "播放器";
     }
-    return videoInfo?.title || playerState?.title || "播放器";
-  }, [bangumiInfo?.title, playerState, videoInfo?.title]);
+    return videoInfo?.title || selectedEpisode?.title || playerState?.title || "播放器";
+  }, [bangumiInfo?.title, playerState, selectedEpisode?.title, videoInfo?.title]);
 
   const currentEpisodeTitle = selectedEpisode?.title || playerState?.title || currentTitle;
-  const cover = bangumiInfo?.cover || videoInfo?.pic || playerState?.cover || "";
+  const cover = bangumiInfo?.cover || videoInfo?.pic || selectedEpisode?.cover || playerState?.cover || "";
   const aiSettings = (appConfig?.ai as AiSummarySettingsLike | undefined) ?? undefined;
   const commentOid = videoInfo?.aid || selectedEpisode?.aid || null;
   const commentType = commentOid ? 1 : null;
@@ -490,11 +527,12 @@ export function PlayerView() {
         return `https://www.bilibili.com/bangumi/play/ep${playerState.epId}`;
       }
     }
-    if (playerState.bvid) {
-      return `https://www.bilibili.com/video/${playerState.bvid}`;
+    const activeBvid = selectedEpisode?.bvid || playerState.bvid;
+    if (activeBvid) {
+      return `https://www.bilibili.com/video/${activeBvid}`;
     }
     return "";
-  }, [playerState]);
+  }, [playerState, selectedEpisode?.bvid]);
 
   useEffect(() => {
     setInteractionState(null);
@@ -700,9 +738,18 @@ export function PlayerView() {
   };
 
   const handleEpisodeChange = async (episode: EpisodeOption) => {
+    const sequence = ++episodeChangeSequenceRef.current;
+    const shouldRefreshVideoInfo = playerState?.kind === "video" && episode.bvid !== videoInfo?.bvid;
     setSelectedEpisode(episode);
+    if (shouldRefreshVideoInfo) {
+      setVideoInfo(null);
+      setInteractionState(null);
+    }
     setLoading(true);
     setError("");
+    const videoInfoRequest = shouldRefreshVideoInfo
+      ? invoke<VideoInfo>("get_normal_info", { bvid: episode.bvid }).catch(() => null)
+      : Promise.resolve<VideoInfo | null>(null);
     try {
       if (episode.localTaskId) {
         setAvailableQualities([]);
@@ -712,11 +759,18 @@ export function PlayerView() {
         setPlayUrl(await loadPlayableUrl(episode.bvid, episode.cid));
       }
     } catch (err) {
-      setError(String(err));
-      setDashPlayback(null);
-      setPlayUrl("");
+      if (sequence === episodeChangeSequenceRef.current) {
+        setError(String(err));
+        setDashPlayback(null);
+        setPlayUrl("");
+      }
     } finally {
-      setLoading(false);
+      const nextVideoInfo = await videoInfoRequest;
+      if (sequence === episodeChangeSequenceRef.current) {
+        if (nextVideoInfo) setVideoInfo(nextVideoInfo);
+        setCommentRefreshKey((key) => key + 1);
+        setLoading(false);
+      }
     }
   };
 
@@ -745,7 +799,7 @@ export function PlayerView() {
     setDownloadPlaylist((current) => (current.some((existing) => existing.taskId === item.taskId) ? current : [...current, item]));
     setEpisodes((current) => {
       if (current.some((episode) => episode.localTaskId === item.taskId)) return current;
-      return [...current, { label: `P${current.length + 1}`, title: item.title, bvid: item.bvid || playerState?.bvid || "", cid: item.cid ?? 0, localTaskId: item.taskId }];
+      return [...current, { label: `P${current.length + 1}`, title: item.title, bvid: item.bvid || playerState?.bvid || "", cid: item.cid ?? 0, localTaskId: item.taskId, cover: item.cover }];
     });
     setPlaylistCandidates((current) => current.filter((candidate) => candidate.taskId !== item.taskId));
     showNotice(`已添加到播放列表：${item.title}`);
@@ -920,7 +974,8 @@ export function PlayerView() {
   const seekTo = (time: number, shouldPlay: boolean) => {
     const video = videoRef.current;
     if (!video) return;
-    const target = Math.max(0, time);
+    const duration = Number.isFinite(video.duration) ? video.duration : mediaDuration;
+    const target = Math.max(0, duration > 0 ? Math.min(duration, time) : time);
     setCurrentTime(target);
     const dash = dashPlayerRef.current;
     if (dash && dashStreamReadyRef.current) {
@@ -996,10 +1051,34 @@ export function PlayerView() {
 
   const handleFullscreen = async () => {
     try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
+      if (document.fullscreenElement || isFullscreen) {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        if (nativeFullscreenRef.current) {
+          nativeFullscreenRef.current = false;
+          await getCurrentWindow().setFullscreen(false);
+        }
+        setIsFullscreen(false);
+        document.documentElement.classList.remove("bb-player-fullscreen-active");
       } else {
-        await playerContainerRef.current?.requestFullscreen();
+        let elementFullscreen = false;
+        let nativeFullscreen = false;
+        try {
+          await playerContainerRef.current?.requestFullscreen();
+          elementFullscreen = document.fullscreenElement === playerContainerRef.current;
+        } catch {
+          // 部分 WebView 只支持原生窗口全屏，继续尝试 Tauri API。
+        }
+
+        try {
+          await getCurrentWindow().setFullscreen(true);
+          nativeFullscreenRef.current = true;
+          nativeFullscreen = true;
+        } catch {
+          // 浏览器预览环境没有 Tauri 窗口，DOM 全屏仍然有效。
+        }
+        if (!elementFullscreen && !nativeFullscreen) throw new Error("当前环境不支持播放器全屏");
+        setIsFullscreen(true);
+        document.documentElement.classList.add("bb-player-fullscreen-active");
       }
     } catch (err) {
       setError(String(err));
@@ -1008,6 +1087,168 @@ export function PlayerView() {
 
   const hasPlayableSource = Boolean(playUrl || dashPlayback);
   const canPictureInPicture = typeof document !== "undefined" && document.pictureInPictureEnabled;
+
+  useEffect(() => {
+    if (!hasPlayableSource || loading) return;
+
+    const showPlayerControls = () => {
+      setControlsVisible(true);
+      if (controlHideTimerRef.current !== null) {
+        window.clearTimeout(controlHideTimerRef.current);
+        controlHideTimerRef.current = null;
+      }
+    };
+
+    const isTextEntryTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      return target.isContentEditable || Boolean(target.closest("input:not([type='range']), textarea, select"));
+    };
+
+    const isOverlayTarget = (target: EventTarget | null) => {
+      return target instanceof HTMLElement && Boolean(target.closest("[role='dialog'], [role='listbox']"));
+    };
+
+    const isControlTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      return isTextEntryTarget(target) || Boolean(target.closest("input, [role='combobox'], [role='dialog'], [role='listbox']"));
+    };
+
+    const seekBy = (delta: number) => {
+      const video = videoRef.current;
+      if (!video) return;
+      const duration = Number.isFinite(video.duration) ? video.duration : mediaDuration;
+      const target = Math.max(0, duration > 0 ? Math.min(duration, video.currentTime + delta) : video.currentTime + delta);
+      setCurrentTime(target);
+      if (dashPlayerRef.current && dashStreamReadyRef.current) dashPlayerRef.current.seek(target);
+      else video.currentTime = target;
+    };
+
+    const restoreHold = (commitShortPress: boolean) => {
+      const hold = arrowHoldRef.current;
+      if (!hold) return;
+      arrowHoldRef.current = null;
+      if (hold.timerId !== null) window.clearTimeout(hold.timerId);
+      if (hold.rewindIntervalId !== null) window.clearInterval(hold.rewindIntervalId);
+      const video = videoRef.current;
+      if (!video) return;
+
+      if (!hold.longPress && commitShortPress) {
+        seekBy(hold.key === "ArrowRight" ? 5 : -5);
+      } else if (hold.longPress && hold.key === "ArrowRight") {
+        video.playbackRate = hold.previousRate;
+        if (hold.wasPaused) {
+          dashPlayerRef.current?.pause();
+          video.pause();
+        }
+      } else if (hold.longPress && hold.key === "ArrowLeft" && !hold.wasPaused) {
+        if (dashPlayerRef.current) dashPlayerRef.current.play();
+        else void video.play().catch(() => {});
+      }
+      showPlayerControls();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const video = videoRef.current;
+      if (!video) return;
+
+      if (event.code === "Space") {
+        if (isTextEntryTarget(event.target) || isOverlayTarget(event.target)) return;
+        event.preventDefault();
+        if (event.repeat) return;
+        if (video.paused) {
+          if (dashPlayerRef.current) dashPlayerRef.current.play();
+          else void video.play().catch(() => {});
+        } else {
+          dashPlayerRef.current?.pause();
+          video.pause();
+        }
+        showPlayerControls();
+        return;
+      }
+
+      if (event.key === "Escape" && isFullscreen) {
+        event.preventDefault();
+        if (event.repeat) return;
+        void handleFullscreen();
+        showPlayerControls();
+        return;
+      }
+
+      if (event.code === "KeyF" || event.key.toLowerCase() === "f") {
+        if (isTextEntryTarget(event.target) || isOverlayTarget(event.target)) return;
+        event.preventDefault();
+        if (event.repeat) return;
+        void handleFullscreen();
+        showPlayerControls();
+        return;
+      }
+
+      if (isControlTarget(event.target)) return;
+
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+        const nextVolume = Math.max(0, Math.min(1, video.volume + (event.key === "ArrowUp" ? 0.05 : -0.05)));
+        video.volume = nextVolume;
+        video.muted = nextVolume === 0;
+        setVolume(nextVolume);
+        setIsMuted(nextVolume === 0);
+        showPlayerControls();
+        return;
+      }
+
+      if ((event.key !== "ArrowLeft" && event.key !== "ArrowRight") || event.repeat || arrowHoldRef.current) return;
+      event.preventDefault();
+      const hold: ArrowHoldState = {
+        key: event.key,
+        timerId: null,
+        rewindIntervalId: null,
+        longPress: false,
+        previousRate: video.playbackRate || playbackRate,
+        wasPaused: video.paused,
+      };
+      hold.timerId = window.setTimeout(() => {
+        const active = arrowHoldRef.current;
+        const currentVideo = videoRef.current;
+        if (active !== hold || !currentVideo) return;
+        active.longPress = true;
+        active.timerId = null;
+        if (active.key === "ArrowRight") {
+          currentVideo.playbackRate = 3;
+          if (dashPlayerRef.current) dashPlayerRef.current.play();
+          else void currentVideo.play().catch(() => {});
+        } else {
+          dashPlayerRef.current?.pause();
+          currentVideo.pause();
+          active.rewindIntervalId = window.setInterval(() => seekBy(-0.6), 200);
+        }
+        showPlayerControls();
+      }, 350);
+      arrowHoldRef.current = hold;
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === "Space" && !isTextEntryTarget(event.target) && !isOverlayTarget(event.target)) {
+        event.preventDefault();
+        return;
+      }
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      if (arrowHoldRef.current?.key !== event.key) return;
+      event.preventDefault();
+      restoreHold(true);
+    };
+    const handleWindowBlur = () => restoreHold(false);
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleWindowBlur);
+      restoreHold(false);
+    };
+  }, [hasPlayableSource, isFullscreen, loading, mediaDuration, playbackRate]);
 
   if (!playerState) {
     return (
@@ -1090,15 +1331,16 @@ export function PlayerView() {
           </div>
           <div
             ref={playerContainerRef}
+            className={`bb-player-surface${isFullscreen ? " bb-player-surface--fullscreen" : ""}`}
             onMouseMove={revealControls}
             onMouseLeave={() => isPlaying && setControlsVisible(false)}
             style={{
               width: "100%",
               height: isFullscreen ? "100%" : undefined,
               aspectRatio: isFullscreen ? undefined : "16 / 9",
-              backgroundColor: "#0f172a",
+              backgroundColor: isFullscreen ? "#000" : "#0f172a",
               position: "relative",
-              borderRadius: "12px",
+              borderRadius: isFullscreen ? 0 : "12px",
               overflow: "hidden",
             }}
           >

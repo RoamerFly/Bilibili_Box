@@ -13,6 +13,7 @@ import {
   MonitorPlay,
   Moon,
   Palette,
+  Power,
   RefreshCw,
   RotateCcw,
   Settings2,
@@ -31,10 +32,12 @@ import { CARD_LAYOUT_KEYS, DEFAULT_CARD_LAYOUT, DEFAULT_CARD_SCALE, useAppStore,
 import { AiSettingsPanel, withAiSettings, type AiSettings } from "./ai-settings-panel";
 
 type ThemeMode = "light" | "dark" | "system";
+type CloseWindowBehavior = "ask" | "minimize_to_tray" | "exit";
 
 interface BackendConfig {
   download_dir: string;
   start_maximized: boolean;
+  close_window_behavior: CloseWindowBehavior;
   card_scale: number;
   card_page_size: number;
   card_page_rows: number;
@@ -289,6 +292,16 @@ export function SettingsView() {
       }
     } catch (err) {
       setFeedback(`选择下载目录失败：${String(err)}`);
+    }
+  };
+
+  const handleCloseWindowBehaviorChange = async (value: CloseWindowBehavior) => {
+    setFeedback("");
+    try {
+      await saveConfig({ close_window_behavior: value });
+      setFeedback("关闭窗口行为已保存");
+    } catch (err) {
+      setFeedback(`保存关闭窗口行为失败：${String(err)}`);
     }
   };
 
@@ -768,6 +781,28 @@ export function SettingsView() {
               checked={backendConfig.start_maximized}
               onChange={(checked) => void saveConfig({ start_maximized: checked })}
             />
+          }
+        />
+
+        <SettingRow
+          icon={<Power style={{ width: 21, height: 21, color: "#c2410c" }} />}
+          iconBgColor="var(--color-warning-bg)"
+          title="关闭窗口时"
+          description="选择最小化到托盘后，窗口会隐藏，下载任务和后台处理仍会继续运行"
+          control={
+            <Select
+              value={backendConfig.close_window_behavior || "ask"}
+              onValueChange={(value) => void handleCloseWindowBehaviorChange(value as CloseWindowBehavior)}
+            >
+              <SelectTrigger style={{ ...selectStyle, minWidth: "190px" }} aria-label="关闭窗口时">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ask">每次询问</SelectItem>
+                <SelectItem value="minimize_to_tray">最小化到托盘运行</SelectItem>
+                <SelectItem value="exit">退出程序</SelectItem>
+              </SelectContent>
+            </Select>
           }
         />
 

@@ -5,6 +5,7 @@
   "windows": ["*"],
   "permissions": [
     "core:default",
+    "core:window:allow-set-fullscreen",
     "dialog:default",
     "opener:default",
     "os:default",

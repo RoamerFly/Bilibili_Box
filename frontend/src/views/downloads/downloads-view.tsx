@@ -212,6 +212,13 @@ export function DownloadsView() {
 
   const displayTasks = useMemo(() => groupDownloadTasks(tasks), [tasks]);
 
+  useEffect(() => {
+    setDetailTask((current) => {
+      if (!current) return current;
+      return displayTasks.find((task) => task.task_id === current.task_id) ?? null;
+    });
+  }, [displayTasks]);
+
   // 筛选
   const filteredTasks = useMemo(() => {
     let result = displayTasks;
@@ -282,11 +289,19 @@ export function DownloadsView() {
     }
   };
   const handleRestart = async (task: string | DownloadTask) => {
+    const taskIds = typeof task === "string"
+      ? [task]
+      : task.children
+        ? task.children.filter((child) => child.state === "Failed").map((child) => child.task_id)
+        : task.state === "Failed"
+          ? [task.task_id]
+          : [];
+    if (!taskIds.length) return;
     try {
-      await invoke("restart_download_tasks", { taskIds: taskIdsOf(task) });
+      await invoke("restart_download_tasks", { taskIds });
       fetchTasks();
     } catch (e) {
-      console.error("重启失败:", e);
+      console.error("重试失败:", e);
     }
   };
   const handleOpenFolder = async (taskId?: string) => {
@@ -387,6 +402,19 @@ export function DownloadsView() {
       cover: first.cover || group.cover,
       localTaskId: first.task_id,
       playlist: children.map(toPlaylistItem),
+    });
+    setDetailTask(null);
+  };
+
+  const handlePlayGroupItem = (task: DownloadTask) => {
+    if (!isPlayableVideoTask(task)) return;
+    openPlayer({
+      kind: "video",
+      bvid: task.bvid,
+      cid: task.cid,
+      title: task.title,
+      cover: task.cover,
+      localTaskId: task.task_id,
     });
     setDetailTask(null);
   };
@@ -746,6 +774,8 @@ export function DownloadsView() {
           onClose={() => setDetailTask(null)}
           onOpenFolder={handleOpenFolder}
           onDelete={(taskId) => requestDelete([taskId])}
+          onRestart={(taskId) => void handleRestart(taskId)}
+          onPlayItem={handlePlayGroupItem}
           onPlayAll={() => handlePlayGroup(detailTask)}
         />
       ) : null}
@@ -1152,12 +1182,16 @@ function TaskDetailDialog({
   onClose,
   onOpenFolder,
   onDelete,
+  onRestart,
+  onPlayItem,
   onPlayAll,
 }: {
   task: DownloadTask;
   onClose: () => void;
   onOpenFolder: (id?: string) => void;
   onDelete: (taskId: string) => void;
+  onRestart: (taskId: string) => void;
+  onPlayItem: (task: DownloadTask) => void;
   onPlayAll: () => void;
 }) {
   const children = task.children ?? [];
@@ -1188,7 +1222,7 @@ function TaskDetailDialog({
         </div>
         <div style={{ padding: "14px 18px", overflowY: "auto", display: "grid", gap: "10px" }}>
           {children.map((child, index) => (
-            <div key={child.task_id} style={{ display: "grid", gridTemplateColumns: "36px minmax(0, 1fr) 92px 76px", gap: "10px", alignItems: "center", padding: "10px", borderRadius: "10px", border: "1px solid var(--color-bg-tertiary)" }}>
+            <div key={child.task_id} style={{ display: "grid", gridTemplateColumns: "36px minmax(0, 1fr) 92px 110px", gap: "10px", alignItems: "center", padding: "10px", borderRadius: "10px", border: "1px solid var(--color-bg-tertiary)" }}>
               <span style={{ color: "var(--color-text-muted)", fontSize: "12px", fontWeight: 800 }}>{index + 1}</span>
               <div style={{ minWidth: 0 }}>
                 <div style={{ color: "var(--color-text)", fontSize: "13.5px", fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{child.title}</div>
@@ -1196,6 +1230,16 @@ function TaskDetailDialog({
               </div>
               <span style={{ justifySelf: "end", color: getStateConfig(child.state).style.color, fontSize: "12px", fontWeight: 800 }}>{getStateConfig(child.state).text}</span>
               <span style={{ justifySelf: "end", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                {isPlayableVideoTask(child) ? (
+                  <button type="button" onClick={() => onPlayItem(child)} style={childTaskButtonStyle} title="播放此视频">
+                    <Play style={{ width: 14, height: 14 }} />
+                  </button>
+                ) : null}
+                {child.state === "Failed" ? (
+                  <button type="button" onClick={() => onRestart(child.task_id)} style={childTaskButtonStyle} title="重新下载">
+                    <RotateCcw style={{ width: 14, height: 14 }} />
+                  </button>
+                ) : null}
                 <button type="button" onClick={() => onOpenFolder(child.task_id)} style={childTaskButtonStyle} title="打开所在目录">
                   <FolderOpen style={{ width: 14, height: 14 }} />
                 </button>

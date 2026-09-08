@@ -1,6 +1,6 @@
 [package]
 name = "bilibili-box"
-version = "1.1.0"
+version = "1.1.1"
 description = "BiliBox - Bilibili 媒体工作站"
 authors = ["BiliBox"]
 license-file = "../LICENSE"
@@ -16,7 +16,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # Tauri 核心
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-os = "2"

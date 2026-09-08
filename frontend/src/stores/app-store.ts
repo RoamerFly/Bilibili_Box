@@ -132,6 +132,7 @@ export interface UserInfoDetail {
 export interface AppConfig {
   sessdata: string;
   cookie?: string;
+  close_window_behavior?: "ask" | "minimize_to_tray" | "exit";
   card_scale?: number;
   card_page_size?: number;
   card_page_rows?: number;
