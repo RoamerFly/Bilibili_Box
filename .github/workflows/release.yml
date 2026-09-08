@@ -839,15 +839,33 @@ jobs:
           NODE
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: ${{ env.PUBLIC_RELEASE_REPOSITORY }}
-          token: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
-          tag_name: ${{ steps.meta.outputs.tag_name }}
-          name: ${{ steps.meta.outputs.release_name }}
-          target_commitish: main
-          body_path: ${{ steps.meta.outputs.body_file }}
-          draft: ${{ steps.meta.outputs.draft == 'true' }}
-          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
-          files: release-assets/latest.json
-          fail_on_unmatched_files: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
+          TAG_NAME: ${{ steps.meta.outputs.tag_name }}
+          RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
+          RELEASE_NOTES_FILE: ${{ steps.meta.outputs.body_file }}
+          RELEASE_DRAFT: ${{ steps.meta.outputs.draft }}
+          RELEASE_PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG_NAME" release-assets/latest.json \
+            --repo "$PUBLIC_RELEASE_REPOSITORY" \
+            --clobber
+          edit_args=(
+            "$TAG_NAME"
+            --repo "$PUBLIC_RELEASE_REPOSITORY"
+            --title "$RELEASE_NAME"
+            --notes-file "$RELEASE_NOTES_FILE"
+          )
+          if [ "$RELEASE_DRAFT" = true ]; then
+            edit_args+=(--draft)
+          else
+            edit_args+=(--draft=false)
+          fi
+          if [ "$RELEASE_PRERELEASE" = true ]; then
+            edit_args+=(--prerelease)
+          else
+            edit_args+=(--prerelease=false)
+          fi
+          gh release edit "${edit_args[@]}"
