@@ -194,6 +194,16 @@ export function SettingsView() {
     void loadConfig();
   }, [loadConfig]);
 
+  const storeConfig = useAppStore((s) => s.config);
+  useEffect(() => {
+    if (storeConfig && typeof storeConfig === "object") {
+      setBackendConfig((prev) => {
+        if (!prev) return storeConfig as unknown as BackendConfig;
+        return { ...prev, ...storeConfig } as BackendConfig;
+      });
+    }
+  }, [storeConfig]);
+
   const saveConfig = useCallback(
     async (updates: Partial<BackendConfig>) => {
       const currentConfig = backendConfigRef.current ?? backendConfig ?? (await invoke<BackendConfig>("get_config"));
@@ -1605,11 +1615,6 @@ function AboutDialog({
               >
                 GitHub Issues <ExternalLink style={{ width: 11, height: 11 }} />
               </button>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ color: "var(--color-text-muted)" }}>联系邮箱</span>
-              <span style={{ color: "var(--color-text)", fontFamily: "monospace" }}>1623658271@qq.com</span>
             </div>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useLayoutEffect, useRef, useEffect, useState, type ComponentType, type MouseEvent } from "react";
-import { useAppStore, type ViewType } from "@/stores/app-store";
+import { useAppStore, type AppConfig, type ViewType } from "@/stores/app-store";
 import { useConfigWatch } from "@/hooks/use-config-watch";
 import { useDownloadEvents } from "@/hooks/use-download-events";
 import { Sidebar } from "./sidebar";
@@ -197,12 +197,24 @@ export function AppShell() {
     };
   }, []);
 
-  const resolveCloseRequest = (action: "minimize_to_tray" | "exit") => {
+  const resolveCloseRequest = async (action: "minimize_to_tray" | "exit", remember = false) => {
     setCloseDialogOpen(false);
-    void invoke("window_resolve_close", { action }).catch((error) => {
+    if (remember) {
+      try {
+        const currentConfig = (await invoke<AppConfig>("get_config")) ?? (useAppStore.getState().config as AppConfig);
+        const nextConfig = { ...currentConfig, close_window_behavior: action };
+        await invoke("save_config", { newConfig: nextConfig });
+        setConfig(nextConfig);
+      } catch (error) {
+        console.error("Failed to save close window behavior:", error);
+      }
+    }
+    try {
+      await invoke("window_resolve_close", { action });
+    } catch (error) {
       console.error("Failed to resolve close request:", error);
       setCloseDialogOpen(true);
-    });
+    }
   };
 
   return (
@@ -269,8 +281,8 @@ export function AppShell() {
       {closeDialogOpen ? (
         <CloseWindowDialog
           onCancel={() => setCloseDialogOpen(false)}
-          onMinimizeToTray={() => resolveCloseRequest("minimize_to_tray")}
-          onExit={() => resolveCloseRequest("exit")}
+          onMinimizeToTray={(remember) => void resolveCloseRequest("minimize_to_tray", remember)}
+          onExit={(remember) => void resolveCloseRequest("exit", remember)}
         />
       ) : null}
     </div>
@@ -359,9 +371,11 @@ function CloseWindowDialog({
   onExit,
 }: {
   onCancel: () => void;
-  onMinimizeToTray: () => void;
-  onExit: () => void;
+  onMinimizeToTray: (remember: boolean) => void;
+  onExit: (remember: boolean) => void;
 }) {
+  const [remember, setRemember] = useState(false);
+
   return (
     <div
       role="presentation"
@@ -398,10 +412,47 @@ function CloseWindowDialog({
         <p style={{ margin: "10px 0 0", color: "var(--color-text-muted)", fontSize: "14px", lineHeight: 1.7 }}>
           最小化到托盘后，正在进行的下载和后台任务会继续运行；退出程序则会停止当前后台任务。
         </p>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "9px", marginTop: "22px", flexWrap: "wrap" }}>
-          <button type="button" onClick={onCancel} style={closeDialogSecondaryButtonStyle}>取消</button>
-          <button type="button" onClick={onMinimizeToTray} style={closeDialogSecondaryButtonStyle}>最小化到托盘</button>
-          <button type="button" onClick={onExit} style={closeDialogExitButtonStyle}>退出程序</button>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+            marginTop: "24px",
+            flexWrap: "wrap",
+          }}
+        >
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "7px",
+              cursor: "pointer",
+              userSelect: "none",
+              color: "var(--color-text-muted)",
+              fontSize: "13px",
+              fontWeight: 500,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              style={{
+                cursor: "pointer",
+                width: "15px",
+                height: "15px",
+                accentColor: "var(--color-primary)",
+                margin: 0,
+              }}
+            />
+            记住此选项
+          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap" }}>
+            <button type="button" onClick={onCancel} style={closeDialogSecondaryButtonStyle}>取消</button>
+            <button type="button" onClick={() => onMinimizeToTray(remember)} style={closeDialogSecondaryButtonStyle}>最小化到托盘</button>
+            <button type="button" onClick={() => onExit(remember)} style={closeDialogExitButtonStyle}>退出程序</button>
+          </div>
         </div>
       </section>
     </div>
