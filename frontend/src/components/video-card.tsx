@@ -110,7 +110,7 @@ export function UnifiedVideoCard({
 
   return (
     <div style={{ borderRadius: `${14 * scale}px`, backgroundColor: "var(--color-bg-secondary)", border: selected ? "1.5px solid var(--color-primary)" : "1px solid var(--color-border)", padding: `${13 * scale}px ${14 * scale}px` }}>
-      <div style={{ display: "grid", gridTemplateColumns: `${Math.max(118 * scale, 148 * scale)}px minmax(0, 1fr)`, gap: `${13 * scale}px`, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: `${Math.max(118, Math.round(148 * scale))}px minmax(0, 1fr)`, gap: `${13 * scale}px`, alignItems: "start" }}>
         <div
           onClick={onPlay}
           style={{ aspectRatio: "16 / 9", borderRadius: `${10 * scale}px`, overflow: "hidden", backgroundColor: "var(--color-bg-tertiary)", position: "relative", cursor: "pointer" }}

@@ -339,6 +339,7 @@ export async function invoke<T>(
       result = accountResult();
       break;
     case "clear_user_info":
+      config = { ...config, sessdata: "", cookie: "" };
       result = null;
       break;
     case "get_recommended_videos":

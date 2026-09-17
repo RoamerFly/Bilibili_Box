@@ -239,7 +239,9 @@ export function RecommendView() {
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
       setError(String(err));
-      setRecommendPageState({ videos: [] });
+      if (!append) {
+        setRecommendPageState({ videos: [] });
+      }
     } finally {
       if (requestId === requestIdRef.current) {
         setIsLoading(false);
