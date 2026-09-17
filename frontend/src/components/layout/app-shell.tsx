@@ -57,6 +57,7 @@ export function AppShell() {
   const setUserInfo = useAppStore((s) => s.setUserInfo);
   const setRecommendPageState = useAppStore((s) => s.setRecommendPageState);
   const bottomBarExpanded = useAppStore((s) => s.bottomBarExpanded);
+  const contentFontSize = useAppStore((s) => s.contentFontSize ?? "standard");
   const theme = useAppStore((s) => s.config?.theme) as string | undefined;
   const scrollRef = useRef<HTMLDivElement>(null);
   const previousViewRef = useRef(currentView);
@@ -225,6 +226,7 @@ export function AppShell() {
       {/* Main Content Area */}
       <main
         className="bb-main-stage flex-1 flex flex-col min-w-0 relative overflow-hidden"
+        data-font-size={contentFontSize}
       >
         <WindowDragRegion />
         <WindowControls />

@@ -611,9 +611,10 @@ function createProviderId(): string {
 
 export function AiSettingsPanel({ onFeedback, onSettingsSaved }: AiSettingsPanelProps) {
   const [activeSubTab, setActiveSubTab] = useState<"summary" | "reply">("summary");
+  const [summarySubTab, setSummarySubTab] = useState<"prompt" | "asr">("prompt");
   const [modelConfigModalOpen, setModelConfigModalOpen] = useState(false);
-  const [summaryPromptExpanded, setSummaryPromptExpanded] = useState(true);
-  const [summaryAsrExpanded, setSummaryAsrExpanded] = useState(true);
+  const [summaryPromptExpanded, setSummaryPromptExpanded] = useState(false);
+  const [summaryAsrExpanded, setSummaryAsrExpanded] = useState(false);
 
   const [settings, setSettings] = useState<AiSettings>(DEFAULT_AI_SETTINGS);
   const [selectedProviderId, setSelectedProviderId] = useState<string>("");
@@ -1158,144 +1159,175 @@ export function AiSettingsPanel({ onFeedback, onSettingsSaved }: AiSettingsPanel
         </div>
       </div>
 
-      {/* 子 Tab 1: AI 总结 (包含提示词设置与语音转录两个可折叠卡片) */}
+      {/* 子 Tab 1: AI 总结 (包含提示词设置与语音转录子Tab) */}
       {activeSubTab === "summary" ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* 子卡片 1: 提示词设置 (可展开折叠) */}
-          <CollapsibleCard
-            id="ai-prompt-template-card"
-            icon={<Sparkles style={iconStyle} />}
-            iconColor="var(--color-primary)"
-            title="提示词设置"
-            description="生成视频总结时注入的提示词模板及上下文变量，支持实时预览。"
-            expanded={summaryPromptExpanded}
-            onToggle={() => setSummaryPromptExpanded(!summaryPromptExpanded)}
-            action={
-              <button
-                type="button"
-                onClick={() => updateSettings((current) => ({ ...current, prompt_template: DEFAULT_AI_PROMPT_TEMPLATE }))}
-                style={smallButtonStyle}
-                title="恢复系统默认提示词模板"
-              >
-                <RotateCcw style={{ width: 12, height: 12 }} />
-                恢复默认
-              </button>
-            }
-          >
-            <div style={{ padding: "14px 20px 18px" }}>
-              <textarea
-                aria-label="提示词模板"
-                value={settings.prompt_template}
-                onChange={(event) => updateSettings((current) => ({ ...current, prompt_template: event.target.value }))}
-                rows={5}
-                style={textareaStyle}
-              />
-              <div style={{ marginTop: 10 }}>
-                <span style={helperTextStyle}>
-                  可用变量：{"{video.title}"}（标题）、{"{video.description}"}（简介）、{"{video.owner}"}（UP主）、{"{video.bvid}"}、{"{video.aid}"}、{"{video.cid}"}、{"{video.note}"}（播放页补充说明）、{"{video.subtitle}"}（已识别字幕）。
-                </span>
-              </div>
-              {promptPreview ? (
-                <div style={previewContainerStyle}>
-                  <span style={previewTitleStyle}>发送给模型的完整内容预览（示例数据渲染）</span>
-                  <span style={helperTextStyle}>
-                    变量按示例值替换；{"{video.subtitle}"} 会替换为已识别字幕，生成时以实际视频为准。
-                  </span>
-                  <pre style={previewPreStyle}>
-                    {`【系统提示词】\n${promptPreview.system_prompt}\n\n【指令（模板替换后）】\n${promptPreview.instruction}\n\n【用户消息（完整 JSON）】\n${promptPreview.user_prompt}`}
-                  </pre>
-                </div>
-              ) : (
-                <div style={previewContainerStyle}>
-                  <span style={helperTextStyle}>提示词预览暂不可用。</span>
-                </div>
-              )}
-            </div>
-          </CollapsibleCard>
-
-          {/* 子卡片 2: 本地语音转录 (可展开折叠) */}
-          <CollapsibleCard
-            id="ai-asr-card"
-            icon={<Mic style={iconStyle} />}
-            iconColor="var(--color-info-text)"
-            title="本地语音转录"
-            description="当前版本固定采用 SenseVoice 本地模型，为无字幕视频生成转录（离线本地推理，需先下载模型）。"
-            badge={<AsrStatusBadge status={asrStatus} unavailable={Boolean(asrStatusError)} />}
-            expanded={summaryAsrExpanded}
-            onToggle={() => setSummaryAsrExpanded(!summaryAsrExpanded)}
-          >
-            <div style={{ padding: "14px 20px 18px" }}>
-              <div style={asrCompactStyle}>
-                <div style={{ minWidth: 0 }}>
-                  <strong style={fieldTitleStyle}>{selectedAsr.label}</strong>
-                  <span style={mutedStyle}>
-                    {ASR_MODEL_ID} · {ASR_MODEL_SIZE_LABEL} · {settings.asr_language || "auto"}
-                  </span>
-                </div>
-                <div style={asrActionsStyle}>
-                  {asrStatus.state === "downloading" ? (
-                    <button
-                      type="button"
-                      style={{ ...secondaryButtonStyle, color: "var(--color-warning-text)" }}
-                      disabled={asrCancelling}
-                      onClick={() => void cancelAsrModelDownload()}
-                    >
-                      {asrCancelling ? "取消中…" : "取消下载"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      style={secondaryButtonStyle}
-                      disabled={asrBusy || asrStatus.state === "installed"}
-                      onClick={() => void downloadAsrModel()}
-                    >
-                      <Download style={buttonIconStyle} />
-                      下载模型（约 230MB 空间）
-                    </button>
-                  )}
-                  {asrStatus.state === "installed" ? (
-                    <button
-                      type="button"
-                      style={{ ...secondaryButtonStyle, color: "var(--color-warning-text)" }}
-                      disabled={asrBusy}
-                      onClick={() => void deleteAsrModel()}
-                    >
-                      <Trash2 style={buttonIconStyle} />
-                      删除模型
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-
-              {asrStatus.state === "downloading" ? (
-                <div style={progressTrackStyle} aria-label="ASR 模型下载进度">
-                  <span style={{ ...progressValueStyle, width: `${Math.max(0, Math.min(100, asrStatus.progress ?? 0))}%` }} />
-                </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* 二级子 Tab 切换 */}
+          <div style={secondaryTabsWrapperStyle} role="tablist" aria-label="AI 总结功能分类">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={summarySubTab === "prompt"}
+              onClick={() => setSummarySubTab("prompt")}
+              style={summarySubTab === "prompt" ? activeSubTabStyle : inactiveSubTabStyle}
+            >
+              <Sparkles style={{ width: 13, height: 13 }} />
+              提示词设置
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={summarySubTab === "asr"}
+              onClick={() => setSummarySubTab("asr")}
+              style={summarySubTab === "asr" ? activeSubTabStyle : inactiveSubTabStyle}
+            >
+              <Mic style={{ width: 13, height: 13 }} />
+              本地语音转录
+              {asrStatus.state === "installed" ? (
+                <span style={installedDotStyle} title="模型已就绪" />
               ) : null}
+            </button>
+          </div>
 
-              <div style={noticeStyle}>
-                <ShieldCheck style={buttonIconStyle} />
-                <span>
-                  {asrStatusError ||
-                    "首次使用需下载约 230MB 模型。模型名称、大小和支持语言由后端统一固定，绝不消耗第三方在线 API 费用，完全本地运行。"}
-                </span>
-              </div>
-
-              <div style={asrFieldsStyle}>
-                <FieldLabel title="转录引擎" description="当前版本仅支持 SenseVoice，由底层原生加速库驱动。">
-                  <div style={readOnlyFieldStyle}>{ASR_ENGINE}</div>
-                </FieldLabel>
-                <FieldLabel title="模型规格" description="官方 SenseVoiceSmall 8-bit 量化模型。">
-                  <div style={readOnlyFieldStyle}>{ASR_MODEL_ID}</div>
-                </FieldLabel>
-                <FieldLabel title="支持语言" description="支持自动语种检测及多语言混合转录。">
-                  <div style={readOnlyFieldStyle}>
-                    {(asrStatus.languages.length ? asrStatus.languages : ["auto", "zh", "en", "ja", "ko", "yue"]).join(" / ")}
+          {/* 子 Tab 1-1: 提示词设置 (默认折叠) */}
+          {summarySubTab === "prompt" ? (
+            <CollapsibleCard
+              id="ai-prompt-template-card"
+              icon={<Sparkles style={iconStyle} />}
+              iconColor="var(--color-primary)"
+              title="提示词设置"
+              description="生成视频总结时注入的提示词模板及上下文变量，支持实时预览。"
+              expanded={summaryPromptExpanded}
+              onToggle={() => setSummaryPromptExpanded(!summaryPromptExpanded)}
+              action={
+                <button
+                  type="button"
+                  onClick={() => updateSettings((current) => ({ ...current, prompt_template: DEFAULT_AI_PROMPT_TEMPLATE }))}
+                  style={smallButtonStyle}
+                  title="恢复系统默认提示词模板"
+                >
+                  <RotateCcw style={{ width: 12, height: 12 }} />
+                  恢复默认
+                </button>
+              }
+            >
+              <div style={{ padding: "14px 20px 18px" }}>
+                <textarea
+                  aria-label="提示词模板"
+                  value={settings.prompt_template}
+                  onChange={(event) => updateSettings((current) => ({ ...current, prompt_template: event.target.value }))}
+                  rows={5}
+                  style={textareaStyle}
+                />
+                <div style={{ marginTop: 10 }}>
+                  <span style={helperTextStyle}>
+                    可用变量：{"{video.title}"}（标题）、{"{video.description}"}（简介）、{"{video.owner}"}（UP主）、{"{video.bvid}"}、{"{video.aid}"}、{"{video.cid}"}、{"{video.note}"}（播放页补充说明）、{"{video.subtitle}"}（已识别字幕）。
+                  </span>
+                </div>
+                {promptPreview ? (
+                  <div style={previewContainerStyle}>
+                    <span style={previewTitleStyle}>发送给模型的完整内容预览（示例数据渲染）</span>
+                    <span style={helperTextStyle}>
+                      变量按示例值替换；{"{video.subtitle}"} 会替换为已识别字幕，生成时以实际视频为准。
+                    </span>
+                    <pre style={previewPreStyle}>
+                      {`【系统提示词】\n${promptPreview.system_prompt}\n\n【指令（模板替换后）】\n${promptPreview.instruction}\n\n【用户消息（完整 JSON）】\n${promptPreview.user_prompt}`}
+                    </pre>
                   </div>
-                </FieldLabel>
+                ) : (
+                  <div style={previewContainerStyle}>
+                    <span style={helperTextStyle}>提示词预览暂不可用。</span>
+                  </div>
+                )}
               </div>
-            </div>
-          </CollapsibleCard>
+            </CollapsibleCard>
+          ) : null}
+
+          {/* 子 Tab 1-2: 本地语音转录 (默认折叠) */}
+          {summarySubTab === "asr" ? (
+            <CollapsibleCard
+              id="ai-asr-card"
+              icon={<Mic style={iconStyle} />}
+              iconColor="var(--color-info-text)"
+              title="本地语音转录"
+              description="当前版本固定采用 SenseVoice 本地模型，为无字幕视频生成转录（离线本地推理，需先下载模型）。"
+              badge={<AsrStatusBadge status={asrStatus} unavailable={Boolean(asrStatusError)} />}
+              expanded={summaryAsrExpanded}
+              onToggle={() => setSummaryAsrExpanded(!summaryAsrExpanded)}
+            >
+              <div style={{ padding: "14px 20px 18px" }}>
+                <div style={asrCompactStyle}>
+                  <div style={{ minWidth: 0 }}>
+                    <strong style={fieldTitleStyle}>{selectedAsr.label}</strong>
+                    <span style={mutedStyle}>
+                      {ASR_MODEL_ID} · {ASR_MODEL_SIZE_LABEL} · {settings.asr_language || "auto"}
+                    </span>
+                  </div>
+                  <div style={asrActionsStyle}>
+                    {asrStatus.state === "downloading" ? (
+                      <button
+                        type="button"
+                        style={{ ...secondaryButtonStyle, color: "var(--color-warning-text)" }}
+                        disabled={asrCancelling}
+                        onClick={() => void cancelAsrModelDownload()}
+                      >
+                        {asrCancelling ? "取消中…" : "取消下载"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        style={secondaryButtonStyle}
+                        disabled={asrBusy || asrStatus.state === "installed"}
+                        onClick={() => void downloadAsrModel()}
+                      >
+                        <Download style={buttonIconStyle} />
+                        下载模型（约 230MB 空间）
+                      </button>
+                    )}
+                    {asrStatus.state === "installed" ? (
+                      <button
+                        type="button"
+                        style={{ ...secondaryButtonStyle, color: "var(--color-warning-text)" }}
+                        disabled={asrBusy}
+                        onClick={() => void deleteAsrModel()}
+                      >
+                        <Trash2 style={buttonIconStyle} />
+                        删除模型
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {asrStatus.state === "downloading" ? (
+                  <div style={progressTrackStyle} aria-label="ASR 模型下载进度">
+                    <span style={{ ...progressValueStyle, width: `${Math.max(0, Math.min(100, asrStatus.progress ?? 0))}%` }} />
+                  </div>
+                ) : null}
+
+                <div style={noticeStyle}>
+                  <ShieldCheck style={buttonIconStyle} />
+                  <span>
+                    {asrStatusError ||
+                      "首次使用需下载约 230MB 模型。模型名称、大小和支持语言由后端统一固定，绝不消耗第三方在线 API 费用，完全本地运行。"}
+                  </span>
+                </div>
+
+                <div style={asrFieldsStyle}>
+                  <FieldLabel title="转录引擎" description="当前版本仅支持 SenseVoice，由底层原生加速库驱动。">
+                    <div style={readOnlyFieldStyle}>{ASR_ENGINE}</div>
+                  </FieldLabel>
+                  <FieldLabel title="模型规格" description="官方 SenseVoiceSmall 8-bit 量化模型。">
+                    <div style={readOnlyFieldStyle}>{ASR_MODEL_ID}</div>
+                  </FieldLabel>
+                  <FieldLabel title="支持语言" description="支持自动语种检测及多语言混合转录。">
+                    <div style={readOnlyFieldStyle}>
+                      {(asrStatus.languages.length ? asrStatus.languages : ["auto", "zh", "en", "ja", "ko", "yue"]).join(" / ")}
+                    </div>
+                  </FieldLabel>
+                </div>
+              </div>
+            </CollapsibleCard>
+          ) : null}
         </div>
       ) : null}
 
@@ -2107,10 +2139,10 @@ function FeedbackBanner({ message, isError }: { message: string; isError: boolea
 }
 
 /* 样式表定义 */
-const pageStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 14 };
+const pageStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 10 };
 const panelStyle: React.CSSProperties = {
   backgroundColor: "var(--color-bg-secondary)",
-  borderRadius: 14,
+  borderRadius: 12,
   border: "1.5px solid var(--color-border)",
   overflow: "hidden",
 };
@@ -2124,22 +2156,22 @@ const panelHeadingStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 12,
-  padding: "16px 20px 14px",
+  padding: "13px 18px 12px",
   borderBottom: "1px solid var(--color-bg-subtle)",
 };
 const panelIconStyle: React.CSSProperties = {
-  width: 36,
-  height: 36,
-  borderRadius: 10,
+  width: 34,
+  height: 34,
+  borderRadius: 9,
   backgroundColor: "var(--color-primary-light)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
   flexShrink: 0,
 };
-const iconStyle: React.CSSProperties = { width: 18, height: 18 };
-const headingTitleStyle: React.CSSProperties = { fontSize: 16, fontWeight: 750, color: "var(--color-text)", margin: 0 };
-const mutedStyle: React.CSSProperties = { display: "block", marginTop: 3, color: "var(--color-text-muted)", fontSize: 12.5 };
+const iconStyle: React.CSSProperties = { width: 17, height: 17 };
+const headingTitleStyle: React.CSSProperties = { fontSize: 15, fontWeight: 750, color: "var(--color-text)", margin: 0 };
+const mutedStyle: React.CSSProperties = { display: "block", marginTop: 2, color: "var(--color-text-muted)", fontSize: 12 };
 const activeBadgeStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -2162,12 +2194,32 @@ const topBarContainerStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
-  gap: "14px",
-  padding: "10px 16px",
-  borderRadius: "13px",
+  gap: "10px",
+  padding: "7px 14px",
+  borderRadius: "11px",
   backgroundColor: "var(--color-bg-secondary)",
   border: "1.5px solid var(--color-border)",
   flexWrap: "wrap",
+};
+
+const secondaryTabsWrapperStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "2px",
+  borderRadius: "9px",
+  backgroundColor: "var(--color-bg-tertiary)",
+  border: "1px solid var(--color-border)",
+  gap: "2px",
+  width: "fit-content",
+};
+
+const installedDotStyle: React.CSSProperties = {
+  display: "inline-block",
+  width: 6,
+  height: 6,
+  borderRadius: "50%",
+  backgroundColor: "var(--color-success)",
+  marginLeft: 4,
 };
 
 const subTabsWrapperStyle: React.CSSProperties = {

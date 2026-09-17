@@ -63,7 +63,7 @@ export function Sidebar() {
     <motion.aside
       className={sidebarCollapsed ? "bb-sidebar collapsed" : "bb-sidebar"}
       animate={{ width: sidebarCollapsed ? 64 : 210 }}
-      transition={{ type: "spring", stiffness: 320, damping: 28, mass: 0.8 }}
+      transition={{ type: "spring", stiffness: 360, damping: 30, mass: 0.8 }}
     >
       {/* Brand Header */}
       <div className="bb-brand" data-tauri-drag-region>
@@ -73,14 +73,16 @@ export function Sidebar() {
           title={sidebarCollapsed ? "点击展开导航栏" : undefined}
           style={{ cursor: sidebarCollapsed ? "pointer" : "default" }}
         >
-          <motion.img
-            src={appIcon}
-            alt="BiliBox"
-            className="bb-brand-icon"
-            whileHover={sidebarCollapsed ? { scale: 1.1 } : { scale: 1.05 }}
-            whileTap={{ scale: 0.94 }}
-            transition={{ type: "spring", stiffness: 420, damping: 22 }}
-          />
+          <div className="bb-brand-icon-wrap">
+            <motion.img
+              src={appIcon}
+              alt="BiliBox"
+              className="bb-brand-icon"
+              whileHover={sidebarCollapsed ? { scale: 1.08 } : { scale: 1.05 }}
+              whileTap={{ scale: 0.94 }}
+              transition={{ type: "spring", stiffness: 420, damping: 22 }}
+            />
+          </div>
           <AnimatePresence>
             {!sidebarCollapsed && (
               <motion.div
@@ -103,8 +105,10 @@ export function Sidebar() {
           onClick={toggleSidebar}
           title={sidebarCollapsed ? "展开导航栏" : "折叠导航栏"}
           aria-label={sidebarCollapsed ? "展开导航栏" : "折叠导航栏"}
-          whileHover={{ scale: 1.12 }}
-          whileTap={{ scale: 0.88 }}
+          data-tauri-drag-region="false"
+          style={{ cursor: "pointer", pointerEvents: "auto" }}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
           transition={{ type: "spring", stiffness: 400, damping: 20 }}
         >
           {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
@@ -188,23 +192,25 @@ export function Sidebar() {
         whileTap={{ scale: 0.96 }}
         transition={{ type: "spring", stiffness: 400, damping: 22 }}
       >
-        <span className="bb-user-avatar">
-          {showAvatar ? (
-            <img
-              src={avatar}
-              alt={username}
-              referrerPolicy="no-referrer"
-              onError={(event) => {
-                event.currentTarget.style.display = "none";
-                setAvatarFailed(true);
-              }}
-            />
-          ) : isLoggedIn ? (
-            <Crown size={sidebarCollapsed ? 18 : 20} />
-          ) : (
-            <LogIn size={sidebarCollapsed ? 18 : 20} />
-          )}
-        </span>
+        <div className="bb-user-avatar-wrap">
+          <span className="bb-user-avatar">
+            {showAvatar ? (
+              <img
+                src={avatar}
+                alt={username}
+                referrerPolicy="no-referrer"
+                onError={(event) => {
+                  event.currentTarget.style.display = "none";
+                  setAvatarFailed(true);
+                }}
+              />
+            ) : isLoggedIn ? (
+              <Crown size={sidebarCollapsed ? 18 : 20} />
+            ) : (
+              <LogIn size={sidebarCollapsed ? 18 : 20} />
+            )}
+          </span>
+        </div>
         <AnimatePresence>
           {!sidebarCollapsed && (
             <motion.span

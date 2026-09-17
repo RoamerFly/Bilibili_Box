@@ -21,6 +21,7 @@ import {
   Settings2,
   Sun,
   Trash2,
+  Type,
   Users,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -30,7 +31,7 @@ import { invoke } from "@/lib/api";
 import { openExternalUrl } from "@/lib/open-external";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { showComingSoon } from "@/lib/coming-soon";
-import { CARD_LAYOUT_KEYS, DEFAULT_CARD_LAYOUT, DEFAULT_CARD_SCALE, useAppStore, type CardLayoutKey } from "@/stores/app-store";
+import { CARD_LAYOUT_KEYS, DEFAULT_CARD_LAYOUT, DEFAULT_CARD_SCALE, useAppStore, type CardLayoutKey, type ContentFontSize } from "@/stores/app-store";
 import { AiSettingsPanel, withAiSettings, type AiSettings } from "./ai-settings-panel";
 
 type ThemeMode = "light" | "dark" | "system";
@@ -148,6 +149,8 @@ export function SettingsView() {
   const setCardScale = useAppStore((s) => s.setCardScale);
   const setAllCardLayouts = useAppStore((s) => s.setAllCardLayouts);
   const setAllCardScales = useAppStore((s) => s.setAllCardScales);
+  const contentFontSize = useAppStore((s) => s.contentFontSize ?? "standard");
+  const setContentFontSize = useAppStore((s) => s.setContentFontSize);
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -525,7 +528,7 @@ export function SettingsView() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        style={{ marginBottom: "28px" }}
+        style={{ marginBottom: "14px" }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
           <div>
@@ -596,7 +599,7 @@ export function SettingsView() {
           gap: "4px",
           width: "fit-content",
           maxWidth: "100%",
-          marginBottom: "16px",
+          marginBottom: "10px",
           padding: "4px",
           borderRadius: "11px",
           backgroundColor: "var(--color-bg-tertiary)",
@@ -628,7 +631,7 @@ export function SettingsView() {
           role={feedbackIsError ? "alert" : "status"}
           aria-live={feedbackIsError ? "assertive" : "polite"}
           style={{
-            marginBottom: "16px",
+            marginBottom: "10px",
             padding: "11px 16px",
             borderRadius: "10px",
             backgroundColor: feedbackIsError ? "var(--color-error-bg)" : "var(--color-success-bg)",
@@ -712,6 +715,19 @@ export function SettingsView() {
             <ThemeSelector
               value={(backendConfig.theme as ThemeMode) || "system"}
               onChange={(val) => void saveConfig({ theme: val })}
+            />
+          }
+        />
+
+        <SettingRow
+          icon={<Type style={{ width: 21, height: 21, color: "var(--color-purple)" }} />}
+          iconBgColor="var(--color-purple-bg)"
+          title="正文字体大小"
+          description="调整主内容区文字的基准字号与显示缩放（支持 13px / 14px / 15px / 16px）"
+          control={
+            <FontSizeSelector
+              value={contentFontSize}
+              onChange={(val) => setContentFontSize(val)}
             />
           }
         />
@@ -1828,6 +1844,62 @@ function ThemeSelector({
             }}
           >
             {option.icon}
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function FontSizeSelector({
+  value,
+  onChange,
+}: {
+  value: ContentFontSize;
+  onChange: (value: ContentFontSize) => void;
+}) {
+  const options: Array<{ key: ContentFontSize; label: string }> = [
+    { key: "small", label: "偏小 (13px)" },
+    { key: "standard", label: "标准 (14px)" },
+    { key: "large", label: "中等 (15px)" },
+    { key: "huge", label: "偏大 (16px)" },
+  ];
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "2px",
+        padding: "3px",
+        borderRadius: "10px",
+        backgroundColor: "var(--color-bg-tertiary)",
+      }}
+    >
+      {options.map((option) => {
+        const active = value === option.key;
+        return (
+          <button
+            key={option.key}
+            type="button"
+            onClick={() => onChange(option.key)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "7px 13px",
+              borderRadius: "8px",
+              fontSize: "13px",
+              fontWeight: active ? 650 : 450,
+              border: active ? "1.5px solid var(--color-purple)" : "1.5px solid transparent",
+              color: active ? "var(--color-purple)" : "var(--color-text-secondary)",
+              backgroundColor: active ? "var(--color-bg-secondary)" : "transparent",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              boxShadow: active ? "0 1px 3px rgba(147, 51, 234, 0.15)" : "none",
+            }}
+          >
             {option.label}
           </button>
         );
