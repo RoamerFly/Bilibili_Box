@@ -30,8 +30,16 @@ import { LoginDialog } from "@/components/login-dialog";
 import { invoke } from "@/lib/api";
 import { openExternalUrl } from "@/lib/open-external";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { showComingSoon } from "@/lib/coming-soon";
-import { CARD_LAYOUT_KEYS, DEFAULT_CARD_LAYOUT, DEFAULT_CARD_SCALE, useAppStore, type CardLayoutKey, type ContentFontSize } from "@/stores/app-store";
+import {
+  CARD_LAYOUT_KEYS,
+  DEFAULT_CARD_LAYOUT,
+  DEFAULT_CARD_SCALE,
+  DEFAULT_APP_FONT_SIZE,
+  MIN_APP_FONT_SIZE,
+  MAX_APP_FONT_SIZE,
+  useAppStore,
+  type CardLayoutKey,
+} from "@/stores/app-store";
 import { AiSettingsPanel, withAiSettings, type AiSettings } from "./ai-settings-panel";
 
 type ThemeMode = "light" | "dark" | "system";
@@ -149,8 +157,8 @@ export function SettingsView() {
   const setCardScale = useAppStore((s) => s.setCardScale);
   const setAllCardLayouts = useAppStore((s) => s.setAllCardLayouts);
   const setAllCardScales = useAppStore((s) => s.setAllCardScales);
-  const contentFontSize = useAppStore((s) => s.contentFontSize ?? "standard");
-  const setContentFontSize = useAppStore((s) => s.setContentFontSize);
+  const appFontSize = useAppStore((s) => s.appFontSize ?? DEFAULT_APP_FONT_SIZE);
+  const setAppFontSize = useAppStore((s) => s.setAppFontSize);
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -722,12 +730,12 @@ export function SettingsView() {
         <SettingRow
           icon={<Type style={{ width: 21, height: 21, color: "var(--color-purple)" }} />}
           iconBgColor="var(--color-purple-bg)"
-          title="正文字体大小"
-          description="调整主内容区文字的基准字号与显示缩放（支持 13px / 14px / 15px / 16px）"
+          title="全局字体大小"
+          description="调整全界面的文字基础字号（包括左侧导航栏与各页面），滑动实时缩放"
           control={
-            <FontSizeSelector
-              value={contentFontSize}
-              onChange={(val) => setContentFontSize(val)}
+            <FontSizeSliderControl
+              value={appFontSize}
+              onChange={(val) => setAppFontSize(val)}
             />
           }
         />
@@ -1852,58 +1860,117 @@ function ThemeSelector({
   );
 }
 
-function FontSizeSelector({
+function FontSizeSliderControl({
   value,
   onChange,
 }: {
-  value: ContentFontSize;
-  onChange: (value: ContentFontSize) => void;
+  value: number;
+  onChange: (value: number) => void;
 }) {
-  const options: Array<{ key: ContentFontSize; label: string }> = [
-    { key: "small", label: "偏小 (13px)" },
-    { key: "standard", label: "标准 (14px)" },
-    { key: "large", label: "中等 (15px)" },
-    { key: "huge", label: "偏大 (16px)" },
+  const [localInput, setLocalInput] = useState<string>(String(value));
+
+  useEffect(() => {
+    setLocalInput(String(value));
+  }, [value]);
+
+  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const num = parseFloat(e.target.value);
+    if (!isNaN(num)) {
+      onChange(num);
+    }
+  };
+
+  const commitInputChange = (strVal: string) => {
+    let num = parseFloat(strVal);
+    if (isNaN(num)) {
+      num = DEFAULT_APP_FONT_SIZE;
+    }
+    const clamped = Math.max(MIN_APP_FONT_SIZE, Math.min(MAX_APP_FONT_SIZE, Math.round(num * 10) / 10));
+    setLocalInput(String(clamped));
+    onChange(clamped);
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      commitInputChange(localInput);
+      (e.target as HTMLInputElement).blur();
+    }
+  };
+
+  const presets = [
+    { label: "偏小", size: 12 },
+    { label: "标准", size: 14 },
+    { label: "偏大", size: 16 },
+    { label: "超大", size: 18 },
   ];
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "2px",
-        padding: "3px",
-        borderRadius: "10px",
-        backgroundColor: "var(--color-bg-tertiary)",
-      }}
-    >
-      {options.map((option) => {
-        const active = value === option.key;
-        return (
-          <button
-            key={option.key}
-            type="button"
-            onClick={() => onChange(option.key)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "7px 13px",
-              borderRadius: "8px",
-              fontSize: "13px",
-              fontWeight: active ? 650 : 450,
-              border: active ? "1.5px solid var(--color-purple)" : "1.5px solid transparent",
-              color: active ? "var(--color-purple)" : "var(--color-text-secondary)",
-              backgroundColor: active ? "var(--color-bg-secondary)" : "transparent",
-              cursor: "pointer",
-              fontFamily: "inherit",
-              boxShadow: active ? "0 1px 3px rgba(147, 51, 234, 0.15)" : "none",
-            }}
-          >
-            {option.label}
-          </button>
-        );
-      })}
+    <div className="bb-font-slider-container">
+      <div className="bb-font-presets">
+        {presets.map((p) => {
+          const isActive = Math.abs(value - p.size) < 0.1;
+          return (
+            <button
+              key={p.size}
+              type="button"
+              className={`bb-font-preset-pill${isActive ? " active" : ""}`}
+              onClick={() => onChange(p.size)}
+              title={`设置为 ${p.size}px`}
+            >
+              {p.label} ({p.size}px)
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="bb-font-slider-row">
+        <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>A-</span>
+        <input
+          type="range"
+          min={MIN_APP_FONT_SIZE}
+          max={MAX_APP_FONT_SIZE}
+          step={0.5}
+          value={value}
+          onChange={handleSliderChange}
+          className="bb-font-slider"
+          aria-label="全局字号滑块"
+        />
+        <span style={{ fontSize: "15px", color: "var(--color-text-muted)", fontWeight: 700 }}>A+</span>
+      </div>
+
+      <div className="bb-font-px-wrap">
+        <input
+          type="number"
+          min={MIN_APP_FONT_SIZE}
+          max={MAX_APP_FONT_SIZE}
+          step={0.5}
+          value={localInput}
+          onChange={(e) => {
+            setLocalInput(e.target.value);
+            const num = parseFloat(e.target.value);
+            if (!isNaN(num) && num >= MIN_APP_FONT_SIZE && num <= MAX_APP_FONT_SIZE) {
+              onChange(num);
+            }
+          }}
+          onBlur={() => commitInputChange(localInput)}
+          onKeyDown={handleInputKeyDown}
+          className="bb-font-px-input"
+          aria-label="全局字号数值(px)"
+        />
+        <span className="bb-font-px-unit">px</span>
+      </div>
+
+      {Math.abs(value - DEFAULT_APP_FONT_SIZE) >= 0.1 && (
+        <button
+          type="button"
+          onClick={() => onChange(DEFAULT_APP_FONT_SIZE)}
+          className="bb-font-reset-btn"
+          title="恢复默认 14px 字号"
+        >
+          <RotateCcw style={{ width: 12, height: 12 }} />
+          默认 (14px)
+        </button>
+      )}
     </div>
   );
 }

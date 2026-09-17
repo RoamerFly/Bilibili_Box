@@ -2,6 +2,9 @@
 
 :root {
   color-scheme: light;
+  /* 全局字号基准 (支持设置滑动缩放与手动px输入) */
+  --bb-app-font-size: 14px;
+
   /* 主色 - 蓝紫色系 */
   --color-primary: #6366f1;
   --color-primary-hover: #4f46e5;
@@ -188,6 +191,7 @@ body {
   height: 100%;
   width: 100%;
   overflow: hidden;
+  font-size: var(--bb-app-font-size, 14px);
 }
 
 body {
@@ -352,28 +356,28 @@ html.bb-player-fullscreen-active body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
     system-ui, Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   letter-spacing: -0.006em;
-  font-size: var(--bb-content-font-size, 14px);
-  --bb-content-font-size: 14px;
+  font-size: var(--bb-app-font-size, 14px);
+  --bb-content-font-size: var(--bb-app-font-size, 14px);
   --bb-content-font-scale: 1;
 }
 
 .bb-main-stage[data-font-size="small"] {
-  --bb-content-font-size: 13px;
+  --bb-content-font-size: calc(var(--bb-app-font-size, 14px) * 0.93);
   --bb-content-font-scale: 0.928;
 }
 
 .bb-main-stage[data-font-size="standard"] {
-  --bb-content-font-size: 14px;
+  --bb-content-font-size: var(--bb-app-font-size, 14px);
   --bb-content-font-scale: 1;
 }
 
 .bb-main-stage[data-font-size="large"] {
-  --bb-content-font-size: 15px;
+  --bb-content-font-size: calc(var(--bb-app-font-size, 14px) * 1.07);
   --bb-content-font-scale: 1.071;
 }
 
 .bb-main-stage[data-font-size="huge"] {
-  --bb-content-font-size: 16px;
+  --bb-content-font-size: calc(var(--bb-app-font-size, 14px) * 1.14);
   --bb-content-font-scale: 1.143;
 }
 
@@ -569,7 +573,7 @@ html.bb-player-fullscreen-active body {
 .bb-brand strong {
   display: block;
   color: #ffffff;
-  font-size: 17.5px;
+  font-size: calc(var(--bb-app-font-size, 14px) * 1.25);
   line-height: 1.1;
   font-weight: 850;
   letter-spacing: -0.01em;
@@ -578,7 +582,7 @@ html.bb-player-fullscreen-active body {
 .bb-brand span {
   display: block;
   color: rgba(226, 232, 255, 0.72);
-  font-size: 11px;
+  font-size: calc(var(--bb-app-font-size, 14px) * 0.82);
   margin-top: 2px;
   white-space: nowrap;
 }
@@ -692,7 +696,7 @@ html.bb-player-fullscreen-active body {
 .bb-nav-label {
   position: relative;
   z-index: 1;
-  font-size: 13.5px;
+  font-size: calc(var(--bb-app-font-size, 14px) * 1.05);
   font-weight: 650;
   line-height: 1;
   white-space: nowrap;
@@ -809,7 +813,7 @@ html.bb-player-fullscreen-active body {
   align-items: center;
   gap: 6px;
   color: #ffffff;
-  font-size: 13.5px;
+  font-size: calc(var(--bb-app-font-size, 14px) * 1.04);
   font-weight: 750;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -822,7 +826,7 @@ html.bb-player-fullscreen-active body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: calc(var(--bb-app-font-size, 14px) * 0.82);
   font-weight: 700;
 }
 
@@ -2076,7 +2080,7 @@ html[data-theme="dark"] .bb-download-quality-dialog {
 
 @media (max-width: 980px) {
   .bb-nav-label {
-    font-size: 13px;
+    font-size: calc(var(--bb-app-font-size, 14px) * 1.02);
   }
 
   .bb-stat-grid {
@@ -2150,4 +2154,148 @@ html[data-theme="dark"] .bb-download-quality-dialog {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+/* 全局字体大小调节控件 */
+.bb-font-slider-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.bb-font-presets {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bb-font-preset-pill {
+  padding: 4px 9px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.12s ease;
+}
+
+.bb-font-preset-pill:hover {
+  color: var(--color-text);
+  background-color: var(--color-bg-subtle);
+  border-color: var(--color-border);
+}
+
+.bb-font-preset-pill.active {
+  background-color: var(--color-purple-bg);
+  color: var(--color-purple);
+  border-color: var(--color-purple-border);
+  font-weight: 750;
+  box-shadow: 0 1px 4px rgba(147, 51, 234, 0.15);
+}
+
+.bb-font-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bb-font-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 130px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--color-bg-tertiary);
+  outline: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.bb-font-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-purple, #9333ea);
+  box-shadow: 0 2px 6px rgba(147, 51, 234, 0.45);
+  border: 2px solid #ffffff;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.bb-font-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.bb-font-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-purple, #9333ea);
+  box-shadow: 0 2px 6px rgba(147, 51, 234, 0.45);
+  border: 2px solid #ffffff;
+  cursor: pointer;
+}
+
+.bb-font-px-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background-color: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 3px 8px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.bb-font-px-wrap:focus-within {
+  border-color: var(--color-purple, #9333ea);
+  box-shadow: 0 0 0 2px rgba(147, 51, 234, 0.15);
+}
+
+.bb-font-px-input {
+  width: 42px;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 750;
+  text-align: center;
+  outline: none;
+  font-family: inherit;
+}
+
+.bb-font-px-unit {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.bb-font-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.bb-font-reset-btn:hover {
+  background-color: var(--color-purple-bg);
+  border-color: var(--color-purple-border);
+  color: var(--color-purple);
 }

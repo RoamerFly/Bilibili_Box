@@ -58,6 +58,7 @@ export function AppShell() {
   const setRecommendPageState = useAppStore((s) => s.setRecommendPageState);
   const bottomBarExpanded = useAppStore((s) => s.bottomBarExpanded);
   const contentFontSize = useAppStore((s) => s.contentFontSize ?? "standard");
+  const appFontSize = useAppStore((s) => s.appFontSize ?? 14);
   const theme = useAppStore((s) => s.config?.theme) as string | undefined;
   const scrollRef = useRef<HTMLDivElement>(null);
   const previousViewRef = useRef(currentView);
@@ -107,6 +108,12 @@ export function AppShell() {
       mediaQuery.removeEventListener("change", handleSystemThemeChange);
     };
   }, [theme]);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.style.setProperty("--bb-app-font-size", `${appFontSize}px`);
+    }
+  }, [appFontSize]);
 
   useLayoutEffect(() => {
     const previousView = previousViewRef.current;
