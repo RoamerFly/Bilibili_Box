@@ -4,18 +4,21 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $envDir = Join-Path $projectRoot "env"
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("bilibox-ffmpeg-" + [Guid]::NewGuid().ToString("N"))
-$archiveName = "ffmpeg-release-essentials.zip"
-$baseUrl = "https://www.gyan.dev/ffmpeg/builds"
+$archiveName = "ffmpeg-n8.1-latest-win64-gpl-8.1.zip"
+$baseUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
 $archivePath = Join-Path $tempDir $archiveName
-$checksumPath = Join-Path $tempDir "$archiveName.sha256"
+$checksumPath = Join-Path $tempDir "checksums.sha256"
 
 function Download-File([string]$Url, [string]$Destination) {
     Write-Host "Downloading $Url"
-    & curl.exe --fail --location --retry 3 --retry-all-errors --output $Destination $Url
+    & curl.exe --silent --show-error --fail --location --retry 3 --retry-all-errors --output $Destination $Url
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to download $Url"
     }
@@ -24,12 +27,16 @@ function Download-File([string]$Url, [string]$Destination) {
 try {
     New-Item -ItemType Directory -Force $envDir, $tempDir | Out-Null
     Download-File "$baseUrl/$archiveName" $archivePath
-    Download-File "$baseUrl/$archiveName.sha256" $checksumPath
+    Download-File "$baseUrl/checksums.sha256" $checksumPath
 
-    $expectedHash = ((Get-Content $checksumPath -Raw).Trim() -split "\s+")[0].ToLowerInvariant()
+    $checksumLine = (Get-Content $checksumPath) | Where-Object { $_ -match [regex]::Escape($archiveName) } | Select-Object -First 1
+    if (-not $checksumLine) {
+        throw "Archive $archiveName not found in checksums.sha256."
+    }
+    $expectedHash = ($checksumLine.Trim() -split "\s+")[0].ToLowerInvariant()
     $actualHash = (Get-FileHash -Algorithm SHA256 $archivePath).Hash.ToLowerInvariant()
     if ($actualHash -ne $expectedHash) {
-        throw "Checksum verification failed for $archiveName."
+        throw "Checksum verification failed for $archiveName. Expected: $expectedHash, Actual: $actualHash"
     }
 
     $expandedDir = Join-Path $tempDir "expanded"
