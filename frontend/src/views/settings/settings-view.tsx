@@ -2,8 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Cookie,
   Database,
+  ExternalLink,
   Eye,
   FolderOpen,
+  Github,
+  Info,
   Loader2,
   Maximize2,
   Monitor,
@@ -20,6 +23,7 @@ import { motion } from "framer-motion";
 import { DOWNLOAD_QUALITY_OPTIONS } from "@/components/download-quality-dialog";
 import { LoginDialog } from "@/components/login-dialog";
 import { invoke } from "@/lib/api";
+import { openExternalUrl } from "@/lib/open-external";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { showComingSoon } from "@/lib/coming-soon";
 import { CARD_LAYOUT_KEYS, DEFAULT_CARD_LAYOUT, DEFAULT_CARD_SCALE, useAppStore, type CardLayoutKey } from "@/stores/app-store";
@@ -120,6 +124,10 @@ const PREVIEW_ITEMS = [
   { title: "UP 投稿 F", author: "UP 主页", note: "昨日更新" },
 ];
 
+const PROJECT_GITHUB_URL = "https://github.com/RoamerFly/Bilibili_Box";
+const DEVELOPER_GITHUB_URL = "https://github.com/RoamerFly";
+const ISSUES_URL = "https://github.com/RoamerFly/Bilibili_Box/issues";
+
 export function SettingsView() {
   const userInfo = useAppStore((s) => s.userInfo);
   const setConfig = useAppStore((s) => s.setConfig);
@@ -134,6 +142,7 @@ export function SettingsView() {
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
   const [cacheStepIndex, setCacheStepIndex] = useState(-1);
   const [cacheOverview, setCacheOverview] = useState<CacheOverview | null>(null);
@@ -470,6 +479,15 @@ export function SettingsView() {
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
             <button
               type="button"
+              onClick={() => setAboutDialogOpen(true)}
+              style={purpleAboutButtonStyle}
+              title="关于 BiliBox (bilibili-box) 项目与 GitHub 仓库"
+            >
+              <Github style={{ width: 15, height: 15, marginRight: "6px" }} />
+              关于
+            </button>
+            <button
+              type="button"
               disabled={clearingCache}
               onClick={() => void handleViewCache()}
               style={{ ...secondaryButtonStyle, opacity: clearingCache ? 0.65 : 1 }}
@@ -484,7 +502,7 @@ export function SettingsView() {
               style={{ ...secondaryButtonStyle, opacity: clearingCache || checkingUpdate || resetting ? 0.65 : 1 }}
             >
               {clearingCache ? <Loader2 className="animate-spin" style={{ width: 15, height: 15, marginRight: "6px" }} /> : <Trash2 style={{ width: 15, height: 15, marginRight: "6px" }} />}
-              清空页面缓存并更新所有页面
+              清空页面缓存
             </button>
             <button
               type="button"
@@ -729,6 +747,33 @@ export function SettingsView() {
               onChange={(value) => void saveConfig({ task_concurrency: value })}
             />
           }
+        />
+
+        <SettingRow
+          icon={<Github style={{ width: 21, height: 21, color: "var(--color-purple, #9333ea)" }} />}
+          iconBgColor="var(--color-purple-bg, rgba(147, 51, 234, 0.12))"
+          title="关于项目"
+          description="BiliBox (bilibili-box) 开源项目、GitHub 仓库与反馈"
+          control={
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => setAboutDialogOpen(true)}
+                style={purpleAboutButtonStyle}
+              >
+                <Info style={{ width: 14, height: 14, marginRight: "5px" }} />
+                关于详情
+              </button>
+              <button
+                type="button"
+                onClick={() => void openExternalUrl(PROJECT_GITHUB_URL)}
+                style={{ ...secondaryButtonStyle, color: "var(--color-purple, #9333ea)", borderColor: "var(--color-purple-border, rgba(147, 51, 234, 0.35))" }}
+              >
+                <ExternalLink style={{ width: 14, height: 14, marginRight: "5px" }} />
+                GitHub 仓库
+              </button>
+            </div>
+          }
           isLast
         />
       </motion.div>
@@ -778,6 +823,9 @@ export function SettingsView() {
           onDelete={(profile, username) => void handleDeleteAccount(profile, username)}
           onClose={() => setAccountDialogOpen(false)}
         />
+      ) : null}
+      {aboutDialogOpen ? (
+        <AboutDialog onClose={() => setAboutDialogOpen(false)} />
       ) : null}
       <LoginDialog
         open={addAccountDialogOpen}
@@ -1102,6 +1150,175 @@ function CacheBucketCard({ bucket, actionLabel, onAction }: { bucket: CacheBucke
         <Trash2 style={{ width: 14, height: 14, marginRight: "6px" }} />
         {actionLabel}
       </button>
+    </div>
+  );
+}
+
+function AboutDialog({
+  onClose,
+  version = "1.0.8",
+}: {
+  onClose: () => void;
+  version?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(PROJECT_GITHUB_URL);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback
+    }
+  };
+
+  return (
+    <div style={dialogBackdropStyle} onClick={onClose}>
+      <div style={{ ...dialogPanelStyle, width: "min(520px, 100%)" }} onClick={(event) => event.stopPropagation()}>
+        <div style={dialogHeaderStyle}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div
+              style={{
+                width: "38px",
+                height: "38px",
+                borderRadius: "10px",
+                backgroundColor: "var(--color-purple-bg, rgba(147, 51, 234, 0.1))",
+                display: "grid",
+                placeItems: "center",
+                color: "var(--color-purple, #9333ea)",
+                flexShrink: 0,
+              }}
+            >
+              <Github style={{ width: 22, height: 22 }} />
+            </div>
+            <div>
+              <h2 style={{ ...dialogTitleStyle, fontSize: "17px" }}>关于 BiliBox (bilibili-box)</h2>
+              <p style={{ marginTop: "2px", color: "var(--color-text-muted)", fontSize: "12.5px" }}>
+                基于 Rust + React 构建的哔哩哔哩媒体桌面客户端
+              </p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>关闭</button>
+        </div>
+
+        <div style={{ display: "grid", gap: "12px", marginTop: "4px" }}>
+          <div
+            style={{
+              padding: "14px 16px",
+              borderRadius: "12px",
+              border: "1.5px solid var(--color-purple-border, rgba(147, 51, 234, 0.35))",
+              backgroundColor: "var(--color-purple-bg, rgba(147, 51, 234, 0.05))",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
+              <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--color-purple, #9333ea)" }}>
+                GitHub 项目开源地址
+              </span>
+              <span style={{ fontSize: "12px", color: "var(--color-text-muted)" }}>v{version}</span>
+            </div>
+            <div style={{ fontSize: "13.5px", fontWeight: 650, color: "var(--color-text)", wordBreak: "break-all" }}>
+              {PROJECT_GITHUB_URL}
+            </div>
+            <div style={{ display: "flex", gap: "8px", marginTop: "12px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => void openExternalUrl(PROJECT_GITHUB_URL)}
+                style={{
+                  ...secondaryButtonStyle,
+                  backgroundColor: "var(--color-purple, #9333ea)",
+                  borderColor: "var(--color-purple, #9333ea)",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                }}
+              >
+                <ExternalLink style={{ width: 14, height: 14, marginRight: "5px" }} />
+                打开 GitHub 仓库
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCopyUrl()}
+                style={{
+                  ...secondaryButtonStyle,
+                  borderColor: "var(--color-purple-border, rgba(147, 51, 234, 0.35))",
+                  color: "var(--color-purple, #9333ea)",
+                }}
+              >
+                {copied ? "已复制链接" : "复制仓库链接"}
+              </button>
+            </div>
+          </div>
+
+          <div
+            style={{
+              padding: "14px 16px",
+              borderRadius: "12px",
+              border: "1px solid var(--color-border)",
+              backgroundColor: "var(--color-bg-subtle)",
+              display: "grid",
+              gap: "11px",
+              fontSize: "13px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ color: "var(--color-text-muted)" }}>项目名称</span>
+              <span style={{ fontWeight: 700, color: "var(--color-text)" }}>Bilibili Box (bilibili-box)</span>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ color: "var(--color-text-muted)" }}>开发者</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontWeight: 700, color: "var(--color-text)" }}>RoamerFly</span>
+                <button
+                  type="button"
+                  onClick={() => void openExternalUrl(DEVELOPER_GITHUB_URL)}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--color-primary)",
+                    cursor: "pointer",
+                    padding: 0,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "2px",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                  }}
+                >
+                  GitHub 主页 <ExternalLink style={{ width: 11, height: 11 }} />
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ color: "var(--color-text-muted)" }}>问题反馈与需求建议</span>
+              <button
+                type="button"
+                onClick={() => void openExternalUrl(ISSUES_URL)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--color-primary)",
+                  cursor: "pointer",
+                  padding: 0,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "2px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                }}
+              >
+                GitHub Issues <ExternalLink style={{ width: 11, height: 11 }} />
+              </button>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ color: "var(--color-text-muted)" }}>联系邮箱</span>
+              <span style={{ color: "var(--color-text)", fontFamily: "monospace" }}>1623658271@qq.com</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1532,6 +1749,14 @@ const secondaryButtonStyle: React.CSSProperties = {
   border: "1.5px solid var(--color-border)",
   cursor: "pointer",
   whiteSpace: "nowrap",
+};
+
+const purpleAboutButtonStyle: React.CSSProperties = {
+  ...secondaryButtonStyle,
+  color: "var(--color-purple, #9333ea)",
+  backgroundColor: "var(--color-purple-bg, rgba(147, 51, 234, 0.08))",
+  border: "1.5px solid var(--color-purple-border, rgba(147, 51, 234, 0.35))",
+  fontWeight: 650,
 };
 
 const dialogBackdropStyle: React.CSSProperties = {

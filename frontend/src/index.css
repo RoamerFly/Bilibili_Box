@@ -51,6 +51,9 @@
   --color-warning-text: #c2410c;
   --color-error-text: #dc2626;
   --color-info-text: #2563eb;
+  --color-purple: #9333ea;
+  --color-purple-bg: rgba(147, 51, 234, 0.08);
+  --color-purple-border: rgba(147, 51, 234, 0.35);
 
   /* BottomBar 深色区域 */
   --color-bottom-bg: #1c1c28;
@@ -150,6 +153,9 @@ html[data-theme="dark"] {
   --color-warning-text: #fdba74;
   --color-error-text: #fca5a5;
   --color-info-text: #93c5fd;
+  --color-purple: #c084fc;
+  --color-purple-bg: rgba(192, 132, 252, 0.12);
+  --color-purple-border: rgba(192, 132, 252, 0.35);
 
   --color-bottom-pill-bg: linear-gradient(105deg, rgba(7, 9, 37, 0.98), rgba(14, 14, 55, 0.98) 58%, rgba(27, 13, 69, 0.98));
   --color-bottom-pill-border: rgba(142, 139, 255, 0.2);
@@ -232,6 +238,41 @@ body {
 :focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
+}
+
+/* 播放器进入浏览器全屏后必须完全脱离应用窗口的圆角、焦点框和滚动区域。 */
+html.bb-player-fullscreen-active,
+html.bb-player-fullscreen-active body {
+  overflow: hidden !important;
+  background: #000 !important;
+}
+
+.bb-player-surface--fullscreen,
+.bb-player-surface:fullscreen,
+.bb-player-surface:-webkit-full-screen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483647 !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  overflow: hidden !important;
+  overscroll-behavior: none;
+  background: #000 !important;
+}
+
+.bb-player-surface:fullscreen::-webkit-scrollbar,
+.bb-player-surface:-webkit-full-screen::-webkit-scrollbar,
+.bb-player-surface--fullscreen::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 /* 动画 */
