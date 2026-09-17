@@ -349,6 +349,32 @@ html.bb-player-fullscreen-active body {
   background: var(--color-main-stage-bg);
   border-radius: 16px 0 0 16px;
   box-shadow: var(--shadow-main-stage);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+    system-ui, Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  letter-spacing: -0.006em;
+  font-size: var(--bb-content-font-size, 14px);
+  --bb-content-font-size: 14px;
+  --bb-content-font-scale: 1;
+}
+
+.bb-main-stage[data-font-size="small"] {
+  --bb-content-font-size: 13px;
+  --bb-content-font-scale: 0.928;
+}
+
+.bb-main-stage[data-font-size="standard"] {
+  --bb-content-font-size: 14px;
+  --bb-content-font-scale: 1;
+}
+
+.bb-main-stage[data-font-size="large"] {
+  --bb-content-font-size: 15px;
+  --bb-content-font-scale: 1.071;
+}
+
+.bb-main-stage[data-font-size="huge"] {
+  --bb-content-font-size: 16px;
+  --bb-content-font-scale: 1.143;
 }
 
 .bb-main-scroll {
@@ -371,12 +397,13 @@ html.bb-player-fullscreen-active body {
 }
 
 .bb-window-drag-strip {
-  position: fixed;
-  z-index: 9998;
+  position: absolute;
+  z-index: 50;
   top: 0;
-  left: 80px;
-  right: 116px;
-  height: 42px;
+  left: 0;
+  right: 120px;
+  height: 40px;
+  pointer-events: auto;
 }
 
 .bb-window-controls {
@@ -470,6 +497,8 @@ html.bb-player-fullscreen-active body {
   flex-direction: column;
   background: var(--color-sidebar-shell);
   user-select: none;
+  z-index: 40;
+  will-change: width;
 }
 
 .bb-sidebar.collapsed {
@@ -496,13 +525,13 @@ html.bb-player-fullscreen-active body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 16px 14px 14px;
-  min-height: 64px;
+  padding: 14px 10px 12px 8px;
+  min-height: 60px;
   box-sizing: border-box;
 }
 
 .bb-sidebar.collapsed .bb-brand {
-  padding: 14px 0 12px;
+  padding: 12px 0 10px;
   flex-direction: column;
   gap: 6px;
   justify-content: center;
@@ -517,6 +546,14 @@ html.bb-player-fullscreen-active body {
 
 .bb-sidebar.collapsed .bb-brand-main {
   justify-content: center;
+}
+
+.bb-brand-icon-wrap {
+  width: 48px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
 }
 
 .bb-brand img,
@@ -555,16 +592,20 @@ html.bb-player-fullscreen-active body {
   padding: 0;
   border: 0;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(226, 232, 255, 0.7);
-  cursor: pointer;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(226, 232, 255, 0.85);
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 30;
   transition: all 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
   flex-shrink: 0;
 }
 
 .bb-sidebar-toggle-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.2);
   color: #ffffff;
+  transform: scale(1.06);
 }
 
 .bb-sidebar.collapsed .bb-sidebar-toggle-btn {
@@ -578,7 +619,7 @@ html.bb-player-fullscreen-active body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 0 10px;
+  padding: 0 8px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -600,15 +641,16 @@ html.bb-player-fullscreen-active body {
   color: rgba(232, 236, 255, 0.76);
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 0 12px;
   cursor: pointer;
   text-decoration: none;
   font-family: inherit;
+  padding: 0;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .bb-sidebar.collapsed .bb-nav-item {
-  width: 44px;
+  width: 48px;
   height: 40px;
   padding: 0;
   justify-content: center;
@@ -640,7 +682,8 @@ html.bb-player-fullscreen-active body {
   z-index: 1;
   display: grid;
   place-items: center;
-  width: 22px;
+  width: 48px;
+  height: 40px;
   flex-shrink: 0;
   color: currentColor;
   filter: drop-shadow(0 3px 6px rgba(87, 110, 255, 0.4));
@@ -655,6 +698,7 @@ html.bb-player-fullscreen-active body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding-right: 6px;
 }
 
 .bb-nav-spark {
@@ -662,12 +706,14 @@ html.bb-player-fullscreen-active body {
   z-index: 1;
   color: rgba(255, 255, 255, 0.95);
   flex-shrink: 0;
+  margin-right: 8px;
 }
 
 .bb-nav-badge {
   position: relative;
   z-index: 1;
   margin-left: auto;
+  margin-right: 8px;
   min-width: 19px;
   height: 19px;
   padding: 0 5px;
@@ -685,8 +731,8 @@ html.bb-player-fullscreen-active body {
 
 .bb-nav-badge.collapsed {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 4px;
+  right: 6px;
   min-width: 16px;
   height: 16px;
   padding: 0 3px;
@@ -698,7 +744,7 @@ html.bb-player-fullscreen-active body {
   position: relative;
   z-index: 2;
   margin: auto 0 0;
-  height: 62px;
+  height: 60px;
   width: 100%;
   border: 0;
   border-radius: 0 16px 0 0;
@@ -707,12 +753,12 @@ html.bb-player-fullscreen-active body {
   color: white;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 13px;
+  padding: 0 8px;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
   transition: background 0.18s ease;
+  box-sizing: border-box;
 }
 
 .bb-user-card.collapsed {
@@ -723,6 +769,14 @@ html.bb-player-fullscreen-active body {
 
 .bb-user-card:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+.bb-user-avatar-wrap {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
 }
 
 .bb-user-avatar {
@@ -1987,10 +2041,6 @@ html[data-theme="dark"] .bb-download-quality-dialog {
 }
 
 @media (max-width: 1280px) {
-  .bb-window-drag-strip {
-    left: 80px;
-  }
-
   .bb-home {
     padding-left: 22px;
     padding-right: 18px;
@@ -2025,10 +2075,6 @@ html[data-theme="dark"] .bb-download-quality-dialog {
 }
 
 @media (max-width: 980px) {
-  .bb-window-drag-strip {
-    left: 80px;
-  }
-
   .bb-nav-label {
     font-size: 13px;
   }

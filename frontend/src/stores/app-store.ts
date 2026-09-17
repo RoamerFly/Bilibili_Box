@@ -24,6 +24,8 @@ export const CARD_LAYOUT_KEYS: CardLayoutKey[] = ["search", "recommend", "dynami
 export const DEFAULT_CARD_LAYOUT = { rows: 3, columns: 2 } as const;
 export const DEFAULT_CARD_SCALE = 1;
 
+export type ContentFontSize = "small" | "standard" | "large" | "huge";
+
 export interface CardLayoutPreference {
   rows: number;
   columns: number;
@@ -38,6 +40,17 @@ export interface PlayerState {
   epId?: number;
   cover?: string;
   localTaskId?: string;
+  /** Ordered downloaded-video queue rendered as the player's P list. */
+  playlist?: DownloadPlaylistItem[];
+}
+
+/** A single downloaded task exposed as one entry of the player's P list. */
+export interface DownloadPlaylistItem {
+  taskId: string;
+  title: string;
+  cover?: string;
+  bvid?: string;
+  cid?: number;
 }
 
 export interface UpProfileState {
@@ -121,6 +134,7 @@ export interface UserInfoDetail {
 export interface AppConfig {
   sessdata: string;
   cookie?: string;
+  close_window_behavior?: "ask" | "minimize_to_tray" | "exit";
   card_scale?: number;
   card_page_size?: number;
   card_page_rows?: number;
@@ -326,6 +340,9 @@ interface AppState {
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
 
+  contentFontSize: ContentFontSize;
+  setContentFontSize: (size: ContentFontSize) => void;
+
   bottomBarExpanded: boolean;
   toggleBottomBar: () => void;
   setBottomBarExpanded: (expanded: boolean) => void;
@@ -522,6 +539,9 @@ export const useAppStore = create<AppState>()(
       sidebarCollapsed: false,
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
 
+      contentFontSize: "standard",
+      setContentFontSize: (size) => set({ contentFontSize: size }),
+
       bottomBarExpanded: false,
       toggleBottomBar: () => set((state) => ({ bottomBarExpanded: !state.bottomBarExpanded })),
       setBottomBarExpanded: (expanded) => set({ bottomBarExpanded: expanded }),
@@ -590,6 +610,7 @@ export const useAppStore = create<AppState>()(
       },
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,
+        contentFontSize: state.contentFontSize,
         cardViewModes: state.cardViewModes,
         cardLayouts: state.cardLayouts,
         cardScales: state.cardScales,

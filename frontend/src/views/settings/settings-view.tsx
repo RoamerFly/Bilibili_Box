@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Bot,
   Cookie,
   Database,
+  Download,
   ExternalLink,
   Eye,
   FolderOpen,
@@ -13,10 +15,13 @@ import {
   MonitorPlay,
   Moon,
   Palette,
+  Power,
   RefreshCw,
   RotateCcw,
+  Settings2,
   Sun,
   Trash2,
+  Type,
   Users,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -26,13 +31,16 @@ import { invoke } from "@/lib/api";
 import { openExternalUrl } from "@/lib/open-external";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { showComingSoon } from "@/lib/coming-soon";
-import { CARD_LAYOUT_KEYS, DEFAULT_CARD_LAYOUT, DEFAULT_CARD_SCALE, useAppStore, type CardLayoutKey } from "@/stores/app-store";
+import { CARD_LAYOUT_KEYS, DEFAULT_CARD_LAYOUT, DEFAULT_CARD_SCALE, useAppStore, type CardLayoutKey, type ContentFontSize } from "@/stores/app-store";
+import { AiSettingsPanel, withAiSettings, type AiSettings } from "./ai-settings-panel";
 
 type ThemeMode = "light" | "dark" | "system";
+type CloseWindowBehavior = "ask" | "minimize_to_tray" | "exit";
 
 interface BackendConfig {
   download_dir: string;
   start_maximized: boolean;
+  close_window_behavior: CloseWindowBehavior;
   card_scale: number;
   card_page_size: number;
   card_page_rows: number;
@@ -44,6 +52,7 @@ interface BackendConfig {
   prompt_download_quality: boolean;
   show_comments: boolean;
   task_concurrency: number;
+  ai?: AiSettings;
   [key: string]: unknown;
 }
 
@@ -59,6 +68,7 @@ interface UpdateCheckResult {
     url: string;
     size: number;
   } | null;
+  installable: boolean;
 }
 
 interface CacheBucketInfo {
@@ -139,10 +149,15 @@ export function SettingsView() {
   const setCardScale = useAppStore((s) => s.setCardScale);
   const setAllCardLayouts = useAppStore((s) => s.setAllCardLayouts);
   const setAllCardScales = useAppStore((s) => s.setAllCardScales);
+  const contentFontSize = useAppStore((s) => s.contentFontSize ?? "standard");
+  const setContentFontSize = useAppStore((s) => s.setContentFontSize);
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
   const [cacheStepIndex, setCacheStepIndex] = useState(-1);
   const [cacheOverview, setCacheOverview] = useState<CacheOverview | null>(null);
@@ -154,36 +169,52 @@ export function SettingsView() {
   const [accountSwitching, setAccountSwitching] = useState("");
   const [accountDeleting, setAccountDeleting] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [activeSettingsTab, setActiveSettingsTab] = useState<"general" | "ai">("general");
   const [backendConfig, setBackendConfig] = useState<BackendConfig | null>(null);
+  const backendConfigRef = useRef<BackendConfig | null>(null);
   const [unifiedCardLayoutDraft, setUnifiedCardLayoutDraft] = useState<{ rows: number; columns: number }>({
     rows: DEFAULT_CARD_LAYOUT.rows,
     columns: DEFAULT_CARD_LAYOUT.columns,
   });
 
+  const syncBackendConfig = useCallback((nextConfig: BackendConfig) => {
+    backendConfigRef.current = nextConfig;
+    setBackendConfig(nextConfig);
+    setConfig(nextConfig);
+  }, [setConfig]);
+
   const loadConfig = useCallback(async () => {
     setLoading(true);
     try {
       const nextConfig = await invoke<BackendConfig>("get_config");
-      setBackendConfig(nextConfig);
-      setConfig(nextConfig);
+      syncBackendConfig(nextConfig);
     } finally {
       setLoading(false);
     }
-  }, [setConfig]);
+  }, [syncBackendConfig]);
 
   useEffect(() => {
     void loadConfig();
   }, [loadConfig]);
 
+  const storeConfig = useAppStore((s) => s.config);
+  useEffect(() => {
+    if (storeConfig && typeof storeConfig === "object") {
+      setBackendConfig((prev) => {
+        if (!prev) return storeConfig as unknown as BackendConfig;
+        return { ...prev, ...storeConfig } as BackendConfig;
+      });
+    }
+  }, [storeConfig]);
+
   const saveConfig = useCallback(
     async (updates: Partial<BackendConfig>) => {
-      const currentConfig = backendConfig ?? (await invoke<BackendConfig>("get_config"));
+      const currentConfig = backendConfigRef.current ?? backendConfig ?? (await invoke<BackendConfig>("get_config"));
       const nextConfig = { ...currentConfig, ...updates };
       await invoke("save_config", { newConfig: nextConfig });
-      setBackendConfig(nextConfig);
-      setConfig(nextConfig);
+      syncBackendConfig(nextConfig);
     },
-    [backendConfig, setConfig]
+    [backendConfig, syncBackendConfig]
   );
 
   const isLoggedIn = useMemo(() => userInfo !== null, [userInfo]);
@@ -240,8 +271,7 @@ export function SettingsView() {
   }, []);
 
   const applyAccountResult = useCallback((result: AccountSwitchResult) => {
-    setBackendConfig(result.config);
-    setConfig(result.config);
+    syncBackendConfig(result.config);
     setUserInfo(result.user_info ? {
       username: result.user_info.uname,
       avatar: result.user_info.face || "",
@@ -250,15 +280,14 @@ export function SettingsView() {
     } : null);
     resetAccountScopedState();
     notifyAccountChanged();
-  }, [notifyAccountChanged, resetAccountScopedState, setConfig, setUserInfo]);
+  }, [notifyAccountChanged, resetAccountScopedState, setUserInfo, syncBackendConfig]);
 
   const handleLogout = async () => {
     setFeedback("");
     try {
       await invoke("clear_user_info");
       const guestConfig = await invoke<BackendConfig>("get_config");
-      setBackendConfig(guestConfig);
-      setConfig(guestConfig);
+      syncBackendConfig(guestConfig);
       setUserInfo(null);
       resetAccountScopedState();
       notifyAccountChanged();
@@ -271,7 +300,12 @@ export function SettingsView() {
   const handleBrowseFolder = async () => {
     setFeedback("");
     try {
-      const selected = await invoke<string | null>("select_directory");
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "选择下载目录",
+      });
       if (selected && typeof selected === "string") {
         await saveConfig({ download_dir: selected });
         setFeedback("下载目录已更新");
@@ -281,14 +315,23 @@ export function SettingsView() {
     }
   };
 
+  const handleCloseWindowBehaviorChange = async (value: CloseWindowBehavior) => {
+    setFeedback("");
+    try {
+      await saveConfig({ close_window_behavior: value });
+      setFeedback("关闭窗口行为已保存");
+    } catch (err) {
+      setFeedback(`保存关闭窗口行为失败：${String(err)}`);
+    }
+  };
+
   const handleResetConfig = async () => {
     setResetting(true);
     setFeedback("");
     try {
       const restored = await invoke<BackendConfig>("reset_config");
-      setBackendConfig(restored);
-      setConfig(restored);
-      setFeedback("已恢复默认设置");
+      syncBackendConfig(restored);
+      setFeedback("已恢复默认设置；AI 供应商配置与 API Key 未修改，请在 AI 设置中管理供应商");
     } catch (err) {
       setFeedback(`恢复默认设置失败：${String(err)}`);
     } finally {
@@ -305,21 +348,35 @@ export function SettingsView() {
         setFeedback(`当前已是最新版 ${result.current_version}`);
         return;
       }
-      if (!result.asset) {
-        setFeedback(`发现新版本 ${result.latest_version}，但没有适合当前系统的安装包`);
-        return;
-      }
-      setFeedback(`发现新版本 ${result.latest_version}，正在下载 ${result.asset.name}`);
-      await invoke("download_and_install_update", {
-        assetUrl: result.asset.url,
-        assetName: result.asset.name,
-      });
-      setFeedback("安装程序已启动，应用即将退出");
+      setUpdateResult(result);
+      setUpdateDialogOpen(true);
     } catch (err) {
       setFeedback(`检查更新失败：${String(err)}`);
     } finally {
       setCheckingUpdate(false);
     }
+  };
+
+  const handleDownloadUpdate = async () => {
+    if (!updateResult) return;
+    setUpdating(true);
+    setFeedback("");
+    try {
+      await invoke("download_and_install_update");
+      setFeedback("安装程序已启动，应用即将退出");
+      setUpdateDialogOpen(false);
+    } catch (err) {
+      setFeedback(`下载更新失败：${String(err)}`);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleOpenRelease = () => {
+    if (!updateResult) return;
+    void openExternalUrl(updateResult.release_url).catch((err) => {
+      setFeedback(`打开发布页失败：${String(err)}`);
+    });
   };
 
   const handleViewCache = async () => {
@@ -442,6 +499,12 @@ export function SettingsView() {
     }
   };
 
+  const handleAiSettingsSaved = useCallback((settings: AiSettings) => {
+    const currentConfig = backendConfigRef.current;
+    if (!currentConfig) return;
+    syncBackendConfig(withAiSettings(currentConfig, settings));
+  }, [syncBackendConfig]);
+
   if (loading || !backendConfig) {
     return (
       <div
@@ -465,7 +528,7 @@ export function SettingsView() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        style={{ marginBottom: "28px" }}
+        style={{ marginBottom: "14px" }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
           <div>
@@ -517,6 +580,7 @@ export function SettingsView() {
               type="button"
               disabled={resetting || checkingUpdate || clearingCache}
               onClick={() => void handleResetConfig()}
+              title="通用恢复默认不会修改 AI 供应商配置或 API Key；供应商需在 AI 设置中管理"
               style={{ ...secondaryButtonStyle, opacity: resetting || checkingUpdate || clearingCache ? 0.65 : 1 }}
             >
               <RotateCcw style={{ width: 15, height: 15, marginRight: "6px" }} />
@@ -526,10 +590,48 @@ export function SettingsView() {
         </div>
       </motion.div>
 
+      <div
+        role="tablist"
+        aria-label="设置分类"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "4px",
+          width: "fit-content",
+          maxWidth: "100%",
+          marginBottom: "10px",
+          padding: "4px",
+          borderRadius: "11px",
+          backgroundColor: "var(--color-bg-tertiary)",
+          overflowX: "auto",
+        }}
+      >
+        <SettingsTab
+          id="settings-general-tab"
+          controls="settings-general-panel"
+          active={activeSettingsTab === "general"}
+          icon={<Settings2 style={{ width: 16, height: 16 }} />}
+          onClick={() => setActiveSettingsTab("general")}
+        >
+          通用设置
+        </SettingsTab>
+        <SettingsTab
+          id="settings-ai-tab"
+          controls="settings-ai-panel"
+          active={activeSettingsTab === "ai"}
+          icon={<Bot style={{ width: 16, height: 16 }} />}
+          onClick={() => setActiveSettingsTab("ai")}
+        >
+          AI 设置
+        </SettingsTab>
+      </div>
+
       {feedback ? (
         <div
+          role={feedbackIsError ? "alert" : "status"}
+          aria-live={feedbackIsError ? "assertive" : "polite"}
           style={{
-            marginBottom: "16px",
+            marginBottom: "10px",
             padding: "11px 16px",
             borderRadius: "10px",
             backgroundColor: feedbackIsError ? "var(--color-error-bg)" : "var(--color-success-bg)",
@@ -541,6 +643,12 @@ export function SettingsView() {
         </div>
       ) : null}
 
+      {activeSettingsTab === "ai" ? (
+        <div id="settings-ai-panel" role="tabpanel" aria-labelledby="settings-ai-tab" tabIndex={0}>
+          <AiSettingsPanel onSettingsSaved={handleAiSettingsSaved} />
+        </div>
+      ) : (
+      <div id="settings-general-panel" role="tabpanel" aria-labelledby="settings-general-tab" tabIndex={0}>
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
@@ -607,6 +715,19 @@ export function SettingsView() {
             <ThemeSelector
               value={(backendConfig.theme as ThemeMode) || "system"}
               onChange={(val) => void saveConfig({ theme: val })}
+            />
+          }
+        />
+
+        <SettingRow
+          icon={<Type style={{ width: 21, height: 21, color: "var(--color-purple)" }} />}
+          iconBgColor="var(--color-purple-bg)"
+          title="正文字体大小"
+          description="调整主内容区文字的基准字号与显示缩放（支持 13px / 14px / 15px / 16px）"
+          control={
+            <FontSizeSelector
+              value={contentFontSize}
+              onChange={(val) => setContentFontSize(val)}
             />
           }
         />
@@ -706,6 +827,28 @@ export function SettingsView() {
         />
 
         <SettingRow
+          icon={<Power style={{ width: 21, height: 21, color: "#c2410c" }} />}
+          iconBgColor="var(--color-warning-bg)"
+          title="关闭窗口时"
+          description="选择最小化到托盘后，窗口会隐藏，下载任务和后台处理仍会继续运行"
+          control={
+            <Select
+              value={backendConfig.close_window_behavior || "ask"}
+              onValueChange={(value) => void handleCloseWindowBehaviorChange(value as CloseWindowBehavior)}
+            >
+              <SelectTrigger style={{ ...selectStyle, minWidth: "190px" }} aria-label="关闭窗口时">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ask">每次询问</SelectItem>
+                <SelectItem value="minimize_to_tray">最小化到托盘运行</SelectItem>
+                <SelectItem value="exit">退出程序</SelectItem>
+              </SelectContent>
+            </Select>
+          }
+        />
+
+        <SettingRow
           icon={<Monitor style={{ width: 21, height: 21, color: "#0f766e" }} />}
           iconBgColor="var(--color-info-bg)"
           title="卡片设置"
@@ -777,6 +920,8 @@ export function SettingsView() {
           isLast
         />
       </motion.div>
+      </div>
+      )}
       {cacheDialogOpen ? (
         <CacheDialog
           overview={cacheOverview}
@@ -824,8 +969,20 @@ export function SettingsView() {
           onClose={() => setAccountDialogOpen(false)}
         />
       ) : null}
+      {updateDialogOpen && updateResult ? (
+        <UpdateDialog
+          result={updateResult}
+          updating={updating}
+          onDownload={() => void handleDownloadUpdate()}
+          onOpenRelease={handleOpenRelease}
+          onClose={() => setUpdateDialogOpen(false)}
+        />
+      ) : null}
       {aboutDialogOpen ? (
-        <AboutDialog onClose={() => setAboutDialogOpen(false)} />
+        <AboutDialog
+          onClose={() => setAboutDialogOpen(false)}
+          version={updateResult?.current_version || "1.1.1"}
+        />
       ) : null}
       <LoginDialog
         open={addAccountDialogOpen}
@@ -888,6 +1045,53 @@ function SettingRow({
 
       <div style={{ flexShrink: 0 }}>{control}</div>
     </div>
+  );
+}
+
+function SettingsTab({
+  id,
+  controls,
+  active,
+  icon,
+  onClick,
+  children,
+}: {
+  id: string;
+  controls: string;
+  active: boolean;
+  icon: React.ReactNode;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      id={id}
+      role="tab"
+      aria-selected={active}
+      aria-controls={controls}
+      onClick={onClick}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "7px",
+        minHeight: "36px",
+        padding: "0 14px",
+        border: active ? "1px solid var(--color-border)" : "1px solid transparent",
+        borderRadius: "8px",
+        backgroundColor: active ? "var(--color-bg-secondary)" : "transparent",
+        color: active ? "var(--color-primary)" : "var(--color-text-secondary)",
+        boxShadow: active ? "0 1px 3px rgba(15,23,42,0.08)" : "none",
+        fontSize: "13.5px",
+        fontWeight: active ? 650 : 500,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {icon}
+      {children}
+    </button>
   );
 }
 
@@ -1154,9 +1358,126 @@ function CacheBucketCard({ bucket, actionLabel, onAction }: { bucket: CacheBucke
   );
 }
 
+function UpdateDialog({
+  result,
+  updating,
+  onDownload,
+  onOpenRelease,
+  onClose,
+}: {
+  result: UpdateCheckResult;
+  updating: boolean;
+  onDownload: () => void;
+  onOpenRelease: () => void;
+  onClose: () => void;
+}) {
+  const canInstall = Boolean(result.asset && result.installable);
+  const downloadLabel =
+    result.asset && result.asset.size > 0 ? `下载更新 (${formatBytes(result.asset.size)})` : "下载更新";
+
+  return (
+    <div style={dialogBackdropStyle} onClick={onClose}>
+      <div style={{ ...dialogPanelStyle, width: "min(640px, 100%)" }} onClick={(event) => event.stopPropagation()}>
+        <div style={dialogHeaderStyle}>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={dialogTitleStyle}>发现新版本 {result.latest_version}</h2>
+            {result.release_name ? (
+              <p style={{ marginTop: "3px", color: "var(--color-text-muted)", fontSize: "12.5px" }}>
+                {result.release_name}
+              </p>
+            ) : null}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+            <button type="button" onClick={onOpenRelease} style={secondaryButtonStyle}>
+              <ExternalLink style={{ width: 15, height: 15, marginRight: "6px" }} />
+              前往发布页
+            </button>
+            <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+              关闭
+            </button>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: "16px" }}>
+          <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--color-text-secondary)", marginBottom: "8px" }}>
+            当前版本 {result.current_version} → {result.latest_version}
+          </div>
+          {result.body ? (
+            <div
+              style={{
+                maxHeight: "320px",
+                overflowY: "auto",
+                padding: "14px 16px",
+                borderRadius: "12px",
+                border: "1px solid var(--color-border)",
+                backgroundColor: "var(--color-bg-subtle)",
+                color: "var(--color-text)",
+                fontSize: "13.5px",
+                lineHeight: 1.7,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {result.body}
+            </div>
+          ) : (
+            <div style={{ color: "var(--color-text-muted)", fontSize: "13.5px", padding: "12px 0" }}>
+              该版本未提供更新说明。
+            </div>
+          )}
+        </div>
+
+        {!canInstall ? (
+          <div
+            style={{
+              marginBottom: "16px",
+              padding: "11px 14px",
+              borderRadius: "10px",
+              backgroundColor: "var(--color-warning-bg)",
+              color: "var(--color-warning-text)",
+              fontSize: "13px",
+              lineHeight: 1.6,
+            }}
+          >
+            {result.asset
+              ? "当前更新包缺少数字签名，暂不支持应用内下载，请前往发布页手动安装。"
+              : "没有适合当前系统的安装包，请前往发布页手动下载。"}
+          </div>
+        ) : null}
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "10px" }}>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+            稍后再说
+          </button>
+          {canInstall ? (
+            <button
+              type="button"
+              disabled={updating}
+              onClick={onDownload}
+              style={{ ...primaryButtonStyle, opacity: updating ? 0.65 : 1 }}
+            >
+              {updating ? (
+                <Loader2 className="animate-spin" style={{ width: 15, height: 15, marginRight: "6px" }} />
+              ) : (
+                <Download style={{ width: 15, height: 15, marginRight: "6px" }} />
+              )}
+              {updating ? "下载中" : downloadLabel}
+            </button>
+          ) : (
+            <button type="button" onClick={onOpenRelease} style={primaryButtonStyle}>
+              <ExternalLink style={{ width: 15, height: 15, marginRight: "6px" }} />
+              前往发布页
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AboutDialog({
   onClose,
-  version = "1.0.8",
+  version = "1.1.1",
 }: {
   onClose: () => void;
   version?: string;
@@ -1531,6 +1852,62 @@ function ThemeSelector({
   );
 }
 
+function FontSizeSelector({
+  value,
+  onChange,
+}: {
+  value: ContentFontSize;
+  onChange: (value: ContentFontSize) => void;
+}) {
+  const options: Array<{ key: ContentFontSize; label: string }> = [
+    { key: "small", label: "偏小 (13px)" },
+    { key: "standard", label: "标准 (14px)" },
+    { key: "large", label: "中等 (15px)" },
+    { key: "huge", label: "偏大 (16px)" },
+  ];
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "2px",
+        padding: "3px",
+        borderRadius: "10px",
+        backgroundColor: "var(--color-bg-tertiary)",
+      }}
+    >
+      {options.map((option) => {
+        const active = value === option.key;
+        return (
+          <button
+            key={option.key}
+            type="button"
+            onClick={() => onChange(option.key)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "7px 13px",
+              borderRadius: "8px",
+              fontSize: "13px",
+              fontWeight: active ? 650 : 450,
+              border: active ? "1.5px solid var(--color-purple)" : "1.5px solid transparent",
+              color: active ? "var(--color-purple)" : "var(--color-text-secondary)",
+              backgroundColor: active ? "var(--color-bg-secondary)" : "transparent",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              boxShadow: active ? "0 1px 3px rgba(147, 51, 234, 0.15)" : "none",
+            }}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function ToggleSwitch({
   checked,
   onChange,
@@ -1752,6 +2129,21 @@ const purpleAboutButtonStyle: React.CSSProperties = {
   backgroundColor: "var(--color-purple-bg, rgba(147, 51, 234, 0.08))",
   border: "1.5px solid var(--color-purple-border, rgba(147, 51, 234, 0.35))",
   fontWeight: 650,
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "9px 16px",
+  borderRadius: "8px",
+  fontSize: "13.5px",
+  fontWeight: 650,
+  color: "#ffffff",
+  backgroundColor: "var(--color-primary)",
+  border: "1.5px solid var(--color-primary)",
+  cursor: "pointer",
+  whiteSpace: "nowrap",
 };
 
 const dialogBackdropStyle: React.CSSProperties = {
