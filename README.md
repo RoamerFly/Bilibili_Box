@@ -40,135 +40,112 @@
 
 BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的 Bilibili 桌面媒体工作台。它把常用入口、账号数据、在线播放、下载队列和本地配置集中在一个现代化桌面应用里，让找视频、看视频、存视频变成一个连续的流程。
 
-- **桌面体验优先** - 基于 Tauri 2 构建，体积更轻，启动更快，系统集成更自然。
-- **完整使用流程** - 搜索、推荐、收藏夹、历史、稍后再看、追番追剧和下载队列集中管理。
-- **播放和下载联动** - 从任意列表进入播放页，确认资源后可直接加入后台下载。
-- **适合普通用户** - Releases 提供 Windows、macOS 和 Linux 的安装版或便携版。
-- **本地优先** - 登录状态、用户信息、配置和下载数据均保存在本机。
+- **轻量极速架构** - 基于 Tauri 2 + Rust 构建，内存占用极低，秒级冷启动，原生跨平台支持。
+- **找·看·存一站闭环** - 聚合搜索、动态、推荐、收藏、稍后再看与追番追剧，沉浸播放与静默下载无缝衔接。
+- **端云结合 AI 赋能** - 内置 AI 视频摘要与评论区智能回复助手，支持多大模型与本地离线语音转录。
+- **本地优先与隐私安全** - 账号凭据、观影记录、个人配置与模型秘钥完全持久化保存在本机，纯净无广告。
 
 ## 功能亮点
 
-### 账号与登录
-
-- 二维码登录、Cookie 登录、内置浏览器登录
-- 自动保存登录状态到本地，启动后自动恢复账号信息
-
-### 内容发现
-
-- 推荐视频、聚合搜索（支持关键词、BV 号、AV 号和链接）
-- 搜索结果支持排序、发布时间和视频时长筛选
-- 我的收藏、稍后再看、观看历史、追番追剧
-- 浏览页面支持本地缓存，手动刷新时重新获取最新数据
-
-### 播放能力
-
-- 多清晰度动态展示、全屏、画中画、双击切换全屏
-- 下载完成的视频可直接从首页或下载列表进入播放
-- 分集视频可在播放页一键加入全部剧集下载任务
-- 番剧、影视、视频和专栏详情支持评论区展示
-
-### 下载管理
-
-- 后台下载，不强制跳转页面；支持多选批量操作
-- 底部悬浮胶囊实时展示下载进度，最新任务优先显示
-- 支持 FFmpeg / FFprobe 媒体处理
-- 下载清晰度按目标视频可用画质展示，并支持默认画质设置
-
-### 个性化设置
-
-- 下载目录、默认清晰度、任务并发和分片并发配置
-- 亮色、暗色与跟随系统主题
-- 支持一键恢复默认设置，并保留当前账号登录状态
-
-### AI总结
-
-- 一键生成视频内容总结，输出核心观点与按时间戳划分的章节
-- 优先使用官方字幕，无字幕时自动切换本地语音识别兜底
-- 支持自定义提示词模板与多语言输出，结果自动缓存
-- 支持配置多个 AI 供应商与模型
+- **账号与多维内容发现**：支持扫码、Cookie、内置浏览器快捷登录；无缝聚合首页推荐、关注动态、聚合搜索（支持关键词/BV号/链接与多维度筛选）、我的收藏、稍后再看、观看历史与追番追剧。
+- **沉浸式播放体验**：全画质（最高 8K）动态解析切换、画中画、全屏手势，集成完整评论区互动与一键全集批量加入下载。
+- **高效多任务后台下载**：多任务与多分片并发下载，内置 FFmpeg 智能混流；底部悬浮进度胶囊实时反馈，无需中断当前浏览。
+- **双 AI 智能助手**：内置 **AI 视频总结**（提炼核心观点与时间戳分章节，支持多大模型与本地离线语音识别兜底）与 **评论区 AI 智能回复**（自动感知对话脉络与身份，就地生成得体回复草稿）。
+- **个性化定制**：全界面基础字号与整体布局实时滑块放缩；亮色/暗色/跟随系统主题切换；下载目录、网络代理与并发自由调节。
 
 ## 界面预览
 
-### 首页
-
-![Home Preview](./docs/screenshots/home.png)
-
-![Home Animation Preview](./docs/screenshots/home_an.png)
-
-### 搜索内容
-
-![Search Preview](./docs/screenshots/search.png)
-
-### 推荐 / 关注动态
-
-![Recommend Preview](./docs/screenshots/recommend.png)
-
-![Dynamic Preview](./docs/screenshots/dynamic.png)
-
-### 我的点赞 / 收藏
-
-![Favorites Preview](./docs/screenshots/favorites.png)
-
-![Collects Preview](./docs/screenshots/collects.png)
-
-### 稍后再看
-
-![Watch Later Preview](./docs/screenshots/toplay.png)
-
-### 播放页面
-
-![Player Preview](./docs/screenshots/player.png)
-
-### AI总结页面
-
-![Player Preview](./docs/screenshots/AI_sum.png)
-
-### 下载队列
-
-![Downloads Preview](./docs/screenshots/downloads.png)
-
-### 观看历史
-
-![History Preview](./docs/screenshots/history.png)
-
-### 追番追剧
-
-![Bangumi Preview](./docs/screenshots/zfzj1.png)
-
-![Bangumi Detail Preview](./docs/screenshots/zfzj2.png)
-
-### 设置
-
-![Settings Preview](./docs/screenshots/settings1.png)
-
-![Settings Preview](./docs/screenshots/settings2.png)
-
-### 专栏
-
-![Column Preview](./docs/screenshots/column.png)
-
-### 直播
-
-![Live Preview](./docs/screenshots/live.png)
+<table align="center">
+  <tr>
+    <td align="center" width="50%">
+      <b>首页</b><br/>
+      <img src="./docs/screenshots/home.png" alt="首页" />
+    </td>
+    <td align="center" width="50%">
+      <b>搜索内容</b><br/>
+      <img src="./docs/screenshots/search.png" alt="搜索内容" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <b>推荐视频</b><br/>
+      <img src="./docs/screenshots/recommend.png" alt="推荐视频" />
+    </td>
+    <td align="center" width="50%">
+      <b>关注动态</b><br/>
+      <img src="./docs/screenshots/dynamic.png" alt="关注动态" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <b>在线播放</b><br/>
+      <img src="./docs/screenshots/player.png" alt="在线播放" />
+    </td>
+    <td align="center" width="50%">
+      <b>稍后再看</b><br/>
+      <img src="./docs/screenshots/toplay.png" alt="稍后再看" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <b>我的收藏</b><br/>
+      <img src="./docs/screenshots/favorites.png" alt="我的收藏" />
+    </td>
+    <td align="center" width="50%">
+      <b>观看历史</b><br/>
+      <img src="./docs/screenshots/history.png" alt="观看历史" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <b>追番追剧</b><br/>
+      <img src="./docs/screenshots/zfzj1.png" alt="追番追剧" />
+    </td>
+    <td align="center" width="50%">
+      <b>下载队列</b><br/>
+      <img src="./docs/screenshots/downloads.png" alt="下载队列" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <b>AI 智能总结</b><br/>
+      <img src="./docs/screenshots/AI_sum.png" alt="AI 智能总结" />
+    </td>
+    <td align="center" width="50%">
+      <b>AI 智能回复</b><br/>
+      <img src="./docs/screenshots/AI_reply.png" alt="AI 智能回复" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <b>设置中心 (基础与下载)</b><br/>
+      <img src="./docs/screenshots/settings1.png" alt="设置中心" />
+    </td>
+    <td align="center" width="50%">
+      <b>设置中心 (AI 与提示词)</b><br/>
+      <img src="./docs/screenshots/settings2.png" alt="设置中心" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <b>专栏阅读</b><br/>
+      <img src="./docs/screenshots/column.png" alt="专栏阅读" />
+    </td>
+    <td align="center" width="50%">
+      <b>直播互动</b><br/>
+      <img src="./docs/screenshots/live.png" alt="直播互动" />
+    </td>
+  </tr>
+</table>
 
 ## 最近更新计划
 
-### 🚀 评论区 AI 智能回复助手（即将发布 / 预更新）
+- 🎧 **端侧/本地 AI 语音转录与大模型体验优化**：支持接入更多本地轻量模型，优化长视频语音提取切片与多任务并行转录效率。
+- 📥 **合集与批量下载深度增强**：支持按分 P 命名规则模版自定义、音频/视频独立流分离导出与弹幕 XML/ASS 本地转换。
+- 👥 **多账号平滑热切换与分组隔离**：支持多账号登录态快速切换与独立收藏夹/观看历史视图隔离。
+- 🎨 **界面个性化与快捷键深度映射**：支持自定义快捷键控制播放/快进/音量/画中画，丰富主题配色定制。
+- 🌐 **离线模式与局域网媒体推流**：支持已下载视频的局域网 DLNA/AirPlay 投屏播放与移动端互传。
 
-为日常视频评论互动带来更智能、自然的交流体验。支持直接在评论区就地唤起 AI 智能回复助手，结合真实上下文生成得体的回复草稿：
-
-- **就地快捷生成**：在主评论或楼中楼子评论右侧点击「✨ AI回复」，直接在所点击的评论正下方就地展开，无需来回滚动翻找。
-- **智能对话上下文**：
-  - 上下文严格按时间先后顺序自动排列，呈现完整自然的对话脉络；
-  - 准确解析并体现真实回复关系（如“`用户A 回复 @用户B`”），告别“回复主评论”等抽象描述；
-  - 智能感知自身角色：将“我”的历史发言自动标记为“`我`”，他人回复我清晰标记为“`@我`”。
-- **多维度自定义定制**：
-  - 自由勾选多条讨论上下文，可选带入当前视频标题背景；
-  - 提供友善探讨、幽默调侃、点赞认同、理性求证等预设语气风格；
-  - 支持手动补充背景要求与快捷提示词（字数简短、幽默反问、指出漏洞、玩梗等）。
-- **人工最终确认**：生成草稿后一键填入回复框，人工微调审核后由用户亲自点击发送，安全可控。
-
-![AI Reply Preview](./docs/screenshots/AI_reply.png)
 
 ## 技术栈
 
