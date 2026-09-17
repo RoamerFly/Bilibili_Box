@@ -731,7 +731,7 @@ export function SettingsView() {
           icon={<Type style={{ width: 21, height: 21, color: "var(--color-purple)" }} />}
           iconBgColor="var(--color-purple-bg)"
           title="全局界面与字体缩放"
-          description="调整全界面的文字基础字号与整体布局缩放（包括左侧导航栏与各页面内容），滑动实时生效"
+          description="调整全界面的字号与整体布局缩放（含导航栏与各页面），滑动实时生效"
           control={
             <FontSizeSliderControl
               value={appFontSize}
@@ -1024,34 +1024,38 @@ function SettingRow({
       style={{
         display: "flex",
         alignItems: "center",
+        justifyContent: "space-between",
         gap: "16px",
-        padding: "22px 28px",
+        padding: "20px 26px",
         borderBottom: isLast ? "none" : "1px solid var(--color-bg-subtle)",
+        flexWrap: "wrap",
       }}
     >
-      <div
-        style={{
-          width: "42px",
-          height: "42px",
-          borderRadius: "11px",
-          backgroundColor: iconBgColor,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-        }}
-      >
-        {icon}
+      <div style={{ display: "flex", alignItems: "center", gap: "16px", flex: "1 1 280px", minWidth: "220px" }}>
+        <div
+          style={{
+            width: "42px",
+            height: "42px",
+            borderRadius: "11px",
+            backgroundColor: iconBgColor,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          {icon}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h3 style={{ fontSize: "15px", fontWeight: 600, color: "var(--color-text)", marginBottom: "3px" }}>
+            {title}
+          </h3>
+          <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.45 }}>{description}</p>
+        </div>
       </div>
 
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <h3 style={{ fontSize: "15px", fontWeight: 600, color: "var(--color-text)", marginBottom: "3px" }}>
-          {title}
-        </h3>
-        <p style={{ fontSize: "13px", color: "var(--color-text-muted)" }}>{description}</p>
-      </div>
-
-      <div style={{ flexShrink: 0 }}>{control}</div>
+      <div style={{ flexShrink: 0, marginLeft: "auto" }}>{control}</div>
     </div>
   );
 }
@@ -1897,34 +1901,32 @@ function FontSizeSliderControl({
     }
   };
 
-  const presets = [
-    { label: "偏小", size: 12 },
-    { label: "标准", size: 14 },
-    { label: "偏大", size: 16 },
-    { label: "超大", size: 18 },
-  ];
+  const stepDecrease = () => {
+    const next = Math.max(MIN_APP_FONT_SIZE, Math.round((value - 0.5) * 10) / 10);
+    onChange(next);
+  };
+
+  const stepIncrease = () => {
+    const next = Math.min(MAX_APP_FONT_SIZE, Math.round((value + 0.5) * 10) / 10);
+    onChange(next);
+  };
+
+  const isMin = value <= MIN_APP_FONT_SIZE;
+  const isMax = value >= MAX_APP_FONT_SIZE;
 
   return (
     <div className="bb-font-slider-container">
-      <div className="bb-font-presets">
-        {presets.map((p) => {
-          const isActive = Math.abs(value - p.size) < 0.1;
-          return (
-            <button
-              key={p.size}
-              type="button"
-              className={`bb-font-preset-pill${isActive ? " active" : ""}`}
-              onClick={() => onChange(p.size)}
-              title={`设置为 ${p.size}px`}
-            >
-              {p.label} ({p.size}px)
-            </button>
-          );
-        })}
-      </div>
-
       <div className="bb-font-slider-row">
-        <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>A-</span>
+        <button
+          type="button"
+          onClick={stepDecrease}
+          disabled={isMin}
+          className="bb-font-step-btn"
+          title="缩小字号 (每次 -0.5px)"
+          aria-label="缩小字号"
+        >
+          A-
+        </button>
         <input
           type="range"
           min={MIN_APP_FONT_SIZE}
@@ -1935,7 +1937,16 @@ function FontSizeSliderControl({
           className="bb-font-slider"
           aria-label="全局字号滑块"
         />
-        <span style={{ fontSize: "15px", color: "var(--color-text-muted)", fontWeight: 700 }}>A+</span>
+        <button
+          type="button"
+          onClick={stepIncrease}
+          disabled={isMax}
+          className="bb-font-step-btn bb-font-step-btn-large"
+          title="放大字号 (每次 +0.5px)"
+          aria-label="放大字号"
+        >
+          A+
+        </button>
       </div>
 
       <div className="bb-font-px-wrap">
