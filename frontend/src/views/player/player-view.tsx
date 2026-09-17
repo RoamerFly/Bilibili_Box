@@ -1274,7 +1274,7 @@ export function PlayerView() {
           </div>
         </aside>
       </div>
-      {showComments ? <CommentsSection oid={commentOid} typeId={commentType} refreshKey={commentRefreshKey} /> : null}
+      {showComments ? <CommentsSection oid={commentOid} typeId={commentType} refreshKey={commentRefreshKey} title={videoInfo?.title} /> : null}
       {actionNotice ? (
         <motion.div
           key={actionNotice.id}

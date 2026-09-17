@@ -342,6 +342,44 @@ export async function invoke<T>(
       config = { ...config, sessdata: "", cookie: "" };
       result = null;
       break;
+    case "generate_ai_reply": {
+      const style = (args.style as string) || "friendly";
+      const instructions = (args.instructions as string) || "";
+      await new Promise((resolve) => setTimeout(resolve, 350));
+
+      let reply = "";
+      if (instructions) {
+        if (instructions.includes("简短")) {
+          reply = "确实，我也这么觉得！";
+        } else if (instructions.includes("反问")) {
+          reply = "那你觉得这里如果换个角度来看，会不会有更好的思路呢？";
+        } else if (instructions.includes("事实") || instructions.includes("证据")) {
+          reply = "补充个细节，其实视频里前面就交代了这个背景，大家可以回去留心看看~";
+        } else if (instructions.includes("玩梗")) {
+          reply = "好家伙，我直接好家伙，弹幕课代表非你莫属了属于是（笑）。";
+        } else {
+          reply = `对于这一点我的想法是：结合${instructions.slice(0, 20)}来看，整体还是挺有说服力的。`;
+        }
+      } else {
+        switch (style) {
+          case "humorous":
+            reply = "好家伙，被你发现了华点！这波建议直接保送课代表（笑）。";
+            break;
+          case "agree":
+            reply = "完全同意！说到心坎里去了，这波分析确实很到位，很有共鸣。";
+            break;
+          case "question":
+            reply = "有一说一，这里的结论感觉还可以再商榷一下，比如前面的关键前提是否充分？";
+            break;
+          case "friendly":
+          default:
+            reply = "赞同你的看法，我觉得这里的讨论确实很有启发，期待能看到更多不同视角的观点~";
+            break;
+        }
+      }
+      result = reply;
+      break;
+    }
     case "get_recommended_videos":
     case "get_region_videos": {
       const pageSize = Number(args.pageSize || 18);
