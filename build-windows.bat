@@ -110,16 +110,25 @@ if not "!ERRORLEVEL!"=="0" (
 echo.
 echo [5/5] Preparing portable package in %OUTPUT_DIR%...
 if exist "%OUTPUT_DIR%" (
+    if exist "%OUTPUT_DIR%\data" (
+        if exist "%TEMP%\bilibox_data_backup" rmdir /s /q "%TEMP%\bilibox_data_backup"
+        move "%OUTPUT_DIR%\data" "%TEMP%\bilibox_data_backup" >nul
+    )
     rmdir /s /q "%OUTPUT_DIR%"
     if exist "%OUTPUT_DIR%" (
         echo ERROR: Failed to clean %OUTPUT_DIR%. Close any application using it and rebuild.
+        if exist "%TEMP%\bilibox_data_backup" move "%TEMP%\bilibox_data_backup" "%OUTPUT_DIR%\data" >nul
         exit /b 1
     )
 )
 mkdir "%OUTPUT_DIR%\env" >nul
-mkdir "%OUTPUT_DIR%\data\guest" >nul
-mkdir "%OUTPUT_DIR%\data\guest\cache" >nul
-mkdir "%OUTPUT_DIR%\data\guest\download" >nul
+if exist "%TEMP%\bilibox_data_backup" (
+    move "%TEMP%\bilibox_data_backup" "%OUTPUT_DIR%\data" >nul
+) else (
+    mkdir "%OUTPUT_DIR%\data\guest" >nul
+    mkdir "%OUTPUT_DIR%\data\guest\cache" >nul
+    mkdir "%OUTPUT_DIR%\data\guest\download" >nul
+)
 if not exist "THIRD_PARTY_NOTICES.md" (
     echo ERROR: THIRD_PARTY_NOTICES.md was not found.
     exit /b 1

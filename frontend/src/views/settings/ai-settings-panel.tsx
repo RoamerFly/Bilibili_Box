@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, Cloud, Download, KeyRound, LockKeyhole, Mic, Plus, Save, Settings2, ShieldCheck, Sparkles, Trash2, Wifi, X } from "lucide-react";
+import { Check, ChevronDown, Cloud, Download, KeyRound, LockKeyhole, MessageSquare, Mic, Plus, Save, Settings2, ShieldCheck, Sparkles, Trash2, Wifi, X } from "lucide-react";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@/lib/api";
@@ -28,6 +28,7 @@ export interface AiSettings {
   asr_model: string;
   asr_language: string;
   prompt_template: string;
+  reply_auto_context?: boolean;
   /** Legacy aliases kept so the old settings-view can migrate safely. */
   provider?: string;
   base_url?: string;
@@ -72,7 +73,7 @@ function defaultProvider(id: string): AiProviderSettings {
 }
 
 export const DEFAULT_AI_PROMPT_TEMPLATE = "视频标题：{video.title}\n视频简介：{video.description}\n用户补充：{video.note}";
-export const DEFAULT_AI_SETTINGS: AiSettings = { enabled: false, active_provider_id: "default-provider", providers: [defaultProvider("default-provider")], asr_engine: "sensevoice", asr_model: "sensevoice-small-int8", asr_language: "auto", prompt_template: DEFAULT_AI_PROMPT_TEMPLATE, provider: "openai-compatible", base_url: "https://api.openai.com/v1", model: "", temperature: 0.2, max_output_tokens: 2048, timeout_secs: 60 };
+export const DEFAULT_AI_SETTINGS: AiSettings = { enabled: false, active_provider_id: "default-provider", providers: [defaultProvider("default-provider")], asr_engine: "sensevoice", asr_model: "sensevoice-small-int8", asr_language: "auto", prompt_template: DEFAULT_AI_PROMPT_TEMPLATE, reply_auto_context: true, provider: "openai-compatible", base_url: "https://api.openai.com/v1", model: "", temperature: 0.2, max_output_tokens: 2048, timeout_secs: 60 };
 export function credentialStoreNotice(available: boolean): string | null { return available ? null : CREDENTIAL_STORE_UNAVAILABLE_MESSAGE; }
 export function providerBaseUrl(provider: string): string | undefined { return PROVIDER_PRESETS.find((preset) => preset.value === provider)?.baseUrl; }
 export function normalizeApiKeyInput(value: string): string { return value.trim(); }
@@ -91,33 +92,37 @@ function errorString(error: unknown): string {
 export function mapAiModelsError(error: unknown): string {
   const raw = errorString(error);
   const code = raw.match(/AI_MODELS_[A-Z_]+/)?.[0] || "";
+  const serverDetailMatch = raw.match(/（服务商提示：([^）]+)）/);
+  const serverDetail = serverDetailMatch ? serverDetailMatch[1].trim() : "";
+  const withDetail = (baseMsg: string) => (serverDetail ? `${baseMsg}（服务商返回：${serverDetail}）` : baseMsg);
+
   switch (code) {
     case "AI_MODELS_PROVIDER_NOT_FOUND": return "当前供应商还未保存，请先保存供应商后再获取模型。";
     case "AI_MODELS_ENDPOINT_INVALID": return "Base URL 无效，请填写完整地址后保存；远程服务建议使用 HTTPS。";
     case "AI_MODELS_CONFIG_INVALID":
     case "AI_MODELS_SETTINGS_INVALID": return "AI 配置不完整或无效，请检查供应商、Base URL 和超时设置后保存。";
-    case "AI_MODELS_KEY_MISSING": return "尚未配置 API Key，请先保存供应商并设置该供应商的 Key 后再获取模型；本机 Ollama 可留空。";
+    case "AI_MODELS_KEY_MISSING": return "尚未配置 API Key，请先输入并点击“设置 Key”；也可直接在下方手动输入模型名。";
     case "AI_MODELS_KEY_UNAVAILABLE":
     case "AI_MODELS_KEYRING_UNAVAILABLE":
     case "AI_MODELS_KEYRING_FAILED": return "无法读取该供应商的 API Key，请检查系统凭据库或重新设置该供应商的 Key。";
-    case "AI_MODELS_AUTH_FAILED": return "该供应商的 API Key 无效或已过期（DeepSeek 请重点检查当前供应商的 API Key），请重新设置后重试。";
-    case "AI_MODELS_BALANCE_REQUIRED": return "供应商账户余额不足或未开通服务，请检查余额、充值状态和账户权限。";
-    case "AI_MODELS_FORBIDDEN": return "该供应商的 API Key 没有访问模型列表的权限，请检查 Key 权限或更换有权限的 Key。";
-    case "AI_MODELS_ENDPOINT_UNSUPPORTED": return "服务不支持 OpenAI-compatible /models 模型列表接口，请检查 Base URL；也可以手动输入模型名。";
-    case "AI_MODELS_TIMEOUT": return "获取模型列表超时，请检查网络或代理后稍后重试。";
-    case "AI_MODELS_RATE_LIMITED": return "请求过于频繁或已达到配额限制，请稍后重试。";
+    case "AI_MODELS_AUTH_FAILED": return withDetail("该供应商的 API Key 无效或已过期（DeepSeek 请重点检查当前供应商的 API Key），请重新设置后重试；也可直接在下方手动输入模型名（如 deepseek-chat）保存使用。");
+    case "AI_MODELS_BALANCE_REQUIRED": return withDetail("供应商账户余额不足或未开通服务，请检查余额、充值状态和账户权限；也可直接手动输入模型名使用。");
+    case "AI_MODELS_FORBIDDEN": return withDetail("该供应商的 API Key 没有访问模型列表的权限，请检查 Key 权限或更换有权限的 Key；也可以直接手动输入模型名。");
+    case "AI_MODELS_ENDPOINT_UNSUPPORTED": return "服务不支持 OpenAI-compatible /models 模型列表接口，请确认 Base URL（DeepSeek 请使用 https://api.deepseek.com）；也可以手动输入模型名。";
+    case "AI_MODELS_TIMEOUT": return "获取模型列表超时，请检查网络或代理后稍后重试；也可以手动输入模型名。";
+    case "AI_MODELS_RATE_LIMITED": return withDetail("请求过于频繁或已达到配额限制，请稍后重试；也可以手动输入模型名。");
     case "AI_MODELS_REDIRECT_UNSUPPORTED": return "AI 服务要求重定向，但当前请求不会跟随重定向；请检查 Base URL，填写最终接口地址。";
     case "AI_MODELS_SERVER_ERROR": return "AI 服务暂时不可用，请稍后重试；也可以先手动输入模型名。";
     case "AI_MODELS_DNS_FAILED": return "无法解析 AI 服务地址，请检查网络、DNS 或 Base URL。";
     case "AI_MODELS_TLS_FAILED": return "AI 服务 TLS 证书或安全连接失败，请检查系统时间、证书和网络代理。";
     case "AI_MODELS_CONNECT_FAILED": return "无法连接 AI 服务，请检查网络、代理、防火墙或 Base URL。";
     case "AI_MODELS_CLIENT_FAILED": return "无法创建 AI 请求客户端，请检查网络代理或 TLS 配置后重试。";
-    case "AI_MODELS_REQUEST_FAILED": return "请求模型列表失败，请检查网络、代理和服务状态后重试；也可以手动输入模型名。";
+    case "AI_MODELS_REQUEST_FAILED": return withDetail("请求模型列表失败，请检查网络、代理和服务状态后重试；也可以手动输入模型名。");
     case "AI_MODELS_RESPONSE_TOO_LARGE": return "服务返回的模型列表过大，无法加载；请手动输入模型名。";
     case "AI_MODELS_RESPONSE_FAILED": return "读取模型列表响应失败，请检查网络后重试；也可以手动输入模型名。";
     case "AI_MODELS_RESPONSE_INVALID": return "服务返回的模型列表格式不受支持，请确认兼容接口或手动输入模型名。";
-    case "AI_MODELS_HTTP_ERROR": return "供应商返回了未分类的 HTTP 错误，请检查 API Key、权限、余额和服务状态；也可以手动输入模型名。";
-    default: return "获取模型失败，请检查 API Key、权限、余额、网络和服务状态；也可以手动输入模型名。";
+    case "AI_MODELS_HTTP_ERROR": return withDetail("供应商返回了未分类的 HTTP 错误，请检查 API Key、权限、余额和服务状态；也可以手动输入模型名。");
+    default: return serverDetail ? `获取模型失败（服务商返回：${serverDetail}），请检查 API Key、权限、余额、网络和服务状态；也可以手动输入模型名。` : "获取模型失败，请检查 API Key、权限、余额、网络和服务状态；也可以手动输入模型名。";
   }
 }
 
@@ -143,7 +148,7 @@ export function mergeAiSettings(settings?: Partial<AiSettings> | null): AiSettin
   const selected = providers.find((provider) => provider.provider_id === active) || providers[0];
   // Older settings may contain whisper/faster-whisper or a user-entered model.
   // The backend ignores those values, so normalize them to the real fixed ID.
-  return { enabled: Boolean(source.enabled ?? false), active_provider_id: selected.provider_id, providers, asr_engine: ASR_ENGINE, asr_model: ASR_MODEL_ID, asr_language: String(source.asr_language || "auto"), prompt_template: String(source.prompt_template || DEFAULT_AI_PROMPT_TEMPLATE), provider: selected.kind, base_url: selected.base_url, model: selected.model, temperature: selected.temperature, max_output_tokens: selected.max_output_tokens, timeout_secs: selected.timeout_secs };
+  return { enabled: Boolean(source.enabled ?? false), active_provider_id: selected.provider_id, providers, asr_engine: ASR_ENGINE, asr_model: ASR_MODEL_ID, asr_language: String(source.asr_language || "auto"), prompt_template: String(source.prompt_template || DEFAULT_AI_PROMPT_TEMPLATE), reply_auto_context: typeof source.reply_auto_context === "boolean" ? source.reply_auto_context : true, provider: selected.kind, base_url: selected.base_url, model: selected.model, temperature: selected.temperature, max_output_tokens: selected.max_output_tokens, timeout_secs: selected.timeout_secs };
 }
 
 export function normalizeAiSettingsResponse(response?: AiSettingsResponse | null): { settings: AiSettings; credentialStoreAvailable: boolean } {
@@ -168,12 +173,12 @@ export function resolveSavedAiSettings(response: AiSettingsResponse | null | und
 }
 
 export function buildAiSettingsSaveRequest(settings: AiSettings) {
-  return { request: { settings: { enabled: Boolean(settings.enabled), active_provider_id: settings.active_provider_id, providers: settings.providers.map((provider) => ({ provider_id: provider.provider_id, name: provider.name.trim(), kind: provider.kind, base_url: provider.base_url.trim(), model: provider.model.trim(), temperature: clampNumber(provider.temperature, 0.2, 0, 2), max_output_tokens: Math.round(clampNumber(provider.max_output_tokens, 2048, 1, 200000)), timeout_secs: Math.round(clampNumber(provider.timeout_secs, 60, 1, 600)) })), asr_engine: ASR_ENGINE, asr_model: ASR_MODEL_ID, asr_language: settings.asr_language, prompt_template: settings.prompt_template } } };
+  return { request: { settings: { enabled: Boolean(settings.enabled), active_provider_id: settings.active_provider_id, providers: settings.providers.map((provider) => ({ provider_id: provider.provider_id, name: provider.name.trim(), kind: provider.kind, base_url: provider.base_url.trim(), model: provider.model.trim(), temperature: clampNumber(provider.temperature, 0.2, 0, 2), max_output_tokens: Math.round(clampNumber(provider.max_output_tokens, 2048, 1, 200000)), timeout_secs: Math.round(clampNumber(provider.timeout_secs, 60, 1, 600)) })), asr_engine: ASR_ENGINE, asr_model: ASR_MODEL_ID, asr_language: settings.asr_language, prompt_template: settings.prompt_template, reply_auto_context: settings.reply_auto_context ?? true } } };
 }
 
 export function stripAiTransientFields(settings: AiSettings): AiSettings {
   const selected = settings.providers.find((provider) => provider.provider_id === settings.active_provider_id) || settings.providers[0];
-  return { enabled: settings.enabled, active_provider_id: settings.active_provider_id, providers: settings.providers.map(({ provider_id, name, kind, base_url, model, temperature, max_output_tokens, timeout_secs }) => ({ provider_id, name, kind, base_url, model, temperature, max_output_tokens, timeout_secs })), asr_engine: ASR_ENGINE, asr_model: ASR_MODEL_ID, asr_language: settings.asr_language, prompt_template: settings.prompt_template, provider: selected?.kind, base_url: selected?.base_url, model: selected?.model, temperature: selected?.temperature, max_output_tokens: selected?.max_output_tokens, timeout_secs: selected?.timeout_secs };
+  return { enabled: settings.enabled, active_provider_id: settings.active_provider_id, providers: settings.providers.map(({ provider_id, name, kind, base_url, model, temperature, max_output_tokens, timeout_secs }) => ({ provider_id, name, kind, base_url, model, temperature, max_output_tokens, timeout_secs })), asr_engine: ASR_ENGINE, asr_model: ASR_MODEL_ID, asr_language: settings.asr_language, prompt_template: settings.prompt_template, reply_auto_context: settings.reply_auto_context ?? true, provider: selected?.kind, base_url: selected?.base_url, model: selected?.model, temperature: selected?.temperature, max_output_tokens: selected?.max_output_tokens, timeout_secs: selected?.timeout_secs };
 }
 
 export function buildAiProviderDeleteRequest(providerId: string) { return { request: { provider_id: providerId } }; }
@@ -218,10 +223,12 @@ export function settingsAreDirty(
   persistedIds: Set<string>,
   persistedProviders: Record<string, PersistedProviderSnapshot>,
   persistedPromptTemplate: string,
+  persistedReplyAutoContext: boolean = true,
 ): boolean {
   if (settings.enabled !== persistedEnabled) return true;
   if (settings.active_provider_id !== persistedActiveProviderId) return true;
   if (settings.prompt_template !== persistedPromptTemplate) return true;
+  if ((settings.reply_auto_context ?? true) !== persistedReplyAutoContext) return true;
   if (settings.providers.length !== persistedIds.size) return true;
   for (const provider of settings.providers) {
     const persisted = persistedProviders[provider.provider_id];
@@ -250,6 +257,7 @@ export function AiSettingsPanel({ onFeedback, onSettingsSaved }: AiSettingsPanel
   const [persistedEnabled, setPersistedEnabled] = useState(false);
   const [persistedActiveProviderId, setPersistedActiveProviderId] = useState("");
   const [persistedPromptTemplate, setPersistedPromptTemplate] = useState(DEFAULT_AI_PROMPT_TEMPLATE);
+  const [persistedReplyAutoContext, setPersistedReplyAutoContext] = useState(true);
   const [modelOptions, setModelOptions] = useState<Record<string, string[]>>({});
   const [modelLoading, setModelLoading] = useState<Record<string, boolean>>({});
   const [modelErrors, setModelErrors] = useState<Record<string, string>>({});
@@ -269,13 +277,13 @@ export function AiSettingsPanel({ onFeedback, onSettingsSaved }: AiSettingsPanel
   const selectedAsr = ASR_OPTIONS[0];
   const credentialWarning = credentialStoreNotice(credentialStoreAvailable);
   const dirty = useMemo(
-    () => settingsAreDirty(settings, persistedEnabled, persistedActiveProviderId, persistedIds, persistedProviders, persistedPromptTemplate),
-    [settings, persistedEnabled, persistedActiveProviderId, persistedIds, persistedProviders, persistedPromptTemplate],
+    () => settingsAreDirty(settings, persistedEnabled, persistedActiveProviderId, persistedIds, persistedProviders, persistedPromptTemplate, persistedReplyAutoContext),
+    [settings, persistedEnabled, persistedActiveProviderId, persistedIds, persistedProviders, persistedPromptTemplate, persistedReplyAutoContext],
   );
 
   useEffect(() => {
     let cancelled = false;
-    void invoke<AiSettingsResponse>("get_ai_settings").then((response) => { if (cancelled) return; const normalized = normalizeAiSettingsResponse(response); setSettings(normalized.settings); setPersistedIds(new Set(normalized.settings.providers.map((provider) => provider.provider_id))); setPersistedProviders(Object.fromEntries(normalized.settings.providers.map((provider) => [provider.provider_id, providerSnapshot(provider)]))); setPersistedEnabled(normalized.settings.enabled); setPersistedActiveProviderId(normalized.settings.active_provider_id); setPersistedPromptTemplate(normalized.settings.prompt_template); setCredentialStoreAvailable(normalized.credentialStoreAvailable); }).catch(() => { if (!cancelled) setFeedback({ message: "加载 AI 设置失败，请稍后重试。", isError: true }); }).finally(() => { if (!cancelled) setLoading(false); });
+    void invoke<AiSettingsResponse>("get_ai_settings").then((response) => { if (cancelled) return; const normalized = normalizeAiSettingsResponse(response); setSettings(normalized.settings); setPersistedIds(new Set(normalized.settings.providers.map((provider) => provider.provider_id))); setPersistedProviders(Object.fromEntries(normalized.settings.providers.map((provider) => [provider.provider_id, providerSnapshot(provider)]))); setPersistedEnabled(normalized.settings.enabled); setPersistedActiveProviderId(normalized.settings.active_provider_id); setPersistedPromptTemplate(normalized.settings.prompt_template); setPersistedReplyAutoContext(normalized.settings.reply_auto_context ?? true); setCredentialStoreAvailable(normalized.credentialStoreAvailable); }).catch(() => { if (!cancelled) setFeedback({ message: "加载 AI 设置失败，请稍后重试。", isError: true }); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
@@ -323,7 +331,7 @@ export function AiSettingsPanel({ onFeedback, onSettingsSaved }: AiSettingsPanel
       const response = await invoke<AiSettingsResponse>("save_ai_settings", buildAiSettingsSaveRequest(canonical));
       const saved = resolveSavedAiSettings(response, canonical);
       const persisted = saved.settings;
-      setSettings(persisted); setPersistedEnabled(persisted.enabled); setPersistedActiveProviderId(persisted.active_provider_id); setPersistedPromptTemplate(persisted.prompt_template); setPersistedIds(new Set(persisted.providers.map((provider) => provider.provider_id))); setPersistedProviders(Object.fromEntries(persisted.providers.map((provider) => [provider.provider_id, providerSnapshot(provider)]))); setCredentialStoreAvailable(saved.credentialStoreAvailable); onSettingsSaved?.(stripAiTransientFields(persisted));
+      setSettings(persisted); setPersistedEnabled(persisted.enabled); setPersistedActiveProviderId(persisted.active_provider_id); setPersistedPromptTemplate(persisted.prompt_template); setPersistedReplyAutoContext(persisted.reply_auto_context ?? true); setPersistedIds(new Set(persisted.providers.map((provider) => provider.provider_id))); setPersistedProviders(Object.fromEntries(persisted.providers.map((provider) => [provider.provider_id, providerSnapshot(provider)]))); setCredentialStoreAvailable(saved.credentialStoreAvailable); onSettingsSaved?.(stripAiTransientFields(persisted));
       if (closeModal) { setModalProviderId(null); setDraftProvider(null); setDraftDirty(false); }
       showFeedback(successMessage, false); return true;
     } catch { showFeedback("保存 AI 设置失败，请检查配置后重试。", true); return false; } finally { setSaving(false); }
@@ -342,7 +350,7 @@ export function AiSettingsPanel({ onFeedback, onSettingsSaved }: AiSettingsPanel
     try {
       const normalized = normalizeAiSettingsResponse(await invoke<AiSettingsResponse>("delete_ai_provider", buildAiProviderDeleteRequest(id)));
       const remainingIds = new Set(normalized.settings.providers.map((item) => item.provider_id));
-      setSettings(normalized.settings); setPersistedEnabled(normalized.settings.enabled); setPersistedActiveProviderId(normalized.settings.active_provider_id); setPersistedPromptTemplate(normalized.settings.prompt_template); setPersistedIds(remainingIds); setPersistedProviders(Object.fromEntries(normalized.settings.providers.map((item) => [item.provider_id, providerSnapshot(item)]))); setCredentialStoreAvailable(normalized.credentialStoreAvailable); setApiKeys((current) => Object.fromEntries(Object.entries(current).filter(([key]) => remainingIds.has(key)))); setModelOptions((current) => Object.fromEntries(Object.entries(current).filter(([key]) => remainingIds.has(key)))); setModelErrors((current) => Object.fromEntries(Object.entries(current).filter(([key]) => remainingIds.has(key))));
+      setSettings(normalized.settings); setPersistedEnabled(normalized.settings.enabled); setPersistedActiveProviderId(normalized.settings.active_provider_id); setPersistedPromptTemplate(normalized.settings.prompt_template); setPersistedReplyAutoContext(normalized.settings.reply_auto_context ?? true); setPersistedIds(remainingIds); setPersistedProviders(Object.fromEntries(normalized.settings.providers.map((item) => [item.provider_id, providerSnapshot(item)]))); setCredentialStoreAvailable(normalized.credentialStoreAvailable); setApiKeys((current) => Object.fromEntries(Object.entries(current).filter(([key]) => remainingIds.has(key)))); setModelOptions((current) => Object.fromEntries(Object.entries(current).filter(([key]) => remainingIds.has(key)))); setModelErrors((current) => Object.fromEntries(Object.entries(current).filter(([key]) => remainingIds.has(key))));
       if (modalProviderId === id) { setModalProviderId(null); setDraftProvider(null); setDraftDirty(false); }
       onSettingsSaved?.(stripAiTransientFields(normalized.settings)); showFeedback("供应商及其凭据已删除。", false);
     } catch { showFeedback("删除供应商失败，原配置和 API Key 状态均未改变。", true); } finally { setSaving(false); }
@@ -354,13 +362,40 @@ export function AiSettingsPanel({ onFeedback, onSettingsSaved }: AiSettingsPanel
     if (!value || value.length > MAX_API_KEY_CHARS) { showFeedback(value ? `API Key 过长（最多 ${MAX_API_KEY_CHARS} 个字符）。` : "请输入 API Key。", true); return; }
     if (!credentialStoreAvailable) { showFeedback(CREDENTIAL_STORE_UNAVAILABLE_MESSAGE, true); return; }
     setCredentialSaving(true);
-    try { await tauriInvoke("set_ai_api_key", buildAiCredentialRequest(id, value)); setApiKeys((current) => ({ ...current, [id]: "" })); const update = (current: AiSettings) => ({ ...current, providers: current.providers.map((item) => item.provider_id === id ? { ...item, api_key_configured: true, api_key_hint: "已配置" } : item) }); setSettings(update); setDraftProvider((current) => current?.provider_id === id ? { ...current, api_key_configured: true, api_key_hint: "已配置" } : current); showFeedback("API Key 已安全保存。", false); } catch { showFeedback("保存 API Key 失败，请检查系统凭据库后重试。", true); } finally { setCredentialSaving(false); }
+    try {
+      await tauriInvoke("set_ai_api_key", buildAiCredentialRequest(id, value));
+      setApiKeys((current) => ({ ...current, [id]: "" }));
+      const updatedProvider = { ...provider, api_key_configured: true, api_key_hint: "已配置" };
+      const nextProviders = settings.providers.some((item) => item.provider_id === id)
+        ? settings.providers.map((item) => (item.provider_id === id ? updatedProvider : item))
+        : [...settings.providers, updatedProvider];
+      const nextSettings = { ...settings, providers: nextProviders };
+      setSettings(nextSettings);
+      setDraftProvider(updatedProvider);
+      void persistSettings(nextSettings, "API Key 已安全保存，供应商配置已同步。", false);
+    } catch {
+      showFeedback("保存 API Key 失败，请检查系统凭据库后重试。", true);
+    } finally {
+      setCredentialSaving(false);
+    }
   }
 
   async function clearApiKey(provider: AiProviderSettings) {
     if (!credentialStoreAvailable || !window.confirm("确认清除当前供应商已保存的 API Key？")) return;
     setCredentialSaving(true);
-    try { await tauriInvoke("clear_ai_api_key", buildAiCredentialRequest(provider.provider_id)); const update = (current: AiSettings) => ({ ...current, providers: current.providers.map((item) => item.provider_id === provider.provider_id ? { ...item, api_key_configured: false, api_key_hint: "" } : item) }); setSettings(update); setDraftProvider((current) => current?.provider_id === provider.provider_id ? { ...current, api_key_configured: false, api_key_hint: "" } : current); showFeedback("已清除当前供应商的 API Key。", false); } catch { showFeedback("清除 API Key 失败，请稍后重试。", true); } finally { setCredentialSaving(false); }
+    try {
+      await tauriInvoke("clear_ai_api_key", buildAiCredentialRequest(provider.provider_id));
+      const updatedProvider = { ...provider, api_key_configured: false, api_key_hint: "" };
+      const nextProviders = settings.providers.map((item) => (item.provider_id === provider.provider_id ? updatedProvider : item));
+      const nextSettings = { ...settings, providers: nextProviders };
+      setSettings(nextSettings);
+      setDraftProvider(updatedProvider);
+      void persistSettings(nextSettings, "已清除当前供应商的 API Key。", false);
+    } catch {
+      showFeedback("清除 API Key 失败，请稍后重试。", true);
+    } finally {
+      setCredentialSaving(false);
+    }
   }
 
   async function listModels(provider: AiProviderSettings) {
@@ -411,6 +446,7 @@ export function AiSettingsPanel({ onFeedback, onSettingsSaved }: AiSettingsPanel
   return <div style={pageStyle}>
     {feedback ? <FeedbackBanner message={feedback.message} isError={feedback.isError} /> : null}
     <section style={panelStyle} aria-labelledby="ai-model-service-title"><PanelHeading icon={<Cloud style={iconStyle} />} iconColor="var(--color-primary)" title="模型服务" description="保存多个供应商；详细配置在编辑弹窗中完成。" id="ai-model-service-title" /><div style={toolbarStyle}><label style={{ display: "inline-flex", alignItems: "center", gap: "9px", cursor: "pointer", whiteSpace: "nowrap" }} title="启用后，AI 总结会使用当前供应商。"><span style={{ fontSize: "13.5px", fontWeight: 650, color: "var(--color-text)" }}>启用 AI 功能</span><ToggleSwitch name="启用 AI 功能" checked={settings.enabled} onChange={(checked) => updateSettings((current) => ({ ...current, enabled: checked }))} /></label><button type="button" onClick={() => openProviderModal()} disabled={saving || credentialSaving || settings.providers.length >= MAX_AI_PROVIDERS} style={secondaryButtonStyle}><Plus style={buttonIconStyle} />添加供应商</button></div><div style={providerListStyle} aria-label="AI 供应商列表">{settings.providers.map((provider) => <ProviderRow key={provider.provider_id} provider={provider} isActive={settings.active_provider_id === provider.provider_id} onEdit={() => openProviderModal(provider)} onSetCurrent={() => void setCurrent(provider.provider_id)} onDelete={() => void deleteProvider(provider.provider_id)} disabled={saving || credentialSaving} />)}</div><div style={saveBarStyle}><button type="button" disabled={saving || credentialSaving} onClick={() => void saveSettings()} style={{ ...primaryButtonStyle, opacity: saving ? 0.65 : 1, ...(dirty ? { border: "1.5px solid var(--color-primary)", color: "var(--color-primary)", backgroundColor: "transparent" } : {}) }}><Save style={buttonIconStyle} />{saving ? "保存中…" : dirty ? "保存 AI 设置 *" : "保存 AI 设置"}</button></div></section>
+    <section style={panelStyle} aria-labelledby="ai-comment-reply-title"><PanelHeading icon={<MessageSquare style={iconStyle} />} iconColor="var(--color-primary)" title="评论区 AI 回复助手" description="在视频评论区点击 AI 回复时，智能整理上下文并生成回复草稿。" id="ai-comment-reply-title" /><div style={{ padding: "14px 22px 17px" }}><label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", gap: "16px" }}><div><strong style={fieldTitleStyle}>自动选择回复上下文</strong><div style={mutedStyle}>回复主评论时默认仅选择主评论；回复子评论时，自动沿回复层级向上递归追溯对话链（主评论与前序回复），按时间先后顺序排列发给 AI。关闭后默认仅勾选被点击的单条评论。</div></div><ToggleSwitch name="自动选择回复上下文" checked={settings.reply_auto_context ?? true} onChange={(checked) => updateSettings((current) => ({ ...current, reply_auto_context: checked }))} /></label></div></section>
     <section style={panelStyle} aria-labelledby="ai-prompt-template-title"><PanelHeading icon={<Sparkles style={iconStyle} />} iconColor="var(--color-primary)" title="提示词模板" description="生成总结时附加给模型的上下文，支持变量替换，留空恢复默认。" id="ai-prompt-template-title" /><div style={{ padding: "14px 22px 17px" }}><textarea aria-label="提示词模板" value={settings.prompt_template} onChange={(event) => updateSettings((current) => ({ ...current, prompt_template: event.target.value }))} rows={5} style={textareaStyle} /><div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginTop: 9 }}><span style={helperTextStyle}>可用变量：{"{video.title}"}（标题）、{"{video.description}"}（简介）、{"{video.owner}"}（UP主）、{"{video.bvid}"}、{"{video.aid}"}、{"{video.cid}"}、{"{video.note}"}（播放页补充说明）、{"{video.subtitle}"}（已识别字幕）。</span><button type="button" onClick={() => updateSettings((current) => ({ ...current, prompt_template: DEFAULT_AI_PROMPT_TEMPLATE }))} style={smallButtonStyle}>恢复默认</button></div>{promptPreview ? <div style={previewContainerStyle}><span style={previewTitleStyle}>发送给模型的完整内容（示例数据渲染）</span><span style={helperTextStyle}>变量按示例值替换；{"{video.subtitle}"} 会替换为已识别字幕，生成时以实际视频为准。</span><pre style={previewPreStyle}>{`【系统提示词】\n${promptPreview.system_prompt}\n\n【指令（模板替换后）】\n${promptPreview.instruction}\n\n【用户消息（完整 JSON）】\n${promptPreview.user_prompt}`}</pre></div> : <div style={previewContainerStyle}><span style={helperTextStyle}>提示词预览暂不可用。</span></div>}</div></section>
     <section style={panelStyle} aria-labelledby="ai-asr-title"><PanelHeading icon={<Mic style={iconStyle} />} iconColor="var(--color-info-text)" title="本地语音转录" description="当前版本仅支持 SenseVoice。先下载模型，再为没有字幕的视频生成转录；不会自动下载。" id="ai-asr-title" /><div style={asrCompactStyle}><div style={{ minWidth: 0 }}><strong style={fieldTitleStyle}>{selectedAsr.label}</strong><span style={mutedStyle}>{ASR_MODEL_ID} · {ASR_MODEL_SIZE_LABEL} · {settings.asr_language || "auto"}</span></div><AsrStatusBadge status={asrStatus} unavailable={Boolean(asrStatusError)} /></div><div style={asrActionsStyle}>{asrStatus.state === "downloading" ? <button type="button" style={{ ...secondaryButtonStyle, color: "var(--color-warning-text)" }} disabled={asrCancelling} onClick={() => void cancelAsrModelDownload()}>{asrCancelling ? "取消中…" : "取消下载"}</button> : <button type="button" style={secondaryButtonStyle} disabled={asrBusy || asrStatus.state === "installed"} onClick={() => void downloadAsrModel()}><Download style={buttonIconStyle} />下载模型（约 230MB 空间）</button>}{asrStatus.state === "installed" ? <button type="button" style={{ ...secondaryButtonStyle, color: "var(--color-warning-text)" }} disabled={asrBusy} onClick={() => void deleteAsrModel()}><Trash2 style={buttonIconStyle} />删除模型</button> : null}</div>{asrStatus.state === "downloading" ? <div style={progressTrackStyle} aria-label="ASR 模型下载进度"><span style={{ ...progressValueStyle, width: `${Math.max(0, Math.min(100, asrStatus.progress ?? 0))}%` }} /></div> : null}<div style={noticeStyle}><ShieldCheck style={buttonIconStyle} /><span>{asrStatusError || "首次使用需下载约230MB模型。模型名称、大小和支持语言由后端固定，不会自动下载。"}</span></div><div style={asrFieldsStyle}><FieldLabel title="引擎" description="当前版本仅支持 SenseVoice，本选项不可切换。"><div style={readOnlyFieldStyle}>{ASR_ENGINE}</div></FieldLabel><FieldLabel title="模型" description="后端固定 model id，不允许自由编辑。"><div style={readOnlyFieldStyle}>{ASR_MODEL_ID}</div></FieldLabel><FieldLabel title="大小 / 语言" description="显示后端返回的模型信息。"><div style={readOnlyFieldStyle}>{ASR_MODEL_SIZE_LABEL} · {(asrStatus.languages.length ? asrStatus.languages : ["auto", "zh", "en", "ja", "ko", "yue"]).join(" / ")}</div></FieldLabel></div></section>
     {draftProvider && modalProviderId ? <ProviderModal provider={draftProvider} isNew={!persistedIds.has(modalProviderId)} isActive={settings.active_provider_id === modalProviderId} apiKey={apiKeys[modalProviderId] || ""} apiKeyWarning={credentialWarning} modelOptions={modelOptions[modalProviderId] || []} modelLoading={Boolean(modelLoading[modalProviderId])} modelError={modelErrors[modalProviderId] || ""} credentialSaving={credentialSaving} saving={saving} onClose={requestCloseModal} onUpdate={updateDraft} onApiKeyChange={(value) => { setDraftDirty(true); setApiKeys((current) => ({ ...current, [modalProviderId]: value })); }} onSave={() => void saveProvider()} onSetCurrent={() => void setCurrent(modalProviderId)} onListModels={() => void listModels(draftProvider)} onSetApiKey={() => void setApiKey(draftProvider)} onClearApiKey={() => void clearApiKey(draftProvider)} onDelete={() => void deleteProvider(modalProviderId)} /> : null}
@@ -421,7 +457,48 @@ function ProviderRow({ provider, isActive, onEdit, onSetCurrent, onDelete, disab
 
 function ProviderModal({ provider, isNew, isActive, apiKey, apiKeyWarning, modelOptions, modelLoading, modelError, credentialSaving, saving, onClose, onUpdate, onApiKeyChange, onSave, onSetCurrent, onListModels, onSetApiKey, onClearApiKey, onDelete }: { provider: AiProviderSettings; isNew: boolean; isActive: boolean; apiKey: string; apiKeyWarning: string | null; modelOptions: string[]; modelLoading: boolean; modelError: string; credentialSaving: boolean; saving: boolean; onClose: () => void; onUpdate: (update: (provider: AiProviderSettings) => AiProviderSettings) => void; onApiKeyChange: (value: string) => void; onSave: () => void; onSetCurrent: () => void; onListModels: () => void; onSetApiKey: () => void; onClearApiKey: () => void; onDelete: () => void }) {
   const modelSelectOptions = provider.model && !modelOptions.includes(provider.model) ? [provider.model, ...modelOptions] : modelOptions;
-  return <div role="presentation" style={modalOverlayStyle} onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="ai-provider-modal-title" style={modalStyle} onMouseDown={(event) => event.stopPropagation()}><header style={modalHeaderStyle}><div style={{ minWidth: 0 }}><h2 id="ai-provider-modal-title" style={editorTitleStyle}>{isNew ? "添加供应商" : `${provider.name || "未命名供应商"} 设置`}</h2><p style={mutedStyle}>{isNew ? "填写后保存才会加入供应商列表。" : "修改只会在点击保存后生效。"}</p></div><button type="button" aria-label="关闭供应商设置" onClick={onClose} style={iconButtonStyle}><X style={buttonIconStyle} /></button></header><div style={modalBodyStyle}><div style={fieldGridStyle}><FieldLabel title="名称" description="用于识别此供应商，不会发送给模型服务。"><TextField aria-label="供应商名称" value={provider.name} onChange={(value) => onUpdate((current) => ({ ...current, name: value }))} placeholder="例如：公司 OpenAI" /></FieldLabel><FieldLabel title="类型 / Kind" description="决定默认地址与兼容方式。"><SelectField ariaLabel="供应商类型" value={provider.kind} onChange={(value) => onUpdate((current) => ({ ...current, kind: value, base_url: providerBaseUrl(value) || current.base_url }))} options={PROVIDER_PRESETS.map(({ value, label }) => ({ value, label }))} /></FieldLabel><FieldLabel title="Base URL" description="只允许 HTTPS；本机 Ollama 可使用 localhost HTTP。"><TextField aria-label="AI Base URL" value={provider.base_url} onChange={(value) => onUpdate((current) => ({ ...current, base_url: value }))} placeholder="https://api.openai.com/v1" /></FieldLabel><FieldLabel title="模型名" description="先获取模型后从下拉框选择，也可以手动输入。"><div style={modelFieldStyle}><div style={modelControlsStyle}>{modelSelectOptions.length ? <SelectField ariaLabel="AI 模型选择" value={provider.model} onChange={(value) => onUpdate((current) => ({ ...current, model: value }))} options={[{ value: "", label: "手动输入或选择模型" }, ...modelSelectOptions.map((value) => ({ value, label: value }))]} style={modelSelectStyle} /> : null}<TextField aria-label="AI 模型名" value={provider.model} onChange={(value) => onUpdate((current) => ({ ...current, model: value }))} placeholder="获取后选择模型，或手动输入" style={modelInputStyle} /><button type="button" onClick={onListModels} disabled={modelLoading || saving} style={{ ...smallButtonStyle, ...modelButtonStyle }}><Download style={buttonIconStyle} />{modelLoading ? "获取中…" : "获取模型"}</button></div>{isNew ? <span style={helperTextStyle}>可先设置 Key 并获取模型，最后保存供应商即可。</span> : null}{modelError ? <span role="alert" aria-live="assertive" style={errorTextStyle}>{modelError}</span> : null}</div></FieldLabel><FieldLabel title="Temperature" description="控制输出随机程度，范围 0–2。"><NumberField aria-label="AI Temperature" value={provider.temperature} min={0} max={2} step={0.1} onChange={(value) => onUpdate((current) => ({ ...current, temperature: value }))} /></FieldLabel><FieldLabel title="最大输出 token" description="限制单次模型输出长度。"><NumberField aria-label="AI 最大输出 token" value={provider.max_output_tokens} min={1} max={200000} step={1} onChange={(value) => onUpdate((current) => ({ ...current, max_output_tokens: Math.round(value) }))} /></FieldLabel><FieldLabel title="超时（秒）" description="请求超过该时长后返回失败。"><NumberField aria-label="AI 超时秒数" value={provider.timeout_secs} min={1} max={600} step={1} onChange={(value) => onUpdate((current) => ({ ...current, timeout_secs: Math.round(value) }))} /></FieldLabel><FieldLabel title="API Key" description={provider.api_key_configured ? `已配置${provider.api_key_hint ? `（${provider.api_key_hint}）` : ""}；输入新值会替换。` : "密钥只保存到系统凭据库，不会进入设置文件或请求日志。"}><div style={keyFieldStyle}><div style={{ position: "relative", minWidth: 0 }}><KeyRound aria-hidden="true" style={keyIconStyle} /><input aria-label="AI API Key" type="password" autoComplete="off" value={apiKey} onChange={(event) => onApiKeyChange(event.target.value)} disabled={credentialSaving || Boolean(apiKeyWarning)} placeholder={apiKeyWarning ? "系统凭据库不可用" : provider.api_key_configured ? "留空以保留当前 Key" : "输入 API Key"} style={{ ...inputStyle, width: "100%", minWidth: 0, paddingLeft: 34 }} /></div><div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}><button type="button" disabled={credentialSaving || Boolean(apiKeyWarning)} onClick={onSetApiKey} style={smallButtonStyle}>设置 Key</button>{provider.api_key_configured ? <button type="button" disabled={credentialSaving || Boolean(apiKeyWarning)} onClick={onClearApiKey} style={{ ...smallButtonStyle, color: "var(--color-warning-text)" }}>清除 Key</button> : null}</div>{apiKeyWarning ? <span role="status" style={helperTextStyle}>{apiKeyWarning}</span> : null}</div></FieldLabel></div>{provider.kind === "ollama" ? <div style={infoNoteStyle}><Wifi style={buttonIconStyle} />Ollama 通常运行在本机，API Key 可以留空。</div> : null}</div><footer style={modalFooterStyle}>{!isNew ? <button type="button" onClick={onDelete} disabled={saving} style={{ ...smallButtonStyle, color: "var(--color-error-text)" }}><Trash2 style={buttonIconStyle} />删除供应商</button> : <span /> }<div style={rowActionsStyle}>{!isActive ? <button type="button" onClick={onSetCurrent} disabled={saving || isNew} style={smallButtonStyle}>设为当前</button> : <span style={activeBadgeStyle}>当前使用</span>}<button type="button" onClick={onClose} disabled={saving} style={secondaryButtonStyle}>取消</button><button type="button" onClick={onSave} disabled={saving || credentialSaving} style={primaryButtonStyle}><Save style={buttonIconStyle} />{saving ? "保存中…" : "保存并关闭"}</button></div></footer></section></div>;
+  return <div role="presentation" style={modalOverlayStyle} onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="ai-provider-modal-title" style={modalStyle} onMouseDown={(event) => event.stopPropagation()}><header style={modalHeaderStyle}><div style={{ minWidth: 0 }}><h2 id="ai-provider-modal-title" style={editorTitleStyle}>{isNew ? "添加供应商" : `${provider.name || "未命名供应商"} 设置`}</h2><p style={mutedStyle}>{isNew ? "填写后保存才会加入供应商列表。" : "修改只会在点击保存后生效。"}</p></div><button type="button" aria-label="关闭供应商设置" onClick={onClose} style={iconButtonStyle}><X style={buttonIconStyle} /></button></header><div style={modalBodyStyle}><div style={fieldGridStyle}><FieldLabel title="名称" description="用于识别此供应商，不会发送给模型服务。"><TextField aria-label="供应商名称" value={provider.name} onChange={(value) => onUpdate((current) => ({ ...current, name: value }))} placeholder="例如：公司 OpenAI" /></FieldLabel><FieldLabel title="类型 / Kind" description="决定默认地址与兼容方式。"><SelectField ariaLabel="供应商类型" value={provider.kind} onChange={(value) => onUpdate((current) => ({ ...current, kind: value, base_url: providerBaseUrl(value) || current.base_url }))} options={PROVIDER_PRESETS.map(({ value, label }) => ({ value, label }))} /></FieldLabel><FieldLabel title="Base URL" description="只允许 HTTPS；本机 Ollama 可使用 localhost HTTP。"><TextField aria-label="AI Base URL" value={provider.base_url} onChange={(value) => onUpdate((current) => ({ ...current, base_url: value }))} placeholder="https://api.openai.com/v1" /></FieldLabel><FieldLabel title="模型名" description="可从下拉列表选择，也可直接手动输入（如 deepseek-chat）。">
+          <div style={modelFieldStyle}>
+            <div style={modelControlsStyle}>
+              {modelSelectOptions.length ? (
+                <SelectField
+                  ariaLabel="AI 模型选择"
+                  value={provider.model}
+                  onChange={(value) => onUpdate((current) => ({ ...current, model: value }))}
+                  options={[
+                    { value: "", label: "手动输入或选择模型" },
+                    ...modelSelectOptions.map((value) => ({ value, label: value })),
+                  ]}
+                  style={modelSelectStyle}
+                />
+              ) : null}
+              <TextField
+                aria-label="AI 模型名"
+                value={provider.model}
+                onChange={(value) => onUpdate((current) => ({ ...current, model: value }))}
+                placeholder="例如 deepseek-chat 或从列表选择"
+                style={modelInputStyle}
+              />
+              <button
+                type="button"
+                onClick={onListModels}
+                disabled={modelLoading || saving}
+                style={{ ...smallButtonStyle, ...modelButtonStyle }}
+              >
+                <Download style={buttonIconStyle} />
+                {modelLoading ? "获取中…" : "获取模型"}
+              </button>
+            </div>
+            <span style={helperTextStyle}>
+              提示：设置 Key 后可获取模型列表；若服务商接口报错（如余额不足或无列表权限），亦可直接填写模型名并保存使用。
+            </span>
+            {modelError ? (
+              <span role="alert" aria-live="assertive" style={errorTextStyle}>
+                {modelError}
+              </span>
+            ) : null}
+          </div>
+        </FieldLabel><FieldLabel title="Temperature" description="控制输出随机程度，范围 0–2。"><NumberField aria-label="AI Temperature" value={provider.temperature} min={0} max={2} step={0.1} onChange={(value) => onUpdate((current) => ({ ...current, temperature: value }))} /></FieldLabel><FieldLabel title="最大输出 token" description="限制单次模型输出长度。"><NumberField aria-label="AI 最大输出 token" value={provider.max_output_tokens} min={1} max={200000} step={1} onChange={(value) => onUpdate((current) => ({ ...current, max_output_tokens: Math.round(value) }))} /></FieldLabel><FieldLabel title="超时（秒）" description="请求超过该时长后返回失败。"><NumberField aria-label="AI 超时秒数" value={provider.timeout_secs} min={1} max={600} step={1} onChange={(value) => onUpdate((current) => ({ ...current, timeout_secs: Math.round(value) }))} /></FieldLabel><FieldLabel title="API Key" description={provider.api_key_configured ? `已配置${provider.api_key_hint ? `（${provider.api_key_hint}）` : ""}；输入新值会替换。` : "密钥只保存到系统凭据库，不会进入设置文件或请求日志。"}><div style={keyFieldStyle}><div style={{ position: "relative", minWidth: 0 }}><KeyRound aria-hidden="true" style={keyIconStyle} /><input aria-label="AI API Key" type="password" autoComplete="off" value={apiKey} onChange={(event) => onApiKeyChange(event.target.value)} disabled={credentialSaving || Boolean(apiKeyWarning)} placeholder={apiKeyWarning ? "系统凭据库不可用" : provider.api_key_configured ? "留空以保留当前 Key" : "输入 API Key"} style={{ ...inputStyle, width: "100%", minWidth: 0, paddingLeft: 34 }} /></div><div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}><button type="button" disabled={credentialSaving || Boolean(apiKeyWarning)} onClick={onSetApiKey} style={smallButtonStyle}>设置 Key</button>{provider.api_key_configured ? <button type="button" disabled={credentialSaving || Boolean(apiKeyWarning)} onClick={onClearApiKey} style={{ ...smallButtonStyle, color: "var(--color-warning-text)" }}>清除 Key</button> : null}</div>{apiKeyWarning ? <span role="status" style={helperTextStyle}>{apiKeyWarning}</span> : null}</div></FieldLabel></div>{provider.kind === "ollama" ? <div style={infoNoteStyle}><Wifi style={buttonIconStyle} />Ollama 通常运行在本机，API Key 可以留空。</div> : null}</div><footer style={modalFooterStyle}>{!isNew ? <button type="button" onClick={onDelete} disabled={saving} style={{ ...smallButtonStyle, color: "var(--color-error-text)" }}><Trash2 style={buttonIconStyle} />删除供应商</button> : <span /> }<div style={rowActionsStyle}>{!isActive ? <button type="button" onClick={onSetCurrent} disabled={saving || isNew} style={smallButtonStyle}>设为当前</button> : <span style={activeBadgeStyle}>当前使用</span>}<button type="button" onClick={onClose} disabled={saving} style={secondaryButtonStyle}>取消</button><button type="button" onClick={onSave} disabled={saving || credentialSaving} style={primaryButtonStyle}><Save style={buttonIconStyle} />{saving ? "保存中…" : "保存并关闭"}</button></div></footer></section></div>;
 }
 
 function AsrStatusBadge({ status, unavailable }: { status: AsrModelStatus; unavailable: boolean }) { const labels: Record<AsrModelStatus["state"], string> = { missing: "未下载", downloading: "下载中", installed: "已就绪", incomplete: "不完整" }; return <span style={statusBadgeStyle}>{unavailable ? "暂不可用" : labels[status.state]}</span>; }

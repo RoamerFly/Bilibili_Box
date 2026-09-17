@@ -40,6 +40,7 @@ pub struct AiSettingsResponseSettings {
     pub asr_model: String,
     pub asr_language: String,
     pub prompt_template: String,
+    pub reply_auto_context: bool,
 }
 
 impl AiSettingsResponseSettings {
@@ -52,6 +53,7 @@ impl AiSettingsResponseSettings {
             asr_model: settings.asr_model,
             asr_language: settings.asr_language,
             prompt_template: settings.prompt_template,
+            reply_auto_context: settings.reply_auto_context,
         }
     }
 }
@@ -147,6 +149,22 @@ pub(crate) fn read_ai_api_key_for_provider(
             }
         }
         return Ok(Some(value));
+    }
+    // Check global fallback
+    if let Ok(global_store) = KeyringSecretStore::for_profile_provider("global", provider_id) {
+        if let Ok(Some(value)) = global_store.get() {
+            let _ = store.set(&value);
+            return Ok(Some(value));
+        }
+    }
+    // Check guest fallback if current profile is not guest
+    if profile != "guest" {
+        if let Ok(guest_store) = KeyringSecretStore::for_profile_provider("guest", provider_id) {
+            if let Ok(Some(value)) = guest_store.get() {
+                let _ = store.set(&value);
+                return Ok(Some(value));
+            }
+        }
     }
     if !migrate_legacy {
         return Ok(None);
@@ -251,6 +269,26 @@ fn unavailable_ai_response(settings: AiSettings) -> AiSettingsResponse {
     }
 }
 
+struct FallbackSecretStore {
+    app: AppHandle,
+    provider_id: String,
+    primary: KeyringSecretStore,
+}
+
+impl SecretStore for FallbackSecretStore {
+    fn get(&self) -> Result<Option<String>, String> {
+        read_ai_api_key_for_provider(&self.app, &self.provider_id, false)
+    }
+
+    fn set(&self, value: &str) -> Result<(), String> {
+        self.primary.set(value)
+    }
+
+    fn clear(&self) -> Result<(), String> {
+        self.primary.clear()
+    }
+}
+
 /// Build the non-sensitive settings response from the current profile.  Both
 /// `get_ai_settings` and `save_ai_settings` use this path so that the UI sees
 /// the same canonical provider list (including the selected model) immediately
@@ -270,10 +308,12 @@ fn ai_response_for_app(
         return Ok(unavailable_ai_response(settings));
     }
     match read_ai_response(settings.clone(), |provider| {
-        Ok(Box::new(KeyringSecretStore::for_profile_provider(
-            &profile,
-            &provider.id,
-        )?))
+        let primary = KeyringSecretStore::for_profile_provider(&profile, &provider.id)?;
+        Ok(Box::new(FallbackSecretStore {
+            app: app.clone(),
+            provider_id: provider.id.clone(),
+            primary,
+        }))
     }) {
         Ok(response) => Ok(response),
         Err(_) => Ok(unavailable_ai_response(settings)),
@@ -322,6 +362,7 @@ pub fn save_ai_settings(
     // this keeps the selected provider model and active provider synchronized
     // with cached player views without exposing any secret material.
     let saved = config.read().ai.clone().normalize();
+    let _ = Config::save_global_ai(&app, &saved);
     ai_response_for_app(&app, saved)
 }
 
@@ -338,7 +379,11 @@ pub fn set_ai_api_key(app: AppHandle, request: AiApiKeyRequest) -> Result<(), St
         return Err("AI 供应商不存在".to_string());
     }
     let store = current_secret_store(&app, provider_id)?;
-    store.set(api_key)
+    store.set(api_key)?;
+    if let Ok(global_store) = KeyringSecretStore::for_profile_provider("global", provider_id) {
+        let _ = global_store.set(api_key);
+    }
+    Ok(())
 }
 
 /// Explicitly remove the current profile's API key from the platform keyring.
@@ -349,7 +394,11 @@ pub fn clear_ai_api_key(app: AppHandle, request: AiApiKeyRequest) -> Result<(), 
         return Err("AI 供应商不存在".to_string());
     }
     let store = current_secret_store(&app, provider_id)?;
-    store.clear()
+    store.clear()?;
+    if let Ok(global_store) = KeyringSecretStore::for_profile_provider("global", provider_id) {
+        let _ = global_store.clear();
+    }
+    Ok(())
 }
 
 fn restore_secret_snapshots(
@@ -558,29 +607,77 @@ fn models_url(provider_kind: &str, base: &Url) -> Result<Url, String> {
     Ok(url)
 }
 
-fn model_status_error(status: StatusCode) -> String {
-    match status {
-        StatusCode::UNAUTHORIZED =>
-            "AI_MODELS_AUTH_FAILED: API key 无效或已过期，请检查该供应商的 API key".to_string(),
-        StatusCode::PAYMENT_REQUIRED =>
-            "AI_MODELS_BALANCE_REQUIRED: 供应商账户余额不足或未开通服务，请检查账户状态".to_string(),
-        StatusCode::FORBIDDEN =>
-            "AI_MODELS_FORBIDDEN: API key 没有访问模型列表的权限".to_string(),
-        StatusCode::NOT_FOUND =>
-            "AI_MODELS_ENDPOINT_UNSUPPORTED: 服务未提供 OpenAI-compatible /models 接口，请确认 Base URL（DeepSeek 请使用 https://api.deepseek.com）".to_string(),
-        StatusCode::REQUEST_TIMEOUT =>
-            "AI_MODELS_TIMEOUT: AI 服务响应超时，请稍后重试".to_string(),
-        StatusCode::TOO_MANY_REQUESTS =>
-            "AI_MODELS_RATE_LIMITED: AI 服务请求过于频繁，请稍后重试".to_string(),
-        status if status.is_redirection() =>
-            "AI_MODELS_REDIRECT_UNSUPPORTED: AI 服务要求重定向，当前请求不会跟随重定向，请检查 Base URL".to_string(),
-        status if status.is_server_error() =>
-            "AI_MODELS_SERVER_ERROR: AI 服务暂时不可用，请稍后重试".to_string(),
-        status => format!(
-            "AI_MODELS_HTTP_ERROR: AI 服务拒绝了模型列表请求（HTTP {}）",
-            status.as_u16()
-        ),
+fn extract_error_message(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let msg = value.get("error")?.get("message")?.as_str()?;
+    let trimmed = msg.trim();
+    if !trimmed.is_empty() && trimmed.chars().count() <= 300 {
+        Some(trimmed.to_string())
+    } else {
+        None
     }
+}
+
+fn model_status_error_with_body(status: StatusCode, body: &str) -> String {
+    let server_msg = extract_error_message(body);
+    match status {
+        StatusCode::UNAUTHORIZED => {
+            if let Some(msg) = &server_msg {
+                let lower = msg.to_ascii_lowercase();
+                if lower.contains("insufficient") || lower.contains("balance") {
+                    return format!("AI_MODELS_BALANCE_REQUIRED: 供应商账户余额不足或未开通服务（服务商提示：{msg}）");
+                }
+                format!("AI_MODELS_AUTH_FAILED: API key 无效或已过期（服务商提示：{msg}），请检查该供应商的 API key")
+            } else {
+                "AI_MODELS_AUTH_FAILED: API key 无效或已过期，请检查该供应商的 API key".to_string()
+            }
+        }
+        StatusCode::PAYMENT_REQUIRED => {
+            if let Some(msg) = &server_msg {
+                format!("AI_MODELS_BALANCE_REQUIRED: 供应商账户余额不足或未开通服务（服务商提示：{msg}）")
+            } else {
+                "AI_MODELS_BALANCE_REQUIRED: 供应商账户余额不足或未开通服务，请检查账户状态".to_string()
+            }
+        }
+        StatusCode::FORBIDDEN => {
+            if let Some(msg) = &server_msg {
+                format!("AI_MODELS_FORBIDDEN: API key 没有访问模型列表的权限（服务商提示：{msg}）")
+            } else {
+                "AI_MODELS_FORBIDDEN: API key 没有访问模型列表的权限".to_string()
+            }
+        }
+        StatusCode::NOT_FOUND => {
+            "AI_MODELS_ENDPOINT_UNSUPPORTED: 服务未提供 OpenAI-compatible /models 接口，请确认 Base URL（DeepSeek 请使用 https://api.deepseek.com）".to_string()
+        }
+        StatusCode::REQUEST_TIMEOUT => {
+            "AI_MODELS_TIMEOUT: AI 服务响应超时，请稍后重试".to_string()
+        }
+        StatusCode::TOO_MANY_REQUESTS => {
+            if let Some(msg) = &server_msg {
+                format!("AI_MODELS_RATE_LIMITED: AI 服务请求过于频繁，请稍后重试（服务商提示：{msg}）")
+            } else {
+                "AI_MODELS_RATE_LIMITED: AI 服务请求过于频繁，请稍后重试".to_string()
+            }
+        }
+        status if status.is_redirection() => {
+            "AI_MODELS_REDIRECT_UNSUPPORTED: AI 服务要求重定向，当前请求不会跟随重定向，请检查 Base URL".to_string()
+        }
+        status if status.is_server_error() => {
+            "AI_MODELS_SERVER_ERROR: AI 服务暂时不可用，请稍后重试".to_string()
+        }
+        status => {
+            if let Some(msg) = &server_msg {
+                format!("AI_MODELS_HTTP_ERROR: AI 服务拒绝了模型列表请求（HTTP {}，服务商提示：{}）", status.as_u16(), msg)
+            } else {
+                format!("AI_MODELS_HTTP_ERROR: AI 服务拒绝了模型列表请求（HTTP {}）", status.as_u16())
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn model_status_error(status: StatusCode) -> String {
+    model_status_error_with_body(status, "")
 }
 
 fn is_dns_error(detail: &str) -> bool {
@@ -721,7 +818,8 @@ pub async fn list_ai_models(
         .map_err(|error| model_request_error(&error))?;
     let status = response.status();
     if !status.is_success() {
-        return Err(model_status_error(status));
+        let err_body = response.text().await.unwrap_or_default();
+        return Err(model_status_error_with_body(status, &err_body));
     }
     if response
         .content_length()

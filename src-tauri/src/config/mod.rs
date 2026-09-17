@@ -160,6 +160,10 @@ fn default_ai_prompt_template() -> String {
     "视频标题：{video.title}\n视频简介：{video.description}\n用户补充：{video.note}".to_string()
 }
 
+fn default_ai_reply_auto_context() -> bool {
+    true
+}
+
 /// Non-sensitive settings for one AI provider. API keys are stored separately in
 /// the platform keyring under the current profile and this provider's stable id.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -218,6 +222,8 @@ pub struct AiSettings {
     pub asr_language: String,
     #[serde(default = "default_ai_prompt_template")]
     pub prompt_template: String,
+    #[serde(default = "default_ai_reply_auto_context")]
+    pub reply_auto_context: bool,
 }
 
 /// Deserialize both the current multi-provider shape and the previous single
@@ -256,6 +262,8 @@ impl<'de> Deserialize<'de> for AiSettings {
             asr_language: String,
             #[serde(default = "default_ai_prompt_template")]
             prompt_template: String,
+            #[serde(default = "default_ai_reply_auto_context")]
+            reply_auto_context: bool,
         }
         let wire = Wire::deserialize(deserializer)?;
         let providers = wire.providers.unwrap_or_else(|| {
@@ -285,6 +293,7 @@ impl<'de> Deserialize<'de> for AiSettings {
             asr_model: wire.asr_model,
             asr_language: wire.asr_language,
             prompt_template: wire.prompt_template,
+            reply_auto_context: wire.reply_auto_context,
         })
     }
 }
@@ -299,6 +308,7 @@ impl Default for AiSettings {
             asr_model: default_ai_asr_model(),
             asr_language: default_ai_asr_language(),
             prompt_template: default_ai_prompt_template(),
+            reply_auto_context: default_ai_reply_auto_context(),
         }
     }
 }
@@ -487,6 +497,17 @@ impl AiSettings {
         }
         Err("AI base_url 仅支持 https；本地服务可使用 loopback http".to_string())
     }
+
+    pub fn is_configured(&self) -> bool {
+        self.enabled
+            || !self.reply_auto_context
+            || self.providers.len() > 1
+            || self.providers.first().is_some_and(|p| {
+                !p.model.trim().is_empty()
+                    || p.provider.trim() != default_ai_provider()
+                    || p.base_url.trim() != default_ai_base_url()
+            })
+    }
 }
 
 fn valid_provider_id(value: &str) -> bool {
@@ -637,6 +658,40 @@ impl Config {
         Ok(Self::app_root_dir(app)?.join("data"))
     }
 
+    pub fn global_ai_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+        Ok(Self::data_root_dir(app)?.join("ai.json"))
+    }
+
+    pub fn load_global_ai(app: &AppHandle) -> Option<AiSettings> {
+        let path = Self::global_ai_config_path(app).ok()?;
+        let content = std::fs::read_to_string(&path).ok()?;
+        let settings: AiSettings = serde_json::from_str(&content).ok()?;
+        let normalized = settings.normalize();
+        if normalized.validate().is_ok() {
+            Some(normalized)
+        } else {
+            None
+        }
+    }
+
+    pub fn save_global_ai(app: &AppHandle, ai: &AiSettings) -> Result<(), String> {
+        let normalized = ai.clone().normalize();
+        normalized.validate()?;
+        let data_root = Self::data_root_dir(app)?;
+        std::fs::create_dir_all(&data_root).map_err(|e| format!("创建数据根目录失败: {e}"))?;
+        let path = Self::global_ai_config_path(app)?;
+        let content = serde_json::to_string_pretty(&normalized)
+            .map_err(|e| format!("序列化全局 AI 配置失败: {e}"))?;
+        let temporary = path.with_file_name(format!(".ai.{}.tmp", uuid::Uuid::new_v4()));
+        std::fs::write(&temporary, content)
+            .map_err(|e| format!("写入全局 AI 配置临时文件失败: {e}"))?;
+        if let Err(error) = replace_config_atomically(&temporary, &path) {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(format!("写入全局 AI 配置文件失败: {error}"));
+        }
+        Ok(())
+    }
+
     pub fn profile_name_from_user(uname: &str, mid: i64) -> String {
         let name = Self::sanitize_path_component(uname);
         if mid > 0 {
@@ -747,6 +802,7 @@ impl Config {
                     .unwrap_or_else(|_| Self::merge_config(&config_string, &user_data_dir));
                 migrated.sessdata = session_config.sessdata.clone();
                 migrated.cookie = session_config.cookie.clone();
+                migrated.ai = session_config.ai.clone();
                 return Ok(Self::normalize_loaded_config(app, migrated));
             }
         }
@@ -1082,7 +1138,14 @@ impl Config {
         config.card_page_columns = config.card_page_columns.clamp(1, 8);
         config.card_page_size = config.card_page_rows * config.card_page_columns;
 
-        let normalized_ai = config.ai.normalize();
+        let mut normalized_ai = config.ai.normalize();
+        if !normalized_ai.is_configured() {
+            if let Some(global_ai) = Self::load_global_ai(app) {
+                if global_ai.is_configured() {
+                    normalized_ai = global_ai;
+                }
+            }
+        }
         config.ai = if normalized_ai.validate().is_ok() {
             normalized_ai
         } else {
@@ -1105,6 +1168,9 @@ impl Config {
 
     pub fn save(&self, app: &AppHandle) -> Result<(), String> {
         self.ai.validate()?;
+        if self.ai.is_configured() {
+            let _ = Self::save_global_ai(app, &self.ai);
+        }
         let user_data_dir = Self::user_data_dir(app)?;
         Self::ensure_user_dirs(app)?;
 
@@ -1143,6 +1209,17 @@ mod tests {
         assert_eq!(settings.asr_engine, "sensevoice");
         assert_eq!(settings.asr_model, "sensevoice-small-int8");
         assert_eq!(settings.asr_language, "auto");
+        assert!(settings.reply_auto_context);
+    }
+
+    #[test]
+    fn ai_settings_reply_auto_context_roundtrip() {
+        let value = serde_json::json!({
+            "reply_auto_context": false
+        });
+        let settings: AiSettings = serde_json::from_value(value).unwrap();
+        assert!(!settings.reply_auto_context);
+        assert!(settings.is_configured());
     }
 
     #[test]

@@ -228,5 +228,20 @@ describe("AI settings helpers", () => {
     expect(settingsAreDirty({ ...settings, active_provider_id: "other" }, settings.enabled, settings.active_provider_id, persistedIds, persistedProviders, settings.prompt_template)).toBe(true);
     const changedModel = { ...settings, providers: [{ ...settings.providers[0], model: "different-model" }] };
     expect(settingsAreDirty(changedModel, settings.enabled, settings.active_provider_id, persistedIds, persistedProviders, settings.prompt_template)).toBe(true);
+    expect(settingsAreDirty({ ...settings, reply_auto_context: false }, settings.enabled, settings.active_provider_id, persistedIds, persistedProviders, settings.prompt_template, true)).toBe(true);
+  });
+
+  it("handles reply_auto_context setting serialization and defaults", () => {
+    const defaultSettings = mergeAiSettings({});
+    expect(defaultSettings.reply_auto_context).toBe(true);
+
+    const disabledSettings = mergeAiSettings({ reply_auto_context: false });
+    expect(disabledSettings.reply_auto_context).toBe(false);
+
+    const saveReq = buildAiSettingsSaveRequest(disabledSettings);
+    expect(saveReq.request.settings.reply_auto_context).toBe(false);
+
+    const stripped = stripAiTransientFields(disabledSettings);
+    expect(stripped.reply_auto_context).toBe(false);
   });
 });

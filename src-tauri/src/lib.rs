@@ -134,6 +134,7 @@ pub fn run() {
             commands::asr::cancel_asr_model_download,
             ai::get_ai_summary,
             ai::generate_ai_summary,
+            ai::generate_ai_reply,
             ai::delete_ai_summary_cache,
             ai::cancel_ai_summary,
             ai::preview_ai_summary_prompt,

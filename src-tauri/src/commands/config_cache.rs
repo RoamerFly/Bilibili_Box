@@ -35,9 +35,13 @@ pub fn get_config(config: State<'_, Arc<RwLock<Config>>>) -> Config {
 pub fn save_config(
     app: AppHandle,
     config: State<'_, Arc<RwLock<Config>>>,
-    new_config: Config,
+    mut new_config: Config,
 ) -> Result<(), String> {
     let previous_ai = config.read().ai.clone().normalize();
+    // If incoming new_config.ai is not configured or missing, preserve current configured AI settings
+    if !new_config.ai.is_configured() && previous_ai.is_configured() {
+        new_config.ai = previous_ai.clone();
+    }
     let incoming_ai = new_config.ai.clone().normalize();
     if previous_ai
         .providers

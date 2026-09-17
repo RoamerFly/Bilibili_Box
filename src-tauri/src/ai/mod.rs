@@ -635,6 +635,137 @@ fn cancel_registered_job(key: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiReplyRequest {
+    pub context: String,
+    pub target_speaker: Option<String>,
+    pub style: Option<String>,
+    pub instructions: Option<String>,
+    pub video_title: Option<String>,
+}
+
+#[tauri::command]
+pub async fn generate_ai_reply(
+    app: AppHandle,
+    config: State<'_, Arc<RwLock<Config>>>,
+    request: Option<AiReplyRequest>,
+    context: Option<String>,
+    target_speaker: Option<String>,
+    style: Option<String>,
+    instructions: Option<String>,
+    video_title: Option<String>,
+) -> Result<String, String> {
+    let settings = config.read().ai.clone().normalize();
+    if !settings.enabled {
+        return Err("AI_REPLY_DISABLED: 请先在设置中启用 AI 功能并配置服务供应商".to_string());
+    }
+
+    let req = if let Some(r) = request {
+        r
+    } else {
+        AiReplyRequest {
+            context: context.unwrap_or_default(),
+            target_speaker,
+            style,
+            instructions,
+            video_title,
+        }
+    };
+
+    if req.context.trim().is_empty() {
+        return Err("AI_REPLY_CONTEXT_EMPTY: 评论上下文不能为空".to_string());
+    }
+
+    let ai_client = build_ai_client(&app, settings, true)?;
+
+    let system_prompt = "你是一个正在浏览 B站 (Bilibili) 视频的真实普通用户。你将以“我”的第一人称视角在评论区参与讨论并回复他人评论。\n\
+【回复准则】\n\
+1. 必须完全以“我”的第一人称视角回复，承接上下文脉络，切中要害；\n\
+2. 仅输出回复正文内容，严禁输出任何问候、引言前缀（如“好的，这是为您生成的回复：”）、解释说明或前后引号；\n\
+3. 用词生动自然、贴近 B站 社区交流氛围，拒绝机械生硬的 AI 腔调，字数通常在 15~80 字之间（除非用户另有要求）；\n\
+4. 严禁生成人身攻击、违规或低俗内容。";
+
+    let mut user_prompt = String::new();
+    if let Some(title) = &req.video_title {
+        if !title.trim().is_empty() {
+            user_prompt.push_str(&format!("【当前视频标题】：{}\n\n", title.trim()));
+        }
+    }
+    user_prompt.push_str("【评论区讨论上下文】：\n");
+    user_prompt.push_str(&req.context);
+
+    if let Some(target) = &req.target_speaker {
+        if !target.trim().is_empty() {
+            user_prompt.push_str(&format!("\n\n当前正在回复的对象：{}", target.trim()));
+        }
+    }
+
+    if let Some(style) = &req.style {
+        let style_desc = match style.as_str() {
+            "humorous" => "风趣幽默、适度调侃、接梗自然",
+            "agree" => "真诚赞同、深有共鸣、补充支持",
+            "question" => "理性探究、指出疑问、客观求证",
+            _ => "友善探讨、平和交流、观点清晰",
+        };
+        user_prompt.push_str(&format!("\n期望语气风格：{}", style_desc));
+    }
+
+    if let Some(inst) = &req.instructions {
+        if !inst.trim().is_empty() {
+            user_prompt.push_str(&format!("\n【用户补充要求/背景】：{}", inst.trim()));
+        }
+    }
+
+    send_text_completion(&ai_client, system_prompt, &user_prompt, 256).await
+}
+
+async fn send_text_completion(
+    context: &AiClientContext,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_tokens: u32,
+) -> Result<String, String> {
+    let endpoint = chat_completions_url(&context.base_url)?;
+    let mut payload = json!({
+        "model": context.model,
+        "temperature": 0.7,
+        "max_tokens": max_tokens,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+    });
+    if supports_reasoning_effort(&context.settings, &context.base_url) {
+        payload["reasoning_effort"] = json!("none");
+    }
+    let mut request = context
+        .http
+        .post(endpoint)
+        .timeout(Duration::from_secs(context.settings.timeout_secs))
+        .header("accept", "application/json")
+        .header("content-type", "application/json")
+        .json(&payload);
+    if let Some(api_key) = context.api_key.as_deref() {
+        request = request.bearer_auth(api_key);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|e| format!("AI 服务请求失败或超时: {e}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("AI 服务返回 HTTP {status}"));
+    }
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|_| "AI 服务返回了无效响应".to_string())?;
+    let content = extract_response_content(&body)
+        .ok_or_else(|| "AI 服务响应中缺少生成文本".to_string())?;
+    Ok(content.trim().trim_matches('"').to_string())
+}
+
 fn validate_request(request: &AiSummaryRequest) -> Result<(), String> {
     if request.cid <= 0 || (request.aid <= 0 && request.bvid.trim().is_empty()) {
         return Err("AI_SUMMARY_INVALID_VIDEO: bvid/cid 必须有效".to_string());

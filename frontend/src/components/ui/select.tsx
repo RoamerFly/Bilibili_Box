@@ -25,6 +25,7 @@ const Select = ({ value, onValueChange, disabled = false, className, children }:
   const [open, setOpen] = React.useState(false);
   const [activeLabel, setActiveLabel] = React.useState("");
   const timeoutRef = React.useRef<number | null>(null);
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
 
   const handleMouseEnter = () => {
     if (disabled) return;
@@ -58,9 +59,23 @@ const Select = ({ value, onValueChange, disabled = false, className, children }:
     };
   }, []);
 
+  React.useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [open]);
+
   return (
     <SelectContext.Provider value={{ value, onValueChange, open, disabled, setOpen, activeLabel, setActiveLabel }}>
       <div
+        ref={containerRef}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         className={cn("relative inline-flex flex-col min-w-0", className)}
@@ -164,11 +179,12 @@ const SelectItem = ({
     .map((child) => (typeof child === "string" || typeof child === "number" ? String(child) : ""))
     .join("");
 
+  const setActiveLabel = context.setActiveLabel;
   React.useEffect(() => {
     if (isChecked) {
-      context.setActiveLabel(label);
+      setActiveLabel(label);
     }
-  }, [isChecked, label, context]);
+  }, [isChecked, label, setActiveLabel]);
 
   const handleSelect = (e: React.MouseEvent) => {
     e.stopPropagation();
