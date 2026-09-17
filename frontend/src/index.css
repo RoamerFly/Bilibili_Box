@@ -51,6 +51,9 @@
   --color-warning-text: #c2410c;
   --color-error-text: #dc2626;
   --color-info-text: #2563eb;
+  --color-purple: #9333ea;
+  --color-purple-bg: rgba(147, 51, 234, 0.08);
+  --color-purple-border: rgba(147, 51, 234, 0.35);
 
   /* BottomBar 深色区域 */
   --color-bottom-bg: #1c1c28;
@@ -150,6 +153,9 @@ html[data-theme="dark"] {
   --color-warning-text: #fdba74;
   --color-error-text: #fca5a5;
   --color-info-text: #93c5fd;
+  --color-purple: #c084fc;
+  --color-purple-bg: rgba(192, 132, 252, 0.12);
+  --color-purple-border: rgba(192, 132, 252, 0.35);
 
   --color-bottom-pill-bg: linear-gradient(105deg, rgba(7, 9, 37, 0.98), rgba(14, 14, 55, 0.98) 58%, rgba(27, 13, 69, 0.98));
   --color-bottom-pill-border: rgba(142, 139, 255, 0.2);
