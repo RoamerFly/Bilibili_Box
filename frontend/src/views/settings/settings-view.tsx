@@ -730,8 +730,8 @@ export function SettingsView() {
         <SettingRow
           icon={<Type style={{ width: 21, height: 21, color: "var(--color-purple)" }} />}
           iconBgColor="var(--color-purple-bg)"
-          title="全局字体大小"
-          description="调整全界面的文字基础字号（包括左侧导航栏与各页面），滑动实时缩放"
+          title="全局界面与字体缩放"
+          description="调整全界面的文字基础字号与整体布局缩放（包括左侧导航栏与各页面内容），滑动实时生效"
           control={
             <FontSizeSliderControl
               value={appFontSize}

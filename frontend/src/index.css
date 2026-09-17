@@ -2,7 +2,8 @@
 
 :root {
   color-scheme: light;
-  /* 全局字号基准 (支持设置滑动缩放与手动px输入) */
+  /* 全局界面与字号缩放基准 */
+  --bb-app-zoom: 1;
   --bb-app-font-size: 14px;
 
   /* 主色 - 蓝紫色系 */
@@ -186,6 +187,10 @@ html[data-theme="dark"] {
   padding: 0;
 }
 
+html {
+  zoom: var(--bb-app-zoom, 1);
+}
+
 html,
 body {
   height: 100%;
@@ -341,6 +346,8 @@ html.bb-player-fullscreen-active body {
 
 /* BiliBox home shell */
 .bb-app-frame {
+  height: 100%;
+  width: 100%;
   overflow: hidden;
   isolation: isolate;
   background: var(--color-app-chrome-bg);

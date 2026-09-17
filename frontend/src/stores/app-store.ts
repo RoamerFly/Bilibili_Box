@@ -28,6 +28,18 @@ export const MIN_APP_FONT_SIZE = 11;
 export const MAX_APP_FONT_SIZE = 22;
 export type ContentFontSize = "small" | "standard" | "large" | "huge";
 
+export function applyGlobalAppScale(fontSize: number) {
+  if (typeof document === "undefined") return;
+  const clamped = Math.max(MIN_APP_FONT_SIZE, Math.min(MAX_APP_FONT_SIZE, Math.round(Number(fontSize) * 10) / 10 || DEFAULT_APP_FONT_SIZE));
+  const zoomRatio = Math.round((clamped / DEFAULT_APP_FONT_SIZE) * 10000) / 10000;
+  try {
+    document.documentElement.style.zoom = String(zoomRatio);
+  } catch {}
+  document.documentElement.style.setProperty("--bb-app-zoom", String(zoomRatio));
+  document.documentElement.style.setProperty("--bb-app-font-size", `${DEFAULT_APP_FONT_SIZE}px`);
+  document.documentElement.style.setProperty("--bb-app-font-size-target", `${clamped}px`);
+}
+
 export interface CardLayoutPreference {
   rows: number;
   columns: number;
@@ -546,18 +558,14 @@ export const useAppStore = create<AppState>()(
       appFontSize: DEFAULT_APP_FONT_SIZE,
       setAppFontSize: (size) => {
         const clamped = Math.max(MIN_APP_FONT_SIZE, Math.min(MAX_APP_FONT_SIZE, Math.round(Number(size) * 10) / 10 || DEFAULT_APP_FONT_SIZE));
-        if (typeof document !== "undefined") {
-          document.documentElement.style.setProperty("--bb-app-font-size", `${clamped}px`);
-        }
+        applyGlobalAppScale(clamped);
         set({ appFontSize: clamped });
       },
       contentFontSize: "standard",
       setContentFontSize: (size) => {
         const map: Record<ContentFontSize, number> = { small: 13, standard: 14, large: 15, huge: 16 };
-        const num = map[size] ?? 14;
-        if (typeof document !== "undefined") {
-          document.documentElement.style.setProperty("--bb-app-font-size", `${num}px`);
-        }
+        const num = map[size] ?? DEFAULT_APP_FONT_SIZE;
+        applyGlobalAppScale(num);
         set({ contentFontSize: size, appFontSize: num });
       },
 
@@ -637,6 +645,11 @@ export const useAppStore = create<AppState>()(
         recommendPageState: state.recommendPageState,
         favoritesPageState: state.favoritesPageState,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.appFontSize) {
+          applyGlobalAppScale(state.appFontSize);
+        }
+      },
     }
   )
 );

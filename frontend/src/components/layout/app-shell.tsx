@@ -1,5 +1,5 @@
 import { lazy, Suspense, useLayoutEffect, useRef, useEffect, useState, type ComponentType, type MouseEvent } from "react";
-import { useAppStore, type AppConfig, type ViewType } from "@/stores/app-store";
+import { useAppStore, applyGlobalAppScale, type AppConfig, type ViewType } from "@/stores/app-store";
 import { useConfigWatch } from "@/hooks/use-config-watch";
 import { useDownloadEvents } from "@/hooks/use-download-events";
 import { Sidebar } from "./sidebar";
@@ -110,9 +110,7 @@ export function AppShell() {
   }, [theme]);
 
   useEffect(() => {
-    if (typeof document !== "undefined") {
-      document.documentElement.style.setProperty("--bb-app-font-size", `${appFontSize}px`);
-    }
+    applyGlobalAppScale(appFontSize);
   }, [appFontSize]);
 
   useLayoutEffect(() => {
@@ -226,7 +224,7 @@ export function AppShell() {
   };
 
   return (
-    <div className="bb-app-frame flex h-screen w-screen overflow-hidden">
+    <div className="bb-app-frame flex h-full w-full overflow-hidden">
       {/* Sidebar */}
       <Sidebar />
 
