@@ -23,7 +23,9 @@ export type CardLayoutKey = CardViewModeKey;
 export const CARD_LAYOUT_KEYS: CardLayoutKey[] = ["search", "recommend", "dynamic", "favorites", "watchlater", "history", "bangumi", "up"];
 export const DEFAULT_CARD_LAYOUT = { rows: 3, columns: 2 } as const;
 export const DEFAULT_CARD_SCALE = 1;
-
+export const DEFAULT_APP_FONT_SIZE = 14;
+export const MIN_APP_FONT_SIZE = 11;
+export const MAX_APP_FONT_SIZE = 22;
 export type ContentFontSize = "small" | "standard" | "large" | "huge";
 
 export interface CardLayoutPreference {
@@ -340,8 +342,10 @@ interface AppState {
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
 
-  contentFontSize: ContentFontSize;
-  setContentFontSize: (size: ContentFontSize) => void;
+  appFontSize: number;
+  setAppFontSize: (size: number) => void;
+  contentFontSize?: ContentFontSize;
+  setContentFontSize?: (size: ContentFontSize) => void;
 
   bottomBarExpanded: boolean;
   toggleBottomBar: () => void;
@@ -539,8 +543,23 @@ export const useAppStore = create<AppState>()(
       sidebarCollapsed: false,
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
 
+      appFontSize: DEFAULT_APP_FONT_SIZE,
+      setAppFontSize: (size) => {
+        const clamped = Math.max(MIN_APP_FONT_SIZE, Math.min(MAX_APP_FONT_SIZE, Math.round(Number(size) * 10) / 10 || DEFAULT_APP_FONT_SIZE));
+        if (typeof document !== "undefined") {
+          document.documentElement.style.setProperty("--bb-app-font-size", `${clamped}px`);
+        }
+        set({ appFontSize: clamped });
+      },
       contentFontSize: "standard",
-      setContentFontSize: (size) => set({ contentFontSize: size }),
+      setContentFontSize: (size) => {
+        const map: Record<ContentFontSize, number> = { small: 13, standard: 14, large: 15, huge: 16 };
+        const num = map[size] ?? 14;
+        if (typeof document !== "undefined") {
+          document.documentElement.style.setProperty("--bb-app-font-size", `${num}px`);
+        }
+        set({ contentFontSize: size, appFontSize: num });
+      },
 
       bottomBarExpanded: false,
       toggleBottomBar: () => set((state) => ({ bottomBarExpanded: !state.bottomBarExpanded })),
@@ -610,6 +629,7 @@ export const useAppStore = create<AppState>()(
       },
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,
+        appFontSize: state.appFontSize,
         contentFontSize: state.contentFontSize,
         cardViewModes: state.cardViewModes,
         cardLayouts: state.cardLayouts,
