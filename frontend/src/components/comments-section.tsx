@@ -37,6 +37,25 @@ interface CommentPage {
   has_more: boolean;
 }
 
+export interface ActiveReplyState {
+  rpid: number;
+  isAi: boolean;
+}
+
+export function computeNextActiveReply(
+  current: ActiveReplyState | null,
+  targetRpid: number,
+  requestedIsAi: boolean
+): ActiveReplyState | null {
+  if (current && current.rpid === targetRpid) {
+    if (current.isAi === requestedIsAi) {
+      return null;
+    }
+    return { rpid: targetRpid, isAi: requestedIsAi };
+  }
+  return { rpid: targetRpid, isAi: requestedIsAi };
+}
+
 interface SavedUserInfo {
   mid: number;
   uname: string;
@@ -64,6 +83,19 @@ export function CommentsSection({ oid, typeId, title = "评论区", refreshKey }
   const [error, setError] = useState("");
   const [selfMid, setSelfMid] = useState(0);
   const [blockedMids, setBlockedMids] = useState<Set<number>>(new Set());
+  const [activeReply, setActiveReply] = useState<ActiveReplyState | null>(null);
+
+  const handleToggleReply = (rpid: number, isAi: boolean) => {
+    setActiveReply((prev) => computeNextActiveReply(prev, rpid, isAi));
+  };
+
+  const handleCloseReply = () => {
+    setActiveReply(null);
+  };
+
+  const handleSetAiActive = (isAi: boolean) => {
+    setActiveReply((prev) => (prev ? { ...prev, isAi } : null));
+  };
 
   const canLoad = Boolean(oid && typeId);
   const filterBlockedComments = (items: CommentItem[]) =>
@@ -106,6 +138,7 @@ export function CommentsSection({ oid, typeId, title = "评论区", refreshKey }
     setTotal(0);
     setHasMore(false);
     setError("");
+    setActiveReply(null);
     if (canLoad) void loadComments(1, "replace");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [oid, typeId, refreshKey]);
@@ -157,6 +190,7 @@ export function CommentsSection({ oid, typeId, title = "评论区", refreshKey }
               onDeleted={(rpid) => {
                 setComments((previous) => previous.filter((item) => item.rpid !== rpid));
                 setTotal((previous) => Math.max(0, previous - 1));
+                setActiveReply((prev) => (prev?.rpid === rpid ? null : prev));
               }}
               onChanged={() => void loadComments(1, "replace", true)}
               blockedMids={blockedMids}
@@ -166,6 +200,10 @@ export function CommentsSection({ oid, typeId, title = "评论区", refreshKey }
                 next.delete(mid);
                 return next;
               })}
+              activeReply={activeReply}
+              onToggleReply={handleToggleReply}
+              onCloseReply={handleCloseReply}
+              onSetAiActive={handleSetAiActive}
             />
           ))}
         </div>
@@ -198,6 +236,10 @@ function CommentEntry({
   blockedMids,
   onBlockMid,
   onUnblockMid,
+  activeReply,
+  onToggleReply,
+  onCloseReply,
+  onSetAiActive,
 }: {
   oid: number | string;
   typeId: number;
@@ -209,13 +251,15 @@ function CommentEntry({
   blockedMids: Set<number>;
   onBlockMid: (mid: number) => void;
   onUnblockMid: (mid: number) => void;
+  activeReply: ActiveReplyState | null;
+  onToggleReply: (rpid: number, isAi: boolean) => void;
+  onCloseReply: () => void;
+  onSetAiActive: (isAi: boolean) => void;
 }) {
   const openUpProfile = useAppStore((s) => s.openUpProfile);
   const [currentComment, setCurrentComment] = useState(comment);
   const [localReplies, setLocalReplies] = useState<CommentItem[]>([]);
   const [threadReplies, setThreadReplies] = useState<CommentItem[]>([]);
-  const [replying, setReplying] = useState(false);
-  const [replyAiActive, setReplyAiActive] = useState(false);
 
   useEffect(() => {
     setCurrentComment(comment);
@@ -224,6 +268,9 @@ function CommentEntry({
   useEffect(() => {
     setLocalReplies([]);
   }, [comment.rpid]);
+
+  const isReplyingCurrent = activeReply?.rpid === currentComment.rpid;
+  const isAiCurrent = isReplyingCurrent && activeReply.isAi;
 
   return (
     <article style={{ display: "grid", gridTemplateColumns: "40px minmax(0, 1fr)", gap: "13px" }}>
@@ -239,20 +286,16 @@ function CommentEntry({
           typeId={typeId}
           selfMid={selfMid}
           comment={currentComment}
-          onReply={() => {
-            setReplying(true);
-            setReplyAiActive(false);
-          }}
-          onAiReply={() => {
-            setReplying(true);
-            setReplyAiActive(true);
-          }}
+          isReplying={isReplyingCurrent}
+          isAiReplying={isAiCurrent}
+          onReply={() => onToggleReply(currentComment.rpid, false)}
+          onAiReply={() => onToggleReply(currentComment.rpid, true)}
           onDeleted={onDeleted}
           isBlocked={blockedMids.has(currentComment.member.mid)}
           onBlockMid={onBlockMid}
           onUnblockMid={onUnblockMid}
         />
-        {replying ? (
+        {isReplyingCurrent ? (
           <ReplyEditor
             placeholder={`回复 @${currentComment.member.name || "匿名用户"}`}
             targetComment={currentComment}
@@ -262,17 +305,14 @@ function CommentEntry({
             videoTitle={videoTitle}
             oid={oid}
             typeId={typeId}
-            initialAiActive={replyAiActive}
-            onCancel={() => {
-              setReplying(false);
-              setReplyAiActive(false);
-            }}
+            aiActive={activeReply.isAi}
+            onToggleAi={onSetAiActive}
+            onCancel={onCloseReply}
             onSubmit={async (message) => {
               const created = await submitCommentReply(oid, typeId, currentComment.rpid, currentComment.rpid, message);
               setCurrentComment((previous) => ({ ...previous, reply_count: previous.reply_count + 1 }));
               setLocalReplies((previous) => mergeComments(previous, [created]));
-              setReplying(false);
-              setReplyAiActive(false);
+              onCloseReply();
             }}
           />
         ) : null}
@@ -287,6 +327,10 @@ function CommentEntry({
           onUnblockMid={onUnblockMid}
           videoTitle={videoTitle}
           onRepliesChange={setThreadReplies}
+          activeReply={activeReply}
+          onToggleReply={onToggleReply}
+          onCloseReply={onCloseReply}
+          onSetAiActive={onSetAiActive}
         />
       </div>
     </article>
@@ -304,6 +348,10 @@ function ReplyThread({
   onUnblockMid,
   videoTitle,
   onRepliesChange,
+  activeReply,
+  onToggleReply,
+  onCloseReply,
+  onSetAiActive,
 }: {
   oid: number | string;
   typeId: number;
@@ -315,6 +363,10 @@ function ReplyThread({
   onUnblockMid: (mid: number) => void;
   videoTitle?: string;
   onRepliesChange?: (replies: CommentItem[]) => void;
+  activeReply: ActiveReplyState | null;
+  onToggleReply: (rpid: number, isAi: boolean) => void;
+  onCloseReply: () => void;
+  onSetAiActive: (isAi: boolean) => void;
 }) {
   const openUpProfile = useAppStore((s) => s.openUpProfile);
   const [expanded, setExpanded] = useState(false);
@@ -324,8 +376,6 @@ function ReplyThread({
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [replyTarget, setReplyTarget] = useState<CommentItem | null>(null);
-  const [replyAiActive, setReplyAiActive] = useState(false);
 
   useEffect(() => {
     setTotal(Math.max(rootComment.reply_count, initialReplies.length));
@@ -387,6 +437,9 @@ function ReplyThread({
   const handleToggle = () => {
     if (expanded) {
       setExpanded(false);
+      if (activeReply && replies.some((r) => r.rpid === activeReply.rpid)) {
+        onCloseReply();
+      }
       return;
     }
     if (replies.length > 0) {
@@ -413,7 +466,8 @@ function ReplyThread({
         <div style={{ marginTop: "12px", display: "grid", gap: "14px", padding: "12px 14px", borderRadius: "12px", backgroundColor: "var(--color-bg-subtle)" }}>
           {error ? <div style={{ color: "var(--color-error-text)", fontSize: "13px" }}>{error}</div> : null}
           {replies.map((reply) => {
-            const isReplyingThis = replyTarget?.rpid === reply.rpid;
+            const isReplyingThis = activeReply?.rpid === reply.rpid;
+            const isAiThis = isReplyingThis && activeReply.isAi;
             return (
               <article key={reply.rpid} style={{ display: "grid", gridTemplateColumns: "30px minmax(0, 1fr)", gap: "10px" }}>
                 <ClickableAvatar
@@ -430,17 +484,16 @@ function ReplyThread({
                     comment={reply}
                     compact
                     relationText={getReplyRelationText(reply, rootComment, memberByRpid)}
-                    onReply={() => {
-                      setReplyTarget((prev) => (prev?.rpid === reply.rpid ? null : reply));
-                      setReplyAiActive(false);
-                    }}
-                    onAiReply={() => {
-                      setReplyTarget(reply);
-                      setReplyAiActive(true);
-                    }}
+                    isReplying={isReplyingThis}
+                    isAiReplying={isAiThis}
+                    onReply={() => onToggleReply(reply.rpid, false)}
+                    onAiReply={() => onToggleReply(reply.rpid, true)}
                     onDeleted={(rpid) => {
                       setReplies((previous) => previous.filter((item) => item.rpid !== rpid));
                       setTotal((previous) => Math.max(0, previous - 1));
+                      if (activeReply?.rpid === rpid) {
+                        onCloseReply();
+                      }
                     }}
                     isBlocked={blockedMids.has(reply.member.mid)}
                     onBlockMid={onBlockMid}
@@ -456,18 +509,15 @@ function ReplyThread({
                       videoTitle={videoTitle}
                       oid={oid}
                       typeId={typeId}
-                      initialAiActive={replyAiActive}
-                      onCancel={() => {
-                        setReplyTarget(null);
-                        setReplyAiActive(false);
-                      }}
+                      aiActive={activeReply.isAi}
+                      onToggleAi={onSetAiActive}
+                      onCancel={onCloseReply}
                       onSubmit={async (message) => {
                         const created = await submitCommentReply(oid, typeId, rootComment.rpid, reply.rpid, message);
                         setReplies((previous) => mergeComments(previous, [created]));
                         setTotal((previous) => previous + 1);
                         setExpanded(true);
-                        setReplyTarget(null);
-                        setReplyAiActive(false);
+                        onCloseReply();
                       }}
                     />
                   ) : null}
@@ -505,6 +555,8 @@ function CommentBody({
   comment,
   compact = false,
   relationText,
+  isReplying = false,
+  isAiReplying = false,
   onReply,
   onAiReply,
   onDeleted,
@@ -518,6 +570,8 @@ function CommentBody({
   comment: CommentItem;
   compact?: boolean;
   relationText?: string;
+  isReplying?: boolean;
+  isAiReplying?: boolean;
   onReply?: () => void;
   onAiReply?: () => void;
   onDeleted: (rpid: number) => void;
@@ -677,7 +731,15 @@ function CommentBody({
         <span style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
           <ThumbsDown style={{ width: 14, height: 14 }} />
         </span>
-        <button type="button" onClick={onReply} style={replyActionButtonStyle}>
+        <button
+          type="button"
+          onClick={onReply}
+          style={{
+            ...replyActionButtonStyle,
+            color: isReplying && !isAiReplying ? "var(--color-primary)" : "var(--color-text-muted)",
+            fontWeight: isReplying && !isAiReplying ? 800 : 700,
+          }}
+        >
           回复
         </button>
         {onAiReply ? (
@@ -689,8 +751,12 @@ function CommentBody({
               display: "inline-flex",
               alignItems: "center",
               gap: "3px",
-              color: "var(--color-primary)",
-              fontWeight: 700,
+              color: isAiReplying ? "#fff" : "var(--color-primary)",
+              backgroundColor: isAiReplying ? "var(--color-primary)" : "transparent",
+              padding: isAiReplying ? "2px 7px" : 0,
+              borderRadius: isAiReplying ? "6px" : 0,
+              fontWeight: 750,
+              transition: "all 0.15s ease",
             }}
           >
             <Sparkles style={{ width: 12, height: 12 }} />
@@ -778,7 +844,8 @@ function ReplyEditor({
   videoTitle,
   oid,
   typeId,
-  initialAiActive = false,
+  aiActive = false,
+  onToggleAi,
 }: {
   placeholder: string;
   onCancel: () => void;
@@ -790,23 +857,23 @@ function ReplyEditor({
   videoTitle?: string;
   oid?: number | string;
   typeId?: number;
-  initialAiActive?: boolean;
+  aiActive?: boolean;
+  onToggleAi?: (active: boolean) => void;
 }) {
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [showAiPanel, setShowAiPanel] = useState(initialAiActive);
+  const [showAiPanel, setShowAiPanel] = useState(aiActive);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
-    if (initialAiActive) {
-      setShowAiPanel(true);
-    }
-  }, [initialAiActive]);
+    setShowAiPanel(aiActive);
+  }, [aiActive]);
 
   const handleApplyDraft = (draftText: string) => {
     setMessage(draftText);
     setShowAiPanel(false);
+    onToggleAi?.(false);
     setTimeout(() => {
       if (textareaRef.current) {
         textareaRef.current.focus();
@@ -814,6 +881,19 @@ function ReplyEditor({
         textareaRef.current.selectionEnd = textareaRef.current.value.length;
       }
     }, 50);
+  };
+
+  const handleToggleAiPanel = () => {
+    setShowAiPanel((prev) => {
+      const next = !prev;
+      onToggleAi?.(next);
+      return next;
+    });
+  };
+
+  const handleCloseAiPanel = () => {
+    setShowAiPanel(false);
+    onToggleAi?.(false);
   };
 
   return (
@@ -828,7 +908,7 @@ function ReplyEditor({
           oid={oid}
           typeId={typeId}
           onApplyDraft={handleApplyDraft}
-          onClose={() => setShowAiPanel(false)}
+          onClose={handleCloseAiPanel}
         />
       ) : null}
       <textarea
@@ -855,7 +935,7 @@ function ReplyEditor({
         {targetComment ? (
           <button
             type="button"
-            onClick={() => setShowAiPanel((prev) => !prev)}
+            onClick={handleToggleAiPanel}
             style={{
               display: "inline-flex",
               alignItems: "center",
