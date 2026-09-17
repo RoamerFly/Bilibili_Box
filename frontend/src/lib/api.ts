@@ -380,6 +380,16 @@ export async function invoke<T>(
       result = reply;
       break;
     }
+    case "get_ai_settings": {
+      result = {
+        settings: {
+          enabled: true,
+          reply_auto_context: true,
+        },
+        credential_store_available: true,
+      };
+      break;
+    }
     case "get_recommended_videos":
     case "get_region_videos": {
       const pageSize = Number(args.pageSize || 18);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Loader2, RefreshCw, Send, Sparkles, X } from "lucide-react";
 import { invoke } from "@/lib/api";
 import { ClickableAvatar } from "@/components/video-card";
@@ -12,6 +12,7 @@ export interface AiReplyPanelProps {
   videoTitle?: string;
   oid?: number | string;
   typeId?: number;
+  initialAutoContext?: boolean;
   onApplyDraft: (text: string) => void;
   onClose: () => void;
 }
@@ -104,6 +105,107 @@ export function resolveCommentInfo(
   };
 }
 
+/**
+ * 根据回复关系递归追溯上下文评论链：
+ * 1. 回复主评论时，因仅有自身一条，默认仅选择主评论 [rootComment.rpid]；
+ * 2. 回复子评论时，自动根据回复递归找到发起的第一条子评论，再找到主评论加入；
+ * 3. 沿途找到的所有评论（排除无关分支评论）按时间先后顺序升序排列（主评论固定置顶）。
+ */
+export function buildAutoContextChain(
+  targetComment: CommentItem,
+  rootComment: CommentItem | null | undefined,
+  commentsMap: Map<number, CommentItem>
+): number[] {
+  const isRoot = !targetComment.root || (rootComment && targetComment.rpid === rootComment.rpid);
+  if (isRoot) {
+    return [targetComment.rpid];
+  }
+
+  const chain: CommentItem[] = [targetComment];
+  const visitedRpids = new Set<number>([targetComment.rpid]);
+  let current = targetComment;
+
+  while (true) {
+    let parentComment: CommentItem | undefined;
+    const parentRpid = current.parent;
+
+    const isDirectParentRoot = Boolean(
+      rootComment && (parentRpid === rootComment.rpid || (current.root && parentRpid === current.root))
+    );
+
+    if (parentRpid && parentRpid !== 0 && !isDirectParentRoot) {
+      if (visitedRpids.has(parentRpid)) {
+        break; // 避免循环引用
+      }
+      parentComment = commentsMap.get(parentRpid);
+    }
+
+    // 容错处理：若 parent 为 0 或缺失，但消息正文包含 "回复 @xxx :"
+    if (!parentComment && !isDirectParentRoot) {
+      const rawMsg = current.content?.message || current.message || "";
+      const match = rawMsg.match(/^回复\s*@([^：:\s]+)\s*[:：]/);
+      if (match && match[1]) {
+        const targetUname = match[1].trim();
+        if (rootComment && (rootComment.member.name || "").trim() === targetUname) {
+          if (!visitedRpids.has(rootComment.rpid)) {
+            visitedRpids.add(rootComment.rpid);
+            chain.push(rootComment);
+          }
+          break;
+        } else {
+          for (const item of commentsMap.values()) {
+            if (
+              item.rpid !== current.rpid &&
+              !visitedRpids.has(item.rpid) &&
+              (item.member.name || "").trim() === targetUname &&
+              (item.ctime || 0) <= (current.ctime || 0)
+            ) {
+              parentComment = item;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (parentComment) {
+      visitedRpids.add(parentComment.rpid);
+      chain.push(parentComment);
+      current = parentComment;
+    } else {
+      // 已追溯到直接回复主评论的首条子评论，将主评论加入对话链
+      if (rootComment && !visitedRpids.has(rootComment.rpid)) {
+        visitedRpids.add(rootComment.rpid);
+        chain.push(rootComment);
+      }
+      break;
+    }
+  }
+
+  // 严格按时间先后顺序排列，主评论固定位于首位
+  chain.sort((a, b) => {
+    if (rootComment && a.rpid === rootComment.rpid) return -1;
+    if (rootComment && b.rpid === rootComment.rpid) return 1;
+    const timeDiff = (a.ctime || 0) - (b.ctime || 0);
+    if (timeDiff !== 0) return timeDiff;
+    return a.rpid - b.rpid;
+  });
+
+  return chain.map((item) => item.rpid);
+}
+
+export function computeInitialSelectedRpids(
+  targetComment: CommentItem,
+  rootComment: CommentItem | null | undefined,
+  commentsMap: Map<number, CommentItem>,
+  autoContext: boolean
+): Set<number> {
+  if (!autoContext) {
+    return new Set<number>([targetComment.rpid]);
+  }
+  return new Set<number>(buildAutoContextChain(targetComment, rootComment, commentsMap));
+}
+
 export function AiReplyPanel({
   targetComment,
   rootComment,
@@ -112,6 +214,7 @@ export function AiReplyPanel({
   videoTitle,
   oid,
   typeId,
+  initialAutoContext,
   onApplyDraft,
   onClose,
 }: AiReplyPanelProps) {
@@ -142,6 +245,55 @@ export function AiReplyPanel({
 
     return { candidateComments: sorted, candidateMap: map };
   }, [rootComment, threadReplies, extraReplies, targetComment]);
+
+  // 计算当前目标评论关联的递归对话链
+  const autoContextChain = useMemo(
+    () => buildAutoContextChain(targetComment, rootComment, candidateMap),
+    [targetComment, rootComment, candidateMap]
+  );
+  const autoContextChainSet = useMemo(() => new Set(autoContextChain), [autoContextChain]);
+
+  // 记录用户是否手动增删勾选过评论；若用户手动修改过，后续后台数据拉取不再强行覆盖用户选择
+  const userModifiedSelectionRef = useRef(false);
+  const [autoContextEnabled, setAutoContextEnabled] = useState<boolean>(initialAutoContext ?? true);
+
+  const [selectedRpids, setSelectedRpids] = useState<Set<number>>(() =>
+    computeInitialSelectedRpids(targetComment, rootComment, candidateMap, initialAutoContext ?? true)
+  );
+
+  // 初始化时从 AI 设置拉取上下文自动选择配置
+  useEffect(() => {
+    let cancelled = false;
+    invoke<{ settings?: { reply_auto_context?: boolean } }>("get_ai_settings")
+      .then((res) => {
+        if (cancelled) return;
+        if (typeof res?.settings?.reply_auto_context === "boolean") {
+          const enabled = res.settings.reply_auto_context;
+          setAutoContextEnabled(enabled);
+          if (!userModifiedSelectionRef.current) {
+            setSelectedRpids(computeInitialSelectedRpids(targetComment, rootComment, candidateMap, enabled));
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 当候选评论集合更新（如楼中楼加载完毕），且用户未手动修改且处于自动追溯模式时，自动保持完整对话链
+  useEffect(() => {
+    if (!userModifiedSelectionRef.current && autoContextEnabled) {
+      setSelectedRpids(new Set(autoContextChain));
+    }
+  }, [autoContextChain, autoContextEnabled]);
+
+  const handleToggleAutoContext = () => {
+    const nextVal = !autoContextEnabled;
+    setAutoContextEnabled(nextVal);
+    userModifiedSelectionRef.current = false;
+    setSelectedRpids(computeInitialSelectedRpids(targetComment, rootComment, candidateMap, nextVal));
+  };
 
   // 若在主评论触发 AI 回复且本地尚未拉取子评论，自动加载第一页子评论以便供用户勾选上下文
   useEffect(() => {
@@ -179,18 +331,6 @@ export function AiReplyPanel({
     }
   }, [oid, typeId, rootComment, threadReplies.length, extraReplies.length]);
 
-  // 默认勾选正在回复的目标评论；若当前目标回复了某条父评论，也默认勾选其父评论；若有根评论，也默认勾选根评论
-  const [selectedRpids, setSelectedRpids] = useState<Set<number>>(() => {
-    const initial = new Set<number>([targetComment.rpid]);
-    if (targetComment.parent && targetComment.parent !== targetComment.rpid) {
-      initial.add(targetComment.parent);
-    }
-    if (rootComment && rootComment.rpid !== targetComment.rpid) {
-      initial.add(rootComment.rpid);
-    }
-    return initial;
-  });
-
   const [includeVideoTitle, setIncludeVideoTitle] = useState(Boolean(videoTitle));
   const [selectedTone, setSelectedTone] = useState<string>("friendly");
   const [customInstruction, setCustomInstruction] = useState<string>("");
@@ -199,6 +339,7 @@ export function AiReplyPanel({
   const [errorMessage, setErrorMessage] = useState<string>("");
 
   const toggleSelect = (rpid: number) => {
+    userModifiedSelectionRef.current = true;
     setSelectedRpids((prev) => {
       const next = new Set(prev);
       if (next.has(rpid)) {
@@ -312,10 +453,35 @@ export function AiReplyPanel({
       {/* 1. 上下文勾选列表 */}
       <div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px", flexWrap: "wrap", gap: "6px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
             <span style={{ fontWeight: 600, color: "var(--color-text)", fontSize: "12.5px" }}>
               选择喂给 AI 的上下文 ({selectedRpids.size}/{candidateComments.length})：
             </span>
+            <button
+              type="button"
+              onClick={handleToggleAutoContext}
+              title={autoContextEnabled ? "已开启自动追溯对话链，点击切换为仅勾选当前单条" : "已关闭自动追溯对话链，点击开启智能追溯"}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                fontSize: "11px",
+                padding: "2px 8px",
+                borderRadius: "12px",
+                cursor: "pointer",
+                backgroundColor: autoContextEnabled
+                  ? "var(--color-primary-transparent, rgba(0, 161, 214, 0.12))"
+                  : "var(--color-bg-subtle)",
+                color: autoContextEnabled ? "var(--color-primary)" : "var(--color-text-muted)",
+                border: autoContextEnabled
+                  ? "1px solid var(--color-primary)"
+                  : "1px solid var(--color-border)",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <Sparkles style={{ width: 11, height: 11 }} />
+              智能追溯对话链: {autoContextEnabled ? "已开启" : "已关闭"}
+            </button>
             <span style={{ fontSize: "11px", color: "var(--color-text-muted)" }}>
               (按时间先后顺序发送)
             </span>
@@ -349,6 +515,7 @@ export function AiReplyPanel({
           {candidateComments.map((item) => {
             const isTarget = item.rpid === targetComment.rpid;
             const isChecked = selectedRpids.has(item.rpid);
+            const isChainNode = autoContextChainSet.has(item.rpid);
             const info = resolveCommentInfo(item, rootComment, candidateMap, selfMid);
 
             return (
@@ -391,6 +558,10 @@ export function AiReplyPanel({
                   ) : info.isRoot ? (
                     <span style={{ marginLeft: "6px", fontSize: "10px", padding: "1px 4px", borderRadius: "4px", backgroundColor: "var(--color-border)", color: "var(--color-text-muted)" }}>
                       主楼
+                    </span>
+                  ) : isChainNode ? (
+                    <span style={{ marginLeft: "6px", fontSize: "10px", padding: "1px 4px", borderRadius: "4px", backgroundColor: "var(--color-primary-transparent, rgba(0, 161, 214, 0.08))", color: "var(--color-primary)", border: "1px solid var(--color-primary-transparent, rgba(0, 161, 214, 0.25))" }}>
+                      对话链
                     </span>
                   ) : null}
                   <span style={{ color: "var(--color-text-muted)" }}>：</span>
