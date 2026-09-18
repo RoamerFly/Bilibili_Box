@@ -3,7 +3,7 @@ use parking_lot::RwLock;
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::api::BiliClient;
 use crate::config::Config;
@@ -60,9 +60,22 @@ pub fn save_config(
             }
         }
     }
+    let (old_proxy_mode, old_proxy_host, old_proxy_port) = {
+        let r = config.read();
+        (r.proxy_mode.clone(), r.proxy_host.clone(), r.proxy_port)
+    };
     // 先持久化到文件；只有磁盘保存成功后才更新内存，避免两者不一致。
     new_config.save(&app)?;
+    let proxy_changed = old_proxy_mode != new_config.proxy_mode
+        || old_proxy_host != new_config.proxy_host
+        || old_proxy_port != new_config.proxy_port;
     *config.write() = new_config;
+
+    if proxy_changed {
+        if let Some(bili_client) = app.try_state::<Arc<BiliClient>>() {
+            let _ = bili_client.reload_client();
+        }
+    }
     Ok(())
 }
 
@@ -76,6 +89,7 @@ fn reset_config_preserving_session_and_ai(current: &Config) -> Config {
     restored.sessdata = current.sessdata.clone();
     restored.cookie = current.cookie.clone();
     restored.ai = current.ai.clone();
+    restored.custom_ffmpeg_path = current.custom_ffmpeg_path.clone();
     restored
 }
 

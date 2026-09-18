@@ -43,6 +43,26 @@ export interface Config {
   chunk_download_interval_sec: number;
   file_exist_action: string;
   auto_start_download_task: boolean;
+  custom_ffmpeg_path?: string | null;
+}
+
+export interface FfmpegRuntimeStatus {
+  ready: boolean;
+  version?: string | null;
+  ffmpegPath?: string | null;
+  ffprobePath?: string | null;
+  source: "custom" | "managed" | "bundled" | "system" | "missing";
+  managedDir: string;
+  customPath?: string | null;
+  message: string;
+}
+
+export interface FfmpegInstallProgress {
+  stage: string;
+  downloadedBytes: number;
+  totalBytes: number;
+  progress: number;
+  speedBps: number;
 }
 
 // 用户信息

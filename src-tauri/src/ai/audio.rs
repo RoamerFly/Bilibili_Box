@@ -416,7 +416,7 @@ async fn download_audio(
 
 fn transcode_to_wav(input: &Path, output: &Path, cancel: &CancelToken) -> Result<(), String> {
     let ffmpeg = resolve_ffmpeg().ok_or_else(|| {
-        "AI_ASR_FFMPEG_NOT_FOUND: 未找到 FFmpeg，请将 ffmpeg 放入应用 env 目录".to_string()
+        "AI_ASR_FFMPEG_NOT_FOUND: 未找到 FFmpeg 运行环境。请前往「设置」页面一键下载安装，或重新安装完整版本。".to_string()
     })?;
     let mut command = Command::new(ffmpeg);
     command
@@ -802,6 +802,11 @@ fn ffmpeg_candidate_paths(executable: Option<&Path>, current_dir: Option<&Path>)
     }
     if let Some(current_dir) = current_dir {
         append_ffmpeg_layouts(&mut candidates, current_dir);
+    }
+    if let Some(data_dir) = dirs::data_dir() {
+        append_ffmpeg_layouts(&mut candidates, &data_dir.join("BiliBox"));
+        append_ffmpeg_layouts(&mut candidates, &data_dir.join("com.bilibilibox.desktop"));
+        append_ffmpeg_layouts(&mut candidates, &data_dir.join("Bilibili_Box"));
     }
     candidates
 }

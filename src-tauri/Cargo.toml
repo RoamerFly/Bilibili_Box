@@ -1,6 +1,6 @@
 [package]
 name = "bilibili-box"
-version = "1.2.0"
+version = "1.2.1"
 description = "BiliBox - Bilibili 媒体工作站"
 authors = ["BiliBox"]
 license-file = "../LICENSE"
@@ -95,6 +95,7 @@ url = "2"
 
 # FFmpeg 集成
 ffmpeg-sidecar = "1.1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # Local SenseVoice ASR. Use the official shared runtime so the Windows
 # toolchain does not need to link the prebuilt static MSVC archive. The

@@ -169,9 +169,13 @@ if exist "%PROJECT_ENV%\" (
 )
 
 call :copy_runtime_tool ffmpeg.exe
-if not "!ERRORLEVEL!"=="0" exit /b 1
+if not "!ERRORLEVEL!"=="0" (
+    echo   - ffmpeg.exe was not bundled ^(decoupled runtime mode^).
+)
 call :copy_runtime_tool ffprobe.exe
-if not "!ERRORLEVEL!"=="0" exit /b 1
+if not "!ERRORLEVEL!"=="0" (
+    echo   - ffprobe.exe was not bundled ^(decoupled runtime mode^).
+)
 
 echo.
 echo ============================================
@@ -226,7 +230,6 @@ if not defined TOOL_SOURCE (
     )
 )
 if not defined TOOL_SOURCE (
-    echo ERROR: %TOOL_NAME% was not found. Put it in env\ or add it to PATH before building.
     exit /b 1
 )
 echo   - Copying %TOOL_NAME% from !TOOL_SOURCE!

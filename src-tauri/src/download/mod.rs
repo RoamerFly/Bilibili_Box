@@ -1,5 +1,6 @@
 mod assets;
 pub mod ffmpeg;
+pub mod ffmpeg_manager;
 pub mod manager;
 mod naming;
 mod paths;

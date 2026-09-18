@@ -130,3 +130,27 @@ pub fn get_downloaded_play_url(
     let file_path = download_manager.get_downloaded_file(&task_id)?;
     media_proxy.register_local_file(file_path)
 }
+
+#[tauri::command]
+pub fn get_ffmpeg_runtime_status(
+    app: AppHandle,
+) -> crate::download::ffmpeg_manager::FfmpegRuntimeStatus {
+    crate::download::ffmpeg_manager::get_ffmpeg_runtime_status(&app)
+}
+
+#[tauri::command]
+pub async fn install_ffmpeg_runtime(
+    app: AppHandle,
+    custom_url: Option<String>,
+) -> Result<crate::download::ffmpeg_manager::FfmpegRuntimeStatus, String> {
+    crate::download::ffmpeg_manager::install_ffmpeg_runtime(app, custom_url).await
+}
+
+#[tauri::command]
+pub fn set_custom_ffmpeg_path(
+    app: AppHandle,
+    path: Option<String>,
+) -> Result<crate::download::ffmpeg_manager::FfmpegRuntimeStatus, String> {
+    crate::download::ffmpeg_manager::set_custom_ffmpeg_path(app, path)
+}
+

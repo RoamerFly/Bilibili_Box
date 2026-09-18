@@ -43,6 +43,7 @@ env:
 
     - Windows 安装版（推荐大多数用户）：下载 `Bilibili_Box-v*-windows-x64-installer.exe`
     - Windows 便携版（免安装）：下载 `Bilibili_Box-v*-windows-x64-portable.zip`，解压后运行里面的 `Bilibili_Box.exe`
+    - FFmpeg 独立运行包：下载 `ffmpeg-runtime-windows-x64.zip`（应用本体已解耦 FFmpeg，支持在设置页一键自动下载安装，亦可手动解压至 env 目录）
     - macOS Apple Silicon / M 系列：下载 `Bilibili_Box-v*-macos-arm64-installer.dmg`
     - macOS Intel：下载 `Bilibili_Box-v*-macos-x64-installer.dmg`
     - Linux Debian/Ubuntu：下载 `Bilibili_Box-v*-linux-x64-installer.deb`
@@ -408,6 +409,13 @@ jobs:
           $base = "${env:APP_NAME}-${env:TAG_NAME}-windows-x64"
           $version = $env:TAG_NAME.TrimStart("v")
           New-Item -ItemType Directory -Force "release-assets" | Out-Null
+          # Package standalone FFmpeg runtime before building application packages
+          if (Test-Path "dist_windows\env") {
+            Compress-Archive -Path "dist_windows\env\*" `
+              -DestinationPath "release-assets\ffmpeg-runtime-windows-x64.zip" -Force
+            Remove-Item "dist_windows\env" -Recurse -Force
+          }
+
           Compress-Archive -Path "dist_windows" `
             -DestinationPath "release-assets\$base-portable.zip" -Force
           Copy-Item "dist_windows" "dist_windows_installer" -Recurse
@@ -448,6 +456,9 @@ jobs:
           }
           if ($installerListing -notmatch "THIRD_PARTY_NOTICES\.md") {
             throw "THIRD_PARTY_NOTICES.md is missing from the Windows installer."
+          }
+          if ($installerListing -match "ffmpeg\.exe") {
+            throw "FFmpeg was unexpectedly bundled in the Windows installer."
           }
 
       - name: Upload Windows assets

@@ -621,6 +621,8 @@ pub struct Config {
     pub auto_start_download_task: bool,
     #[serde(default)]
     pub ai: AiSettings,
+    #[serde(default)]
+    pub custom_ffmpeg_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1074,6 +1076,7 @@ impl Config {
             file_exist_action: FileExistAction::Rename,
             auto_start_download_task: true,
             ai: AiSettings::default(),
+            custom_ffmpeg_path: None,
         }
     }
 

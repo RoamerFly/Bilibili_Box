@@ -17,6 +17,10 @@ import {
   Moon,
   Palette,
   Power,
+  AlertCircle,
+  CheckCircle2,
+  Film,
+  Globe,
   RefreshCw,
   RotateCcw,
   Settings2,
@@ -31,6 +35,7 @@ import { LoginDialog } from "@/components/login-dialog";
 import { invoke } from "@/lib/api";
 import { openExternalUrl } from "@/lib/open-external";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { FfmpegRuntimeStatus, FfmpegInstallProgress } from "@/lib/types";
 import {
   CARD_LAYOUT_KEYS,
   DEFAULT_CARD_LAYOUT,
@@ -61,6 +66,10 @@ interface BackendConfig {
   prompt_download_quality: boolean;
   show_comments: boolean;
   task_concurrency: number;
+  proxy_mode?: "system" | "no_proxy" | "custom" | string;
+  proxy_host?: string;
+  proxy_port?: number;
+  custom_ffmpeg_path?: string | null;
   ai?: AiSettings;
   [key: string]: unknown;
 }
@@ -143,6 +152,21 @@ const PREVIEW_ITEMS = [
   { title: "UP 投稿 F", author: "UP 主页", note: "昨日更新" },
 ];
 
+export function parseProxyUrl(raw: string): { host: string; port: number } | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(?:([a-zA-Z][a-zA-Z0-9+.-]*):\/\/)?([^/:]+):(\d+)$/);
+  if (match) {
+    const scheme = match[1] ? `${match[1].toLowerCase()}://` : "http://";
+    const hostname = match[2];
+    const port = parseInt(match[3], 10);
+    if (port >= 1 && port <= 65535 && hostname.length > 0) {
+      return { host: `${scheme}${hostname}`, port };
+    }
+  }
+  return null;
+}
+
 const PROJECT_GITHUB_URL = "https://github.com/RoamerFly/Bilibili_Box";
 const DEVELOPER_GITHUB_URL = "https://github.com/RoamerFly";
 const ISSUES_URL = "https://github.com/RoamerFly/Bilibili_Box/issues";
@@ -166,7 +190,7 @@ export function SettingsView() {
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
-  const [appVersion, setAppVersion] = useState("1.2.0");
+  const [appVersion, setAppVersion] = useState("1.2.1");
   const [updating, setUpdating] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
   const [cacheStepIndex, setCacheStepIndex] = useState(-1);
@@ -326,6 +350,135 @@ export function SettingsView() {
       }
     } catch (err) {
       setFeedback(`选择下载目录失败：${String(err)}`);
+    }
+  };
+
+  // Proxy state and handlers
+  const [proxyInput, setProxyInput] = useState("http://127.0.0.1:7890");
+
+  useEffect(() => {
+    if (backendConfig) {
+      const host = backendConfig.proxy_host || "127.0.0.1";
+      const port = backendConfig.proxy_port || 7890;
+      const formatted = host.includes("://") ? `${host}:${port}` : `http://${host}:${port}`;
+      setProxyInput(formatted);
+    }
+  }, [backendConfig?.proxy_host, backendConfig?.proxy_port]);
+
+  const handleProxyModeChange = async (mode: "system" | "no_proxy" | "custom") => {
+    if (mode === "custom") {
+      const parsed = parseProxyUrl(proxyInput) || { host: "http://127.0.0.1", port: 7890 };
+      await saveConfig({ proxy_mode: "custom", proxy_host: parsed.host, proxy_port: parsed.port });
+      setFeedback(`已启用自定义代理：${parsed.host}:${parsed.port}`);
+    } else {
+      await saveConfig({ proxy_mode: mode });
+      setFeedback(mode === "system" ? "已使用系统代理" : "已停用代理");
+    }
+  };
+
+  const handleSaveProxyInput = async () => {
+    const parsed = parseProxyUrl(proxyInput);
+    if (!parsed) {
+      setFeedback("代理格式无效，请输入如 http://127.0.0.1:7890");
+      return;
+    }
+    await saveConfig({
+      proxy_mode: "custom",
+      proxy_host: parsed.host,
+      proxy_port: parsed.port,
+    });
+    setFeedback(`代理配置已保存并生效：${parsed.host}:${parsed.port}`);
+  };
+
+  // FFmpeg runtime state and handlers
+  const [ffmpegStatus, setFfmpegStatus] = useState<FfmpegRuntimeStatus | null>(null);
+  const [ffmpegInstalling, setFfmpegInstalling] = useState(false);
+  const [ffmpegProgress, setFfmpegProgress] = useState<FfmpegInstallProgress | null>(null);
+
+  const loadFfmpegStatus = useCallback(async () => {
+    try {
+      const status = await invoke<FfmpegRuntimeStatus>("get_ffmpeg_runtime_status");
+      setFfmpegStatus(status);
+    } catch (err) {
+      console.error("获取 FFmpeg 状态失败", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadFfmpegStatus();
+  }, [loadFfmpegStatus]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      listen<FfmpegInstallProgress>("ffmpeg-install-progress", (event) => {
+        setFfmpegProgress(event.payload);
+        if (event.payload.progress >= 100) {
+          setTimeout(() => {
+            setFfmpegInstalling(false);
+            setFfmpegProgress(null);
+            void loadFfmpegStatus();
+          }, 1000);
+        }
+      }).then((fn) => {
+        unlisten = fn;
+      });
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, [loadFfmpegStatus]);
+
+  const handleInstallFfmpeg = async () => {
+    setFfmpegInstalling(true);
+    setFfmpegProgress({
+      stage: "正在连接下载服务器...",
+      downloadedBytes: 0,
+      totalBytes: 0,
+      progress: 0,
+      speedBps: 0,
+    });
+    try {
+      const updated = await invoke<FfmpegRuntimeStatus>("install_ffmpeg_runtime");
+      setFfmpegStatus(updated);
+      setFeedback("FFmpeg 运行环境安装完成");
+    } catch (err) {
+      setFeedback(`安装 FFmpeg 失败：${String(err)}`);
+    } finally {
+      setFfmpegInstalling(false);
+      setFfmpegProgress(null);
+      void loadFfmpegStatus();
+    }
+  };
+
+  const handleBrowseCustomFfmpeg = async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        directory: false,
+        multiple: false,
+        title: "选择 FFmpeg 可执行文件 (ffmpeg / ffmpeg.exe)",
+        filters: [{ name: "可执行文件", extensions: ["exe", ""] }],
+      });
+      if (selected && typeof selected === "string") {
+        const updated = await invoke<FfmpegRuntimeStatus>("set_custom_ffmpeg_path", { path: selected });
+        setFfmpegStatus(updated);
+        await saveConfig({ custom_ffmpeg_path: selected });
+        setFeedback("已配置自定义 FFmpeg 路径");
+      }
+    } catch (err) {
+      setFeedback(`设置 FFmpeg 路径失败：${String(err)}`);
+    }
+  };
+
+  const handleResetCustomFfmpeg = async () => {
+    try {
+      const updated = await invoke<FfmpegRuntimeStatus>("set_custom_ffmpeg_path", { path: null });
+      setFfmpegStatus(updated);
+      await saveConfig({ custom_ffmpeg_path: null });
+      setFeedback("已恢复默认自动检测 FFmpeg");
+    } catch (err) {
+      setFeedback(`恢复默认 FFmpeg 失败：${String(err)}`);
     }
   };
 
@@ -788,6 +941,174 @@ export function SettingsView() {
         />
 
         <SettingRow
+          icon={<Film style={{ width: 21, height: 21, color: "#2563eb" }} />}
+          iconBgColor="var(--color-primary-light)"
+          title="媒体处理环境 (FFmpeg)"
+          description="用于音视频混流合并与 MP3 转换的核心组件。已从安装包中分离，支持持久化独立环境或自定义本地路径。"
+          control={
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  backgroundColor: ffmpegStatus?.ready
+                    ? ffmpegStatus.source === "custom"
+                      ? "var(--color-purple-bg, rgba(147, 51, 234, 0.12))"
+                      : ffmpegStatus.source === "system"
+                        ? "var(--color-info-bg)"
+                        : "var(--color-success-bg)"
+                    : "var(--color-warning-bg)",
+                  color: ffmpegStatus?.ready
+                    ? ffmpegStatus.source === "custom"
+                      ? "var(--color-purple, #9333ea)"
+                      : ffmpegStatus.source === "system"
+                        ? "var(--color-info-text)"
+                        : "var(--color-success-text)"
+                    : "var(--color-warning-text)",
+                }}
+                title={ffmpegStatus?.ffmpegPath ? `路径: ${ffmpegStatus.ffmpegPath}${ffmpegStatus.version ? `\n版本: ${ffmpegStatus.version}` : ""}` : undefined}
+              >
+                {ffmpegStatus?.ready ? (
+                  <CheckCircle2 style={{ width: 15, height: 15 }} />
+                ) : (
+                  <AlertCircle style={{ width: 15, height: 15 }} />
+                )}
+                <span>
+                  {ffmpegStatus?.ready
+                    ? ffmpegStatus.source === "custom"
+                      ? "自定义路径"
+                      : ffmpegStatus.source === "system"
+                        ? "系统环境"
+                        : "已就绪"
+                    : "未安装"}
+                </span>
+              </div>
+
+              {ffmpegInstalling ? (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: "200px" }}>
+                  <div style={{ flex: 1, height: "6px", borderRadius: "3px", backgroundColor: "var(--color-bg-tertiary)", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${Math.max(5, ffmpegProgress?.progress || 0)}%`,
+                        backgroundColor: "var(--color-primary)",
+                        transition: "width 0.2s ease",
+                      }}
+                    />
+                  </div>
+                  <span style={{ fontSize: "12px", color: "var(--color-text-secondary)", minWidth: "35px" }}>
+                    {Math.round(ffmpegProgress?.progress || 0)}%
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void handleInstallFfmpeg()}
+                    style={ffmpegStatus?.ready ? secondaryButtonStyle : primaryButtonStyle}
+                  >
+                    <Download style={{ width: 14, height: 14, marginRight: "5px" }} />
+                    {ffmpegStatus?.ready ? "重新下载" : "下载安装"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleBrowseCustomFfmpeg()}
+                    style={secondaryButtonStyle}
+                  >
+                    选择本地路径
+                  </button>
+
+                  {ffmpegStatus?.source === "custom" ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleResetCustomFfmpeg()}
+                      style={{ ...secondaryButtonStyle, color: "var(--color-text-muted)" }}
+                      title="恢复默认自动检测"
+                    >
+                      <RotateCcw style={{ width: 13, height: 13, marginRight: "4px" }} />
+                      恢复默认
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </div>
+          }
+        />
+
+        <SettingRow
+          icon={<Globe style={{ width: 21, height: 21, color: "#0284c7" }} />}
+          iconBgColor="var(--color-info-bg)"
+          title="网络代理"
+          description="设置应用的网络连接代理（支持 HTTP/HTTPS 代理格式，如 http://127.0.0.1:7890）"
+          control={
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <div style={{ display: "flex", alignItems: "center", padding: "3px", gap: "2px", backgroundColor: "var(--color-bg-tertiary)", borderRadius: "10px" }}>
+                <ModeButton
+                  active={(backendConfig.proxy_mode || "system") === "system"}
+                  onClick={() => void handleProxyModeChange("system")}
+                >
+                  系统代理
+                </ModeButton>
+                <ModeButton
+                  active={backendConfig.proxy_mode === "no_proxy"}
+                  onClick={() => void handleProxyModeChange("no_proxy")}
+                >
+                  不使用代理
+                </ModeButton>
+                <ModeButton
+                  active={backendConfig.proxy_mode === "custom"}
+                  onClick={() => void handleProxyModeChange("custom")}
+                >
+                  自定义代理
+                </ModeButton>
+              </div>
+
+              {backendConfig.proxy_mode === "custom" && (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <input
+                    type="text"
+                    value={proxyInput}
+                    onChange={(e) => setProxyInput(e.target.value)}
+                    onBlur={() => void handleSaveProxyInput()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        void handleSaveProxyInput();
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }}
+                    placeholder="http://127.0.0.1:7890"
+                    style={{
+                      width: "190px",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1.5px solid var(--color-border)",
+                      backgroundColor: "var(--color-bg-secondary)",
+                      color: "var(--color-text)",
+                      fontSize: "13px",
+                      outline: "none",
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveProxyInput()}
+                    style={secondaryButtonStyle}
+                  >
+                    保存
+                  </button>
+                </div>
+              )}
+            </div>
+          }
+        />
+
+        <SettingRow
           icon={<MonitorPlay style={{ width: 21, height: 21, color: "var(--color-info-text)" }} />}
           iconBgColor="var(--color-info-bg)"
           title="下载画质策略"
@@ -1010,6 +1331,88 @@ export function SettingsView() {
   );
 }
 
+function SettingInfoTooltip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ position: "relative", display: "inline-flex", alignItems: "center" }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((prev) => !prev);
+        }}
+        aria-label="查看说明"
+        title="查看说明"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "17px",
+          height: "17px",
+          borderRadius: "50%",
+          border: open ? "1.5px solid var(--color-primary)" : "1px solid var(--color-border)",
+          backgroundColor: open ? "var(--color-primary-light)" : "var(--color-bg-tertiary)",
+          color: open ? "var(--color-primary)" : "var(--color-text-muted)",
+          cursor: "pointer",
+          padding: 0,
+          fontSize: "11px",
+          fontWeight: 700,
+          fontFamily: "ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif",
+          fontStyle: "italic",
+          transition: "all 0.18s ease",
+          flexShrink: 0,
+          lineHeight: 1,
+        }}
+      >
+        i
+      </button>
+      {open && (
+        <div
+          role="tooltip"
+          style={{
+            position: "absolute",
+            bottom: "calc(100% + 8px)",
+            left: 0,
+            zIndex: 100,
+            maxWidth: "300px",
+            minWidth: "160px",
+            padding: "8px 12px",
+            borderRadius: "9px",
+            backgroundColor: "var(--color-bg-secondary)",
+            border: "1px solid var(--color-border)",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+            color: "var(--color-text)",
+            fontSize: "12.5px",
+            lineHeight: 1.45,
+            whiteSpace: "normal",
+            pointerEvents: "auto",
+          }}
+        >
+          {text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingRow({
   icon,
   iconBgColor,
@@ -1021,7 +1424,7 @@ function SettingRow({
   icon: React.ReactNode;
   iconBgColor: string;
   title: string;
-  description: string;
+  description?: string;
   control: React.ReactNode;
   isLast?: boolean;
 }) {
@@ -1032,7 +1435,7 @@ function SettingRow({
         alignItems: "center",
         justifyContent: "space-between",
         gap: "16px",
-        padding: "20px 26px",
+        padding: "16px 24px",
         borderBottom: isLast ? "none" : "1px solid var(--color-bg-subtle)",
         flexWrap: "wrap",
       }}
@@ -1053,11 +1456,11 @@ function SettingRow({
           {icon}
         </div>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h3 style={{ fontSize: "15px", fontWeight: 600, color: "var(--color-text)", marginBottom: "3px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flexWrap: "wrap" }}>
+          <h3 style={{ fontSize: "15px", fontWeight: 600, color: "var(--color-text)", margin: 0 }}>
             {title}
           </h3>
-          <p style={{ fontSize: "13px", color: "var(--color-text-muted)", lineHeight: 1.45 }}>{description}</p>
+          {description ? <SettingInfoTooltip text={description} /> : null}
         </div>
       </div>
 
@@ -1495,7 +1898,7 @@ function UpdateDialog({
 
 function AboutDialog({
   onClose,
-  version = "1.2.0",
+  version = "1.2.1",
 }: {
   onClose: () => void;
   version?: string;

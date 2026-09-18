@@ -19,7 +19,19 @@ impl FfmpegExecutor {
         if executor.is_available() {
             Ok(executor)
         } else {
-            Err("FFmpeg is not available. Put ffmpeg and ffprobe in the env folder.".to_string())
+            Err("未找到 FFmpeg 运行环境。请前往「设置」页面一键下载安装或指定本地 FFmpeg 路径。".to_string())
+        }
+    }
+
+    pub fn for_app(app: &tauri::AppHandle) -> Self {
+        let (ffmpeg, ffprobe, _, _) = super::ffmpeg_manager::resolve_ffmpeg_tools(app);
+        if ffmpeg.is_some() {
+            Self {
+                ffmpeg_path: ffmpeg,
+                ffprobe_path: ffprobe,
+            }
+        } else {
+            Self::default()
         }
     }
 
@@ -370,6 +382,12 @@ impl FfmpegExecutor {
                     .join("bin")
                     .join(&file_name),
             );
+        }
+
+        if let Some(data_dir) = dirs::data_dir() {
+            candidates.push(data_dir.join("BiliBox").join("env").join(&file_name));
+            candidates.push(data_dir.join("com.bilibilibox.desktop").join("env").join(&file_name));
+            candidates.push(data_dir.join("Bilibili_Box").join("env").join(&file_name));
         }
 
         candidates

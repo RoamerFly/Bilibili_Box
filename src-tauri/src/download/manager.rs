@@ -642,9 +642,9 @@ impl DownloadManager {
                 let _ = tokio::fs::remove_dir_all(&temp_dir).await;
                 return Ok(DownloadEnd::Completed);
             };
-            let ffmpeg = FfmpegExecutor::default();
+            let ffmpeg = FfmpegExecutor::for_app(app);
             if !ffmpeg.is_available() {
-                return Err("FFmpeg 未安装，无法转换 MP3 音频".to_string());
+                return Err("未找到 FFmpeg 运行环境，无法转换 MP3 音频。请前往「设置」页面一键下载安装或指定本地 FFmpeg 路径。".to_string());
             }
 
             {
@@ -699,7 +699,7 @@ impl DownloadManager {
             };
 
             // 创建 FFmpeg 执行器
-            let ffmpeg = FfmpegExecutor::default();
+            let ffmpeg = FfmpegExecutor::for_app(app);
 
             if ffmpeg.is_available() {
                 log::info!("开始使用 FFmpeg 合并音视频: {}", title);
@@ -739,7 +739,7 @@ impl DownloadManager {
                     }
                 }
             } else {
-                return Err("FFmpeg 未安装，无法合并音视频".to_string());
+                return Err("未找到 FFmpeg 运行环境，无法合并音视频。请前往「设置」页面一键下载安装或指定本地 FFmpeg 路径。".to_string());
             }
         }
 
