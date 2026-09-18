@@ -4,6 +4,7 @@
 export interface Config {
   download_dir: string;
   start_maximized: boolean;
+  close_window_behavior: "ask" | "minimize_to_tray" | "exit";
   card_scale: number;
   card_page_size: number;
   card_page_rows: number;
@@ -42,6 +43,26 @@ export interface Config {
   chunk_download_interval_sec: number;
   file_exist_action: string;
   auto_start_download_task: boolean;
+  custom_ffmpeg_path?: string | null;
+}
+
+export interface FfmpegRuntimeStatus {
+  ready: boolean;
+  version?: string | null;
+  ffmpegPath?: string | null;
+  ffprobePath?: string | null;
+  source: "custom" | "managed" | "bundled" | "system" | "missing";
+  managedDir: string;
+  customPath?: string | null;
+  message: string;
+}
+
+export interface FfmpegInstallProgress {
+  stage: string;
+  downloadedBytes: number;
+  totalBytes: number;
+  progress: number;
+  speedBps: number;
 }
 
 // 用户信息
@@ -58,6 +79,21 @@ export interface UserInfo {
     type: number;
     status: number;
   };
+}
+
+// 二维码数据
+export interface QrcodeData {
+  url: string;
+  qrcode_key: string;
+}
+
+// 二维码状态
+export interface QrcodeStatus {
+  code: number;
+  message: string;
+  url?: string;
+  refresh_token?: string;
+  sessdata?: string | null;
 }
 
 // 视频信息

@@ -21,6 +21,7 @@ const pageCache = new Map<string, unknown>();
 const defaultConfig: Config = {
   download_dir: "Demo Downloads",
   start_maximized: false,
+  close_window_behavior: "ask",
   card_scale: 1,
   card_page_size: 6,
   card_page_rows: 3,
