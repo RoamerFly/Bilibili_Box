@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import {
   Bot,
   Cookie,
@@ -165,6 +166,7 @@ export function SettingsView() {
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState("1.2.0");
   const [updating, setUpdating] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
   const [cacheStepIndex, setCacheStepIndex] = useState(-1);
@@ -204,6 +206,10 @@ export function SettingsView() {
   useEffect(() => {
     void loadConfig();
   }, [loadConfig]);
+
+  useEffect(() => {
+    void getVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   const storeConfig = useAppStore((s) => s.config);
   useEffect(() => {
@@ -989,7 +995,7 @@ export function SettingsView() {
       {aboutDialogOpen ? (
         <AboutDialog
           onClose={() => setAboutDialogOpen(false)}
-          version={updateResult?.current_version || "1.1.1"}
+          version={updateResult?.current_version || appVersion}
         />
       ) : null}
       <LoginDialog
@@ -1489,7 +1495,7 @@ function UpdateDialog({
 
 function AboutDialog({
   onClose,
-  version = "1.1.1",
+  version = "1.2.0",
 }: {
   onClose: () => void;
   version?: string;
