@@ -786,19 +786,9 @@ jobs:
             cat "docs/version-updates.md" > "$notes_file"
           else
             {
-              printf '%s\n' '## 新版本内容'
+              printf '%s\n' "## 新版本内容 ($tag_name)"
               printf '\n%s\n' '### 新增与优化'
-              printf '\n%s\n' '- 新增播放器点赞、投币、收藏操作后的按钮原位浮动提示，交互反馈更清晰。'
-              printf '%s\n' '- 新增 GitHub Releases 自动更新清单 `latest.json`，支持按平台分发签名安装包。'
-              printf '%s\n' '- 优化 Release 工作流，自动生成安装包签名文件并上传到发布页。'
-              printf '\n%s\n' '### 修复'
-              printf '\n%s\n' '- 修复投币弹窗雪碧图分帧播放异常，选中后按 24 帧逐帧播放人物动作。'
-              printf '%s\n' '- 修复点赞、投币接口因 Cookie 合并异常导致的账号异常和非法访问问题。'
-              printf '%s\n' '- 修复收藏取消和收藏夹选择后的状态反馈不明确问题。'
-              printf '\n%s\n' '### 界面与体验'
-              printf '\n%s\n' '- 平衡播放器点赞、投币、收藏、分享图标尺寸和间距。'
-              printf '%s\n' '- 调整动作栏宽度，使其与视频区域左右边界对齐。'
-              printf '%s\n' '- 发布说明改为更适合应用内展示的中文分段结构。'
+              printf '\n%s\n' '- 体验优化与问题修复。'
             } > "$notes_file"
           fi
           cat "$notes_file" > "$body_file"
