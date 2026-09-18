@@ -859,10 +859,31 @@ fn verify_update_signature(bytes: &[u8], signature: &str) -> Result<(), String> 
 
     let public_key = parse_update_public_key(public_key_text)
         .map_err(|e| format!("更新验签公钥无效: {e}"))?;
-    let signature = Signature::decode(signature).map_err(|e| format!("更新包签名格式无效: {e}"))?;
+    let signature = parse_update_signature(signature)
+        .map_err(|e| format!("更新包签名格式无效: {e}"))?;
     public_key
         .verify(bytes, &signature, false)
         .map_err(|e| format!("更新包签名验证失败，已拒绝安装: {e}"))
+}
+
+/// 解析 Minisign 更新包签名。
+///
+/// 更新清单 `latest.json` 中的签名可能是原始 4 行多行文本，也可能是被
+/// Tauri 签名工具整体 base64 编码后的文本。依次尝试：
+/// 直接解析标准多行文本 → base64 解码后再解析多行文本。
+fn parse_update_signature(raw: &str) -> Result<Signature, minisign_verify::Error> {
+    let trimmed = raw.trim();
+    if let Ok(sig) = Signature::decode(trimmed) {
+        return Ok(sig);
+    }
+    if let Ok(decoded) = STANDARD.decode(trimmed) {
+        if let Ok(text) = std::str::from_utf8(&decoded) {
+            if let Ok(sig) = Signature::decode(text.trim()) {
+                return Ok(sig);
+            }
+        }
+    }
+    Signature::decode(trimmed)
 }
 
 /// 解析构建时注入的 Minisign 更新验签公钥。
@@ -1085,5 +1106,14 @@ mod tests {
         assert!(parse_update_public_key(encoded).is_ok());
         assert!(parse_update_public_key(text).is_ok());
         assert!(parse_update_public_key(key_line).is_ok());
+    }
+
+    #[test]
+    fn parses_base64_and_plaintext_update_signature() {
+        let b64 = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbEwvemxrbnk4SE14NG1hWnF5MTJBZERrZ1M5M1FZL05IMDA4Q2gzNzBWK0dNdllOUjF2RW5wcWNUUlFkdnhobVhydWVRRnFPaUF1aDUrdlRHK3Z2dnRpTFVGYzZDOXdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NjYwNDAzCWZpbGU6QmlsaWJpbGlfQm94LXYxLjIuMC13aW5kb3dzLXg2NC1pbnN0YWxsZXIuZXhlClNjY3RwY1FIU2xSZXNYWVV2UjVjNTkrNnluN2UyL1NVOFpkL2RkeUN1aDlBbkVkQkZ1WGFFSFdrOUdxdlg5QXY1RUtJUnVzRDh1RCtIM1NWTUtMTUNnPT0K";
+        let text = "untrusted comment: signature from tauri secret key\nRUTlL/zlkny8HMx4maZqy12AdDkgS93QY/NH008Ch370V+GMvYNR1vEnpqcTRQdvxhmXrueQFqOiAuh5+vTG+vvvtiLUFc6C9wI=\ntrusted comment: timestamp:1789660403\tfile:Bilibili_Box-v1.2.0-windows-x64-installer.exe\nScctpcQHSlResXYUvR5c59+6yn7e2/SU8Zd/ddyCuh9AnEdBFuXaEHWk9GqvX9Av5EKIRusD8uD+H3SVMKLMCg==\n";
+
+        assert!(parse_update_signature(b64).is_ok());
+        assert!(parse_update_signature(text).is_ok());
     }
 }

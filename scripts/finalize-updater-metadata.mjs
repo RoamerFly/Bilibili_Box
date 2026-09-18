@@ -47,6 +47,12 @@ for (const fileName of fileNames) {
   let signature = "";
   try {
     signature = (await readFile(sigPath, "utf8")).trim();
+    if (!signature.startsWith("untrusted comment:")) {
+      const decoded = Buffer.from(signature, "base64").toString("utf8").trim();
+      if (decoded.startsWith("untrusted comment:")) {
+        signature = decoded;
+      }
+    }
   } catch {
     continue;
   }
