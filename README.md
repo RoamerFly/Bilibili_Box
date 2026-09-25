@@ -161,6 +161,8 @@ BiliBox 不是一个只会粘贴链接的下载器，而是面向日常使用的
 
 前往 [Releases](https://github.com/RoamerFly/Bilibili_Box/releases/latest) 页面下载对应平台的安装包或便携版。
 
+新手可直接阅读根目录的 [使用教程.txt](./使用教程.txt)，按步骤完成登录、FFmpeg 配置、播放与下载。
+
 | 平台 | 版本 |
 | --- | --- |
 | Windows | 安装版 `.exe` / 便携版 `.zip` |
